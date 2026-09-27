@@ -4,6 +4,7 @@ import {
   BoldItalicUnderlineToggles,
   CreateLink,
   headingsPlugin,
+  linkDialogPlugin,
   linkPlugin,
   listsPlugin,
   ListsToggle,
@@ -33,6 +34,7 @@ export function RichMarkdownEditor({ value, onChange }: RichMarkdownEditorProps)
           quotePlugin(),
           thematicBreakPlugin(),
           linkPlugin(),
+          linkDialogPlugin(),
           toolbarPlugin({
             toolbarContents: () => (
               <>
@@ -49,3 +51,4 @@ export function RichMarkdownEditor({ value, onChange }: RichMarkdownEditorProps)
     </div>
   );
 }
+

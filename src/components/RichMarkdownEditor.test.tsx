@@ -4,6 +4,7 @@ import { RichMarkdownEditor } from './RichMarkdownEditor';
 
 const mocks = vi.hoisted(() => ({
   headingsPlugin: vi.fn(() => ({ name: 'headings' })),
+  linkDialogPlugin: vi.fn(() => ({ name: 'link-dialog' })),
   toolbarContents: undefined as (() => React.ReactNode) | undefined,
 }));
 
@@ -12,6 +13,7 @@ vi.mock('@mdxeditor/editor', () => ({
   BoldItalicUnderlineToggles: () => null,
   CreateLink: () => null,
   headingsPlugin: mocks.headingsPlugin,
+  linkDialogPlugin: mocks.linkDialogPlugin,
   linkPlugin: () => ({ name: 'link' }),
   listsPlugin: () => ({ name: 'lists' }),
   ListsToggle: () => null,
@@ -28,11 +30,13 @@ vi.mock('@mdxeditor/editor', () => ({
 }));
 
 describe('RichMarkdownEditor', () => {
-  it('uses the dark theme and offers heading levels one through three', () => {
+  it('uses the dark theme and configures its toolbar plugins', () => {
     render(<RichMarkdownEditor value="" onChange={() => undefined} />);
 
     expect(screen.getByTestId('mdx-editor')).toHaveClass('dark-theme');
     expect(mocks.headingsPlugin).toHaveBeenCalledWith({ allowedHeadingLevels: [1, 2, 3] });
+    expect(mocks.linkDialogPlugin).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: 'Heading options' })).toBeInTheDocument();
   });
 });
+
