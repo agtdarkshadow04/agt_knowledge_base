@@ -1,4 +1,4 @@
-import { Eye, FilePenLine, Save, X } from 'lucide-react';
+import { Eye, EyeOff, FilePenLine, Save, X } from 'lucide-react';
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useBlocker, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -22,6 +22,16 @@ const emptyDraft: Draft = { title: '', tags: '', content: '' };
 
 function serializeDraft(draft: Draft) {
   return JSON.stringify(draft);
+}
+
+function MarkdownGuideIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 2h9l5 5v15H6z" />
+      <path d="M14 2v6h6" />
+      <path d="M9 13h6M9 17h6" />
+    </svg>
+  );
 }
 
 export function EditorPage() {
@@ -145,7 +155,13 @@ export function EditorPage() {
             <button type="button" className={mode === 'plain' ? 'active' : ''} onClick={() => setMode('plain')}>Plain Markdown</button>
             <button type="button" className={mode === 'rich' ? 'active' : ''} onClick={() => setMode('rich')}>Visual Markdown</button>
           </div>
-          <button className="button button-ghost compact" type="button" aria-pressed={preview} onClick={() => setPreview((value) => !value)}><Eye aria-hidden="true" />{preview ? 'Hide preview' : 'Show preview'}</button>
+          <div className="editor-toolbar-actions">
+            <a className="icon-button" href="https://www.markdownguide.org/basic-syntax/" target="_blank" rel="noreferrer" title="Markdown Guide"><MarkdownGuideIcon /><span className="sr-only">Markdown Guide</span></a>
+            <button className="icon-button" type="button" aria-pressed={preview} onClick={() => setPreview((value) => !value)} title={preview ? 'Hide preview' : 'Show preview'}>
+              {preview ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+              <span className="sr-only">{preview ? 'Hide preview' : 'Show preview'}</span>
+            </button>
+          </div>
         </div>
 
         <div className={`editor-workspace ${preview ? 'with-preview' : ''}`}>
@@ -182,3 +198,4 @@ export function EditorPage() {
     </div>
   );
 }
+

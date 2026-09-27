@@ -49,6 +49,25 @@ describe('EditorPage', () => {
     expect(screen.getByRole('textbox', { name: /markdown source/i })).toHaveValue('# Draft\n\nUnsaved traveller notes.');
   });
 
+  it('provides icon-only Markdown guide and preview controls', async () => {
+    const user = userEvent.setup();
+    const { container } = renderEditor();
+    const guide = screen.getByRole('link', { name: 'Markdown Guide' });
+    expect(guide).toHaveAttribute('href', 'https://www.markdownguide.org/basic-syntax/');
+    expect(guide).toHaveAttribute('target', '_blank');
+    expect(guide).toHaveAttribute('title', 'Markdown Guide');
+
+    const showPreview = screen.getByRole('button', { name: 'Show preview' });
+    expect(showPreview).toHaveAttribute('title', 'Show preview');
+    expect(container.querySelector('.lucide-eye')).toBeInTheDocument();
+    await user.click(showPreview);
+
+    const hidePreview = screen.getByRole('button', { name: 'Hide preview' });
+    expect(hidePreview).toHaveAttribute('title', 'Hide preview');
+    expect(container.querySelector('.lucide-eye-off')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Preview' })).toBeInTheDocument();
+  });
+
   it('validates and saves a new article with normalized tag input', async () => {
     const user = userEvent.setup();
     renderEditor();
@@ -60,3 +79,4 @@ describe('EditorPage', () => {
     expect(await screen.findByText('Saved article')).toBeInTheDocument();
   });
 });
+
