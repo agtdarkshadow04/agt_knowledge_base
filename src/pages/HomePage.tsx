@@ -1,0 +1,144 @@
+import { ArrowDown, ArrowUp, Search, SlidersHorizontal } from 'lucide-react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../auth/AuthContext';
+import { ArticleCard } from '../components/ArticleCard';
+import { EmptyState, ErrorState, LoadingState } from '../components/States';
+import { listArticles } from '../services/api';
+import type { ArticleListResponse, ArticleSort, SortDirection } from '../types';
+
+export function HomePage() {
+  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [result, setResult] = useState<ArticleListResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const queryString = searchParams.toString();
+
+  const params = useMemo(() => {
+    const current = new URLSearchParams(queryString);
+    return {
+      search: current.get('search') ?? '',
+      tag: current.get('tag') ?? '',
+      protection: (current.get('protection') ?? 'all') as 'all' | 'protected' | 'unprotected',
+      sort: (current.get('sort') ?? 'modifiedAt') as ArticleSort,
+      direction: (current.get('direction') ?? 'desc') as SortDirection,
+      page: Math.max(1, Number(current.get('page') ?? 1) || 1),
+      pageSize: 12,
+    };
+  }, [queryString]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setError('');
+    listArticles(params, controller.signal)
+      .then(setResult)
+      .catch((cause: unknown) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
+        setError(cause instanceof Error ? cause.message : 'The archive could not be loaded.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [params, reloadKey]);
+
+  const updateParam = useCallback((key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value && value !== 'all') next.set(key, value); else next.delete(key);
+    if (key !== 'page') next.delete('page');
+    setSearchParams(next);
+  }, [searchParams, setSearchParams]);
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const next = new URLSearchParams(searchParams);
+    for (const key of ['search', 'tag']) {
+      const value = String(data.get(key) ?? '').trim();
+      if (value) next.set(key, value); else next.delete(key);
+    }
+    next.delete('page');
+    setSearchParams(next);
+  }
+
+  const hasFilters = Boolean(params.search || params.tag || params.protection !== 'all');
+
+  return (
+    <div className="page home-page">
+      <section className="hero" aria-labelledby="home-title">
+        <p className="eyebrow">Galactic archive // public terminal</p>
+        <div className="hero-heading">
+          <div>
+            <h1 id="home-title">AGT Knowledge Base</h1>
+            <p>Field-tested guides, community procedures, and traveller intelligence.</p>
+          </div>
+          {user && <Link className="button button-primary" to="/articles/new">Create article</Link>}
+        </div>
+      </section>
+
+      <section className="filter-panel" aria-labelledby="filter-title">
+        <div className="section-label"><SlidersHorizontal aria-hidden="true" /><h2 id="filter-title">Search archive</h2></div>
+        <form className="filter-form" onSubmit={handleSearch}>
+          <label className="field search-field">
+            <span>Search title and content</span>
+            <span className="input-with-icon"><Search aria-hidden="true" /><input name="search" defaultValue={params.search} placeholder="e.g. portal navigation" /></span>
+          </label>
+          <label className="field">
+            <span>Tag</span>
+            <input name="tag" defaultValue={params.tag} placeholder="e.g. expedition" />
+          </label>
+          <button className="button button-primary" type="submit">Search</button>
+        </form>
+        <div className="sort-row">
+          <label>Protection
+            <select value={params.protection} onChange={(event) => updateParam('protection', event.target.value)}>
+              <option value="all">All articles</option>
+              <option value="unprotected">Open to editors</option>
+              <option value="protected">Protected</option>
+            </select>
+          </label>
+          <label>Sort by
+            <select value={params.sort} onChange={(event) => updateParam('sort', event.target.value)}>
+              <option value="modifiedAt">Last modified</option>
+              <option value="createdAt">Creation date</option>
+              <option value="title">Title</option>
+            </select>
+          </label>
+          <button
+            className="button button-ghost compact"
+            type="button"
+            onClick={() => updateParam('direction', params.direction === 'asc' ? 'desc' : 'asc')}
+            aria-label={`Sort ${params.direction === 'asc' ? 'descending' : 'ascending'}`}
+          >
+            {params.direction === 'asc' ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />}
+            {params.direction === 'asc' ? 'Ascending' : 'Descending'}
+          </button>
+        </div>
+      </section>
+
+      <section className="results-section" aria-labelledby="results-title">
+        <div className="results-heading">
+          <div><p className="eyebrow">Transmissions</p><h2 id="results-title">Published articles</h2></div>
+          {result && <p aria-live="polite">{result.total.toLocaleString()} result{result.total === 1 ? '' : 's'}</p>}
+        </div>
+
+        {loading && <LoadingState />}
+        {!loading && error && <ErrorState message={error} onRetry={() => setReloadKey((value) => value + 1)} />}
+        {!loading && !error && result?.items.length === 0 && <EmptyState filtered={hasFilters} />}
+        {!loading && !error && result && result.items.length > 0 && (
+          <>
+            <div className="article-grid">{result.items.map((article) => <ArticleCard key={article.id} article={article} />)}</div>
+            <nav className="pagination" aria-label="Article pages">
+              <button className="button button-secondary" disabled={result.page <= 1} onClick={() => updateParam('page', String(result.page - 1))}>Previous</button>
+              <span>Page {result.page} of {result.totalPages}</span>
+              <button className="button button-secondary" disabled={result.page >= result.totalPages} onClick={() => updateParam('page', String(result.page + 1))}>Next</button>
+            </nav>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}

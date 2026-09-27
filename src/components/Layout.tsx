@@ -1,0 +1,72 @@
+import { BookOpen, LogIn, LogOut, Plus, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
+import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useAuth } from '../auth/AuthContext';
+
+export function Layout() {
+  const { user, signOut } = useAuth();
+  const [logoFailed, setLogoFailed] = useState(false);
+
+  return (
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <header className="site-header">
+        <div className="header-inner">
+          <Link to="/" className="brand" aria-label="AGT Knowledge Base home">
+            <span className="brand-mark" aria-hidden="true">
+              {!logoFailed ? (
+                <img src="/assets/agt-icon.png" alt="" onError={() => setLogoFailed(true)} />
+              ) : (
+                <span>AGT</span>
+              )}
+            </span>
+            <span className="brand-copy">
+              <strong><span className="desktop-only">Alliance of Galactic Travellers</span><span className="mobile-only">AGT</span></strong>
+              <small><span className="desktop-only">Knowledge Base</span><span className="mobile-only">Archives</span></small>
+            </span>
+          </Link>
+
+          <nav className="header-actions" aria-label="Primary navigation">
+            <NavLink to="/" className="icon-link">
+              <BookOpen aria-hidden="true" /> <span className="desktop-only">Browse</span>
+            </NavLink>
+            {user && (
+              <NavLink to="/articles/new" className="button button-primary compact">
+                <Plus aria-hidden="true" /> <span className="desktop-only">New article</span>
+              </NavLink>
+            )}
+            <span className={`identity-badge ${user?.role === 'Admin' ? 'admin' : ''}`}>
+              {user?.role === 'Admin' && <ShieldCheck aria-hidden="true" />}
+              <span>{user ? `${user.displayName} · ${user.role}` : 'Public user'}</span>
+            </span>
+            {user ? (
+              <button className="icon-button" type="button" onClick={() => void signOut()} title="Sign out">
+                <LogOut aria-hidden="true" /><span className="sr-only">Sign out</span>
+              </button>
+            ) : (
+              <NavLink to="/login" className="icon-button" title="Sign in">
+                <LogIn aria-hidden="true" /><span className="sr-only">Sign in</span>
+              </NavLink>
+            )}
+          </nav>
+        </div>
+        <div className="header-line" />
+      </header>
+
+      <main id="main-content" className="main-content" tabIndex={-1}>
+        <Outlet />
+      </main>
+
+      <footer className="site-footer">
+        <nav aria-label="Alliance links">
+          <a href="https://www.nms-agt.com" target="_blank" rel="noreferrer">Home</a>
+          <a href="https://www.nms-agt.com/about-the-agt" target="_blank" rel="noreferrer">About</a>
+          <a href="https://www.nms-agt.com/contribute" target="_blank" rel="noreferrer">Contribute</a>
+          <a href="https://www.nms-agt.com/agt-galactic-archives" target="_blank" rel="noreferrer">Galactic Archives</a>
+          <a href="https://www.nms-agt.com/support" target="_blank" rel="noreferrer">Support</a>
+        </nav>
+        <p>© {new Date().getUTCFullYear()} Alliance of Galactic Travellers</p>
+      </footer>
+    </div>
+  );
+}
