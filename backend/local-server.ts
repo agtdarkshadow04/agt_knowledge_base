@@ -12,6 +12,7 @@ const verifier = userPoolId && clientId
   : null;
 
 function routeKey(method: string, pathname: string) {
+  if (method === 'GET' && pathname === '/account') return 'GET /account';
   if (method === 'GET' && pathname === '/articles') return 'GET /articles';
   if (method === 'POST' && pathname === '/articles') return 'POST /articles';
   if (/^\/articles\/[^/]+\/protection$/.test(pathname) && method === 'PATCH') return 'PATCH /articles/{id}/protection';
@@ -27,10 +28,10 @@ createServer(async (request, response) => {
 
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   const method = request.method ?? 'GET';
-  const writeRequest = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  const authenticatedRequest = url.pathname === '/account' || ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   let claims: Record<string, unknown> = {};
 
-  if (writeRequest) {
+  if (authenticatedRequest) {
     const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
     if (!token || !verifier) { response.writeHead(401).end(JSON.stringify({ message: 'Authentication is not configured.' })); return; }
     try { claims = await verifier.verify(token); }

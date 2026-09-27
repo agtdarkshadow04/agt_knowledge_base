@@ -1,11 +1,22 @@
 import { BookOpen, LogIn, LogOut, Plus, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { applyStoredAccessibilitySettings, SettingsIcon, SettingsModal } from './SettingsModal';
 
 export function Layout() {
   const { user, signOut } = useAuth();
   const [logoFailed, setLogoFailed] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsButton = useRef<HTMLButtonElement>(null);
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+    requestAnimationFrame(() => settingsButton.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    applyStoredAccessibilitySettings();
+  }, []);
 
   return (
     <div className="app-shell">
@@ -48,6 +59,17 @@ export function Layout() {
                 <LogIn aria-hidden="true" /><span className="sr-only">Sign in</span>
               </NavLink>
             )}
+            <button
+              ref={settingsButton}
+              className="icon-button"
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              title="Settings"
+              aria-haspopup="dialog"
+              aria-expanded={settingsOpen}
+            >
+              <SettingsIcon /><span className="sr-only">Settings</span>
+            </button>
           </nav>
         </div>
         <div className="header-line" />
@@ -67,6 +89,7 @@ export function Layout() {
         </nav>
         <p>© {new Date().getUTCFullYear()} Alliance of Galactic Travellers</p>
       </footer>
+      {settingsOpen && <SettingsModal user={user} onClose={closeSettings} />}
     </div>
   );
 }

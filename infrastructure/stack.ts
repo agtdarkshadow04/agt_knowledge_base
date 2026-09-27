@@ -34,6 +34,9 @@ export class AgtKnowledgeBaseStack extends Stack {
     vpc.addInterfaceEndpoint('SecretsManagerEndpoint', {
       service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
     });
+    vpc.addInterfaceEndpoint('CognitoEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.COGNITO_IDP,
+    });
 
     const lambdaSecurityGroup = new ec2.SecurityGroup(this, 'LambdaSecurityGroup', {
       vpc,
@@ -131,6 +134,7 @@ export class AgtKnowledgeBaseStack extends Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [lambdaSecurityGroup],
       environment: {
+        COGNITO_USER_POOL_ID: userPool.userPoolId,
         DB_SECRET_ARN: database.secret!.secretArn,
         DB_HOST: database.dbInstanceEndpointAddress,
         DB_PORT: database.dbInstanceEndpointPort,
@@ -158,6 +162,7 @@ export class AgtKnowledgeBaseStack extends Stack {
     });
     database.secret!.grantRead(apiFunction);
     database.secret!.grantRead(migrationFunction);
+    userPool.grant(apiFunction, 'cognito-idp:AdminGetUser');
 
     const api = new apigwv2.HttpApi(this, 'HttpApi', {
       apiName: `agt-knowledge-base-${props.stage}`,
@@ -185,6 +190,7 @@ export class AgtKnowledgeBaseStack extends Stack {
     );
 
     api.addRoutes({ path: '/articles', methods: [apigwv2.HttpMethod.GET], integration });
+    api.addRoutes({ path: '/account', methods: [apigwv2.HttpMethod.GET], integration, authorizer });
     api.addRoutes({ path: '/articles/{id}', methods: [apigwv2.HttpMethod.GET], integration });
     api.addRoutes({ path: '/articles', methods: [apigwv2.HttpMethod.POST], integration, authorizer });
     api.addRoutes({ path: '/articles/{id}', methods: [apigwv2.HttpMethod.PUT, apigwv2.HttpMethod.DELETE], integration, authorizer });

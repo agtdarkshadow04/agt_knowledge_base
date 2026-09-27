@@ -7,6 +7,7 @@ import {
 } from 'aws-amplify/auth';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { appConfig } from '../config';
+import { getAccountDetails } from '../services/api';
 import type { SessionUser, UserRole } from '../types';
 
 export type SignInResult = 'SIGNED_IN' | 'NEW_PASSWORD_REQUIRED';
@@ -42,11 +43,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const [current, session] = await Promise.all([getCurrentUser(), fetchAuthSession()]);
       const payload = session.tokens?.idToken?.payload;
+      const token = session.tokens?.idToken?.toString();
+      let createdAt: string | undefined;
+      if (token) {
+        try {
+          createdAt = (await getAccountDetails(token)).createdAt;
+        } catch (error) {
+          console.error('Unable to load account details.', error);
+        }
+      }
       setUser({
         sub: current.userId,
         username: current.username,
         displayName: String(payload?.name ?? payload?.['cognito:username'] ?? current.username),
         email: payload?.email ? String(payload.email) : undefined,
+        createdAt,
         role: roleFromGroups(payload?.['cognito:groups']),
       });
     } catch {
