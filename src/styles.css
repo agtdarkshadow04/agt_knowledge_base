@@ -230,6 +230,7 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .field-error { color: #ff918e; }
 .editor-actions { display: flex; gap: 0.75rem; margin-top: 1.2rem; }
 .rich-editor-shell { min-height: 30rem; flex: 1; overflow: auto; border: 1px solid rgba(255, 180, 81, 0.25); border-radius: 0.55rem; background: #0c0c0c; }
+.rich-editor-shell .dark-theme { --basePageBg: #0c0c0c; }
 .rich-editor-shell [class*='_rootContentEditableWrapper_'], .rich-editor-shell .mdxeditor-root-contenteditable { background: #0c0c0c; }
 .rich-editor-shell [role='toolbar'] { border-bottom: 1px solid var(--line); background: #191919; }
 .rich-editor-content { min-height: 25rem; padding: 1rem 1.2rem; color: var(--white); caret-color: #fff; font-family: Inter, sans-serif; line-height: 1.65; }
