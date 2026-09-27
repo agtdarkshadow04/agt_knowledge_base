@@ -80,6 +80,7 @@ img { max-width: 100%; }
 .icon-link, .icon-button { display: inline-flex; min-width: 2.5rem; min-height: 2.5rem; align-items: center; justify-content: center; gap: 0.45rem; padding: 0.55rem; border: 1px solid transparent; border-radius: 0.55rem; color: var(--gold); background: transparent; text-decoration: none; cursor: pointer; }
 .icon-link:hover, .icon-button:hover { border-color: var(--line); background: rgba(255, 5, 0, 0.08); color: #fff; }
 .icon-link svg, .icon-button svg, .button svg { width: 1rem; height: 1rem; flex: 0 0 auto; }
+.icon-button .settings-icon { width: 1.5rem; height: 1.5rem; }
 .identity-badge { display: inline-flex; max-width: 13rem; align-items: center; gap: 0.35rem; overflow: hidden; padding: 0.38rem 0.65rem; border: 1px solid #74706b; border-radius: 0.45rem; color: #d7d2cb; background: rgba(116, 112, 107, 0.1); font-family: ui-monospace, monospace; font-size: 0.66rem; letter-spacing: 0.06em; text-overflow: ellipsis; white-space: nowrap; }
 .identity-badge.admin { border-color: var(--gold); color: var(--gold); background: rgba(255, 180, 81, 0.08); }
 .identity-badge svg { width: 0.8rem; }
