@@ -1,4 +1,5 @@
 import {
+  confirmSignIn as amplifyConfirmSignIn,
   fetchAuthSession,
   getCurrentUser,
   signIn as amplifySignIn,
@@ -8,11 +9,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { appConfig } from '../config';
 import type { SessionUser, UserRole } from '../types';
 
+export type SignInResult = 'SIGNED_IN' | 'NEW_PASSWORD_REQUIRED';
+
 interface AuthContextValue {
   user: SessionUser | null;
   loading: boolean;
   configured: boolean;
-  signIn(username: string, password: string): Promise<void>;
+  signIn(username: string, password: string): Promise<SignInResult>;
+  completeNewPassword(newPassword: string): Promise<void>;
   signOut(): Promise<void>;
   getToken(): Promise<string>;
   refresh(): Promise<void>;
@@ -58,7 +62,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(async (username: string, password: string) => {
     const result = await amplifySignIn({ username, password });
-    if (!result.isSignedIn) throw new Error('Additional sign-in steps are required. Contact an administrator.');
+    if (result.isSignedIn) {
+      await refresh();
+      return 'SIGNED_IN';
+    }
+    if (result.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+      if (result.nextStep.missingAttributes?.length) {
+        throw new Error(`Your account is missing required attributes: ${result.nextStep.missingAttributes.join(', ')}. Contact an administrator.`);
+      }
+      return 'NEW_PASSWORD_REQUIRED';
+    }
+    throw new Error('This account requires an unsupported additional sign-in step. Contact an administrator.');
+  }, [refresh]);
+
+  const completeNewPassword = useCallback(async (newPassword: string) => {
+    const result = await amplifyConfirmSignIn({ challengeResponse: newPassword });
+    if (!result.isSignedIn) {
+      throw new Error('The password was accepted, but another unsupported sign-in step is required. Contact an administrator.');
+    }
     await refresh();
   }, [refresh]);
 
@@ -75,8 +96,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, configured: appConfig.authConfigured, signIn, signOut, getToken, refresh }),
-    [getToken, loading, refresh, signIn, signOut, user],
+    () => ({ user, loading, configured: appConfig.authConfigured, signIn, completeNewPassword, signOut, getToken, refresh }),
+    [completeNewPassword, getToken, loading, refresh, signIn, signOut, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

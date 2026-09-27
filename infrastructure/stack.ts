@@ -46,7 +46,7 @@ export class AgtKnowledgeBaseStack extends Stack {
     databaseSecurityGroup.addIngressRule(lambdaSecurityGroup, ec2.Port.tcp(5432), 'API and migration Lambdas');
 
     const database = new rds.DatabaseInstance(this, 'Database', {
-      engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16_3 }),
+      engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.of('16.15', '16') }),
       instanceType: production
         ? ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.SMALL)
         : ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MICRO),
@@ -63,7 +63,7 @@ export class AgtKnowledgeBaseStack extends Stack {
       maxAllocatedStorage: 100,
       multiAz: production,
       deletionProtection: production,
-      backupRetention: production ? Duration.days(14) : Duration.days(3),
+      backupRetention: production ? Duration.days(14) : Duration.days(1),
       cloudwatchLogsExports: ['postgresql'],
       cloudwatchLogsRetention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.SNAPSHOT,
@@ -136,6 +136,7 @@ export class AgtKnowledgeBaseStack extends Stack {
         DB_PORT: database.dbInstanceEndpointPort,
         DB_NAME: 'agt_knowledge_base',
         NODE_OPTIONS: '--enable-source-maps',
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
       },
       bundling: { minify: true, sourceMap: true, externalModules: ['@aws-sdk/*'] },
     };
