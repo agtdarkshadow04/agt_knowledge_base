@@ -1,5 +1,6 @@
 import '@mdxeditor/editor/style.css';
 import {
+  BlockTypeSelect,
   BoldItalicUnderlineToggles,
   CreateLink,
   headingsPlugin,
@@ -22,11 +23,12 @@ export function RichMarkdownEditor({ value, onChange }: RichMarkdownEditorProps)
   return (
     <div className="rich-editor-shell">
       <MDXEditor
+        className="dark-theme"
         markdown={value}
         onChange={onChange}
         contentEditableClassName="rich-editor-content"
         plugins={[
-          headingsPlugin(),
+          headingsPlugin({ allowedHeadingLevels: [1, 2, 3] }),
           listsPlugin(),
           quotePlugin(),
           thematicBreakPlugin(),
@@ -35,6 +37,7 @@ export function RichMarkdownEditor({ value, onChange }: RichMarkdownEditorProps)
             toolbarContents: () => (
               <>
                 <UndoRedo />
+                <BlockTypeSelect />
                 <BoldItalicUnderlineToggles />
                 <ListsToggle />
                 <CreateLink />

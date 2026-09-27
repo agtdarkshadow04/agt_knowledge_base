@@ -220,9 +220,9 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .rich-editor-shell { min-height: 30rem; flex: 1; overflow: auto; border: 1px solid rgba(255, 180, 81, 0.25); border-radius: 0.55rem; background: #0c0c0c; }
 .rich-editor-shell [class*='_rootContentEditableWrapper_'], .rich-editor-shell .mdxeditor-root-contenteditable { background: #0c0c0c; }
 .rich-editor-shell [role='toolbar'] { border-bottom: 1px solid var(--line); background: #191919; }
-.rich-editor-content { min-height: 25rem; padding: 1rem 1.2rem; color: #eee8e1; caret-color: #fff; font-family: Inter, sans-serif; line-height: 1.65; }
+.rich-editor-content { min-height: 25rem; padding: 1rem 1.2rem; color: var(--white); caret-color: #fff; font-family: Inter, sans-serif; line-height: 1.65; }
 .rich-editor-content h1, .rich-editor-content h2, .rich-editor-content h3 { color: var(--gold); font-family: 'NMS Futura', sans-serif; }
-.rich-editor-shell button { color: #222; }
+.rich-editor-shell button { color: var(--white); }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 1rem; background: rgba(0, 0, 0, 0.86); backdrop-filter: blur(8px); }
 .confirm-dialog { width: min(100%, 30rem); padding: 1.5rem; border: 1px solid rgba(255, 5, 0, 0.45); border-radius: 0.85rem; color: #e9e4dd; background: #121212; box-shadow: 0 2rem 5rem #000; }
