@@ -64,7 +64,11 @@ export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): P
   } catch (error) {
     if (error instanceof AppError) return json(error.statusCode, { code: error.code, message: error.message });
     if (error instanceof ZodError) {
-      return json(400, { code: 'VALIDATION_ERROR', message: 'The request is invalid.', issues: error.issues });
+      return json(400, {
+        code: 'VALIDATION_ERROR',
+        message: `The request is invalid: ${error.issues[0].message}`,
+        issues: error.issues,
+      });
     }
     console.error('Unhandled API error', { requestId: event.requestContext.requestId, error });
     return json(500, { code: 'INTERNAL_ERROR', message: 'The archive service encountered an unexpected error.' });
