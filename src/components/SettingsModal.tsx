@@ -19,8 +19,10 @@ export function applyStoredAccessibilitySettings() {
 export function SettingsIcon() {
   return (
     <svg className="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M9.5 3.2 10 1.8h4l.5 1.4 1.7 1 1.5-.3 2 3.5-1 1.2v2l1 1.2-2 3.5-1.5-.3-1.7 1-.5 1.4h-4L9.5 16l-1.7-1-1.5.3-2-3.5 1-1.2v-2l-1-1.2 2-3.5 1.5.3 1.7-1Z" />
-      <circle cx="12" cy="9.6" r="2.6" />
+      <g transform="translate(0 2.4)">
+        <path d="M9.5 3.2 10 1.8h4l.5 1.4 1.7 1 1.5-.3 2 3.5-1 1.2v2l1 1.2-2 3.5-1.5-.3-1.7 1-.5 1.4h-4L9.5 16l-1.7-1-1.5.3-2-3.5 1-1.2v-2l-1-1.2 2-3.5 1.5.3 1.7-1Z" />
+        <circle cx="12" cy="9.6" r="2.6" />
+      </g>
     </svg>
   );
 }
