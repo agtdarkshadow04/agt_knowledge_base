@@ -79,4 +79,3 @@ describe('EditorPage', () => {
     expect(await screen.findByText('Saved article')).toBeInTheDocument();
   });
 });
-
