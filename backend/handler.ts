@@ -1,8 +1,7 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { ZodError } from 'zod';
-import { getAccountDetails } from './account-service.js';
 import { ArticleService } from './article-service.js';
-import { requireActor, requireUsername } from './auth.js';
+import { requireActor } from './auth.js';
 import { AppError } from './domain.js';
 import { PostgresArticleRepository } from './postgres-article-repository.js';
 import { parseArticleWrite, parseListQuery, parseProtectionWrite } from './validation.js';
@@ -10,12 +9,12 @@ import { parseArticleWrite, parseListQuery, parseProtectionWrite } from './valid
 const service = new ArticleService(new PostgresArticleRepository());
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function json(statusCode: number, body: unknown, cacheControl = statusCode === 200 ? 'public, max-age=30' : 'no-store'): APIGatewayProxyResultV2 {
+function json(statusCode: number, body: unknown): APIGatewayProxyResultV2 {
   return {
     statusCode,
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      'cache-control': cacheControl,
+      'cache-control': statusCode === 200 ? 'public, max-age=30' : 'no-store',
       'x-content-type-options': 'nosniff',
     },
     body: JSON.stringify(body),
@@ -41,8 +40,6 @@ function articleId(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
 export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<APIGatewayProxyResultV2> {
   try {
     switch (event.routeKey) {
-      case 'GET /account':
-        return json(200, await getAccountDetails(requireUsername(event)), 'no-store');
       case 'GET /articles':
         return json(200, await service.list(parseListQuery(event.queryStringParameters ?? {})));
       case 'GET /articles/{id}':

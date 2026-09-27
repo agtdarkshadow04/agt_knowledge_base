@@ -21,6 +21,20 @@ describe('SettingsModal', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ['Standard', 'Standard'],
+    ['Admin', 'Administrator'],
+  ] as const)('shows the %s group as %s', (role, accountType) => {
+    render(
+      <SettingsModal
+        user={{ sub: 'user-1', username: 'traveller', displayName: 'Traveller', role }}
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText(accountType)).toBeInTheDocument();
+  });
+
   it('displays account details and persists accessibility settings', async () => {
     const user = userEvent.setup();
     render(
@@ -30,8 +44,7 @@ describe('SettingsModal', () => {
           username: 'traveller',
           displayName: 'Traveller',
           email: 'traveller@example.com',
-          createdAt: '2024-03-12T10:15:00.000Z',
-          role: 'Standard',
+          role: 'Admin',
         }}
         onClose={() => undefined}
       />,
@@ -39,7 +52,7 @@ describe('SettingsModal', () => {
 
     expect(screen.getByText('traveller')).toBeInTheDocument();
     expect(screen.getByText('traveller@example.com')).toBeInTheDocument();
-    expect(screen.getByText('March 12, 2024')).toBeInTheDocument();
+    expect(screen.getByText('Administrator')).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText('UI scale'), '1.50');
     await user.selectOptions(screen.getByLabelText('Font size'), 'large');

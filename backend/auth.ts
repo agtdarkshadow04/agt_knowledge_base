@@ -17,19 +17,8 @@ export function roleFromClaims(claims: Record<string, unknown>): Role {
   return parseGroups(claims['cognito:groups']).includes('Admin') ? 'Admin' : 'Standard';
 }
 
-function claimsFrom(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
-  return event.requestContext.authorizer?.jwt?.claims as Record<string, unknown> | undefined;
-}
-
-export function requireUsername(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
-  const claims = claimsFrom(event);
-  const username = claims?.['cognito:username'] ?? claims?.username;
-  if (typeof username !== 'string' || !username) throw new AppError('Authentication is required.', 401, 'UNAUTHENTICATED');
-  return username;
-}
-
 export function requireActor(event: APIGatewayProxyEventV2WithJWTAuthorizer): Actor {
-  const claims = claimsFrom(event);
+  const claims = event.requestContext.authorizer?.jwt?.claims as Record<string, unknown> | undefined;
   const sub = claims?.sub;
   if (typeof sub !== 'string' || !sub) throw new AppError('Authentication is required.', 401, 'UNAUTHENTICATED');
   return {

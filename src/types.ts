@@ -5,12 +5,7 @@ export interface SessionUser {
   username: string;
   displayName: string;
   email?: string;
-  createdAt?: string;
   role: UserRole;
-}
-
-export interface AccountDetails {
-  createdAt: string;
 }
 
 export interface ArticleSummary {

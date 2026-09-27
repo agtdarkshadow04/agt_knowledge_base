@@ -16,12 +16,6 @@ export function applyStoredAccessibilitySettings() {
   document.documentElement.dataset.fontSize = storedSetting('agt-font-size', fontSizes, 'normal');
 }
 
-function formatDate(value?: string) {
-  if (!value) return 'Unavailable';
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? 'Unavailable' : new Intl.DateTimeFormat('en-US', { dateStyle: 'long' }).format(date);
-}
-
 export function SettingsIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -92,7 +86,7 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
           <dl className="account-details">
             <div><dt>Username</dt><dd>{user?.username ?? 'Public user'}</dd></div>
             <div><dt>Email</dt><dd>{user?.email ?? 'N/A'}</dd></div>
-            <div><dt>Account creation date</dt><dd><time dateTime={user?.createdAt}>{user ? formatDate(user.createdAt) : 'N/A'}</time></dd></div>
+            <div><dt>Account type</dt><dd>{user ? user.role === 'Admin' ? 'Administrator' : 'Standard' : 'N/A'}</dd></div>
           </dl>
         </section>
 

@@ -1,5 +1,5 @@
 import { appConfig } from '../config';
-import type { AccountDetails, Article, ArticleInput, ArticleListParams, ArticleListResponse } from '../types';
+import type { Article, ArticleInput, ArticleListParams, ArticleListResponse } from '../types';
 
 export class ApiError extends Error {
   constructor(
@@ -42,10 +42,6 @@ export function listArticles(params: ArticleListParams, signal?: AbortSignal) {
 
 export function getArticle(id: string, signal?: AbortSignal) {
   return request<Article>(`/articles/${encodeURIComponent(id)}`, { signal });
-}
-
-export function getAccountDetails(token: string) {
-  return request<AccountDetails>('/account', {}, token);
 }
 
 export function createArticle(input: ArticleInput, token: string) {
