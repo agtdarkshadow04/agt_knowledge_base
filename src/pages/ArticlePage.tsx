@@ -1,5 +1,5 @@
-import { BadgeCheck, Clock3, Edit3, History, LockKeyhole, Pin, ShieldCheck, Tag, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { BadgeCheck, Clock3, Download, Edit3, FileText, History, LockKeyhole, Pin, ShieldCheck, Tag, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { extractHeadings, MarkdownContent } from '../components/MarkdownContent';
@@ -12,14 +12,27 @@ function formatTimestamp(value: string) {
   return `${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`;
 }
 
+function downloadFilename(title: string, extension: 'md' | 'pdf') {
+  const basename = title
+    .trim()
+    .replace(/[<>:"/\\|?*]/g, '')
+    .replace(/\p{Cc}/gu, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/, '')
+    .slice(0, 100) || 'article';
+  return `${basename}.${extension}`;
+}
+
 export function ArticlePage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { user, getToken } = useAuth();
   const viewerSub = user?.sub;
+  const articleBodyRef = useRef<HTMLElement>(null);
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -34,6 +47,53 @@ export function ArticlePage() {
   const headings = useMemo(() => extractHeadings(article?.content ?? ''), [article?.content]);
   const isAdmin = user?.role === 'Admin';
   const canEdit = Boolean(user && article && (isAdmin || !article.isProtected));
+
+  function downloadMarkdown() {
+    if (!article || !user) return;
+    const url = URL.createObjectURL(new Blob([article.content], { type: 'text/markdown;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = downloadFilename(article.title, 'md');
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadPdf() {
+    if (!article || !articleBodyRef.current || !user) return;
+    setPdfBusy(true);
+    setError('');
+    const pdfSource = document.createElement('section');
+    pdfSource.className = 'pdf-export';
+    pdfSource.setAttribute('aria-hidden', 'true');
+    const title = document.createElement('h1');
+    title.className = 'pdf-export-title';
+    title.textContent = article.title;
+    const articleBody = articleBodyRef.current.cloneNode(true) as HTMLElement;
+    articleBody.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+    pdfSource.append(title, articleBody);
+    document.body.append(pdfSource);
+
+    try {
+      const { default: html2pdf } = await import('html2pdf.js');
+      await html2pdf()
+        .set({
+          margin: [12, 12],
+          filename: downloadFilename(article.title, 'pdf'),
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { backgroundColor: '#ffffff', scale: 2, useCORS: true },
+          jsPDF: { format: 'a4', orientation: 'portrait', unit: 'mm' },
+        })
+        .from(pdfSource)
+        .save();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'PDF could not be created.');
+    } finally {
+      pdfSource.remove();
+      setPdfBusy(false);
+    }
+  }
 
   async function toggleProtection() {
     if (!article || !isAdmin) return;
@@ -108,6 +168,12 @@ export function ArticlePage() {
         </dl>
         {user && (
           <div className="article-actions">
+            <button className="button button-secondary" onClick={downloadMarkdown}>
+              <Download aria-hidden="true" />Download raw Markdown
+            </button>
+            <button className="button button-secondary" disabled={pdfBusy} onClick={() => void downloadPdf()}>
+              <FileText aria-hidden="true" />{pdfBusy ? 'Creating PDF…' : 'Download PDF'}
+            </button>
             <Link className="button button-secondary" to={`/articles/${article.id}/history`}><History aria-hidden="true" />Revision history</Link>
             {canEdit && <Link className="button button-primary" to={`/articles/${article.id}/edit`}><Edit3 aria-hidden="true" />Edit article</Link>}
             {isAdmin && (
@@ -138,7 +204,7 @@ export function ArticlePage() {
             <ol>{headings.map((heading) => <li className={`depth-${heading.depth}`} key={heading.id}><a href={`#${heading.id}`}>{heading.text}</a></li>)}</ol>
           </aside>
         )}
-        <article className="article-body"><MarkdownContent content={article.content} /></article>
+        <article className="article-body" ref={articleBodyRef}><MarkdownContent content={article.content} /></article>
       </div>
     </div>
   );

@@ -188,6 +188,19 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .toc a { color: #aaa39a; text-decoration: none; }
 .toc a:hover { color: var(--gold); }
 .article-body { min-width: 0; padding: clamp(1.2rem, 4vw, 3rem); border: 1px solid rgba(255, 180, 81, 0.1); border-radius: 0.85rem; color: #ded8d1; background: rgba(18, 18, 18, 0.7); }
+.pdf-export { position: fixed; top: 0; left: -10000px; width: 760px; padding: 48px; color: #1a1a1a; background: #fff; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+.pdf-export-title { margin-bottom: 2rem; color: #1a1a1a; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 2.5rem; font-weight: 700; }
+.pdf-export .article-body { padding: 0; border: 0; color: #1a1a1a; background: #fff; }
+.pdf-export .markdown-content { color: #1a1a1a; }
+.pdf-export .markdown-content h1, .pdf-export .markdown-content h2, .pdf-export .markdown-content h3, .pdf-export .markdown-content h4 { break-after: avoid; color: #1a1a1a; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+.pdf-export .markdown-content a { color: #1d4ed8; }
+.pdf-export .markdown-content code { color: #7f1d1d; background: #f3f4f6; }
+.pdf-export .markdown-content pre { break-inside: avoid; border-color: #d1d5db; background: #f3f4f6; }
+.pdf-export .markdown-content pre code { color: #1a1a1a; }
+.pdf-export .markdown-content blockquote { break-inside: avoid; color: #4b5563; background: #f9fafb; }
+.pdf-export .markdown-content table, .pdf-export .markdown-content img { break-inside: avoid; }
+.pdf-export .markdown-content th { color: #1a1a1a; background: #f3f4f6; }
+.pdf-export .markdown-content th, .pdf-export .markdown-content td { border-color: #d1d5db; }
 .markdown-content { color: #ded8d1; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 1rem; line-height: 1.78; }
 .markdown-content > :first-child { margin-top: 0; }
 .markdown-content > :last-child { margin-bottom: 0; }
