@@ -16,6 +16,7 @@ export interface ArticleRecord {
   visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
+  isVerified: boolean;
   createdAt: string;
   createdBy: string;
   createdByName: string;
@@ -37,6 +38,7 @@ export interface ArticleRevisionRecord {
   visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
+  isVerified: boolean;
   revisedAt: string;
   revisedBy: string;
   revisedByName: string;

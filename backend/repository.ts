@@ -17,6 +17,7 @@ export interface ArticleRepository {
   update(id: string, input: ArticleWrite & { version: number }, actor: Actor): Promise<ArticleRecord | null>;
   setPinned(id: string, isPinned: boolean, version: number, actor: Actor): Promise<ArticleRecord | null>;
   setProtection(id: string, isProtected: boolean, version: number, actor: Actor): Promise<ArticleRecord | null>;
+  setVerified(id: string, isVerified: boolean, version: number, actor: Actor): Promise<ArticleRecord | null>;
   restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor): Promise<ArticleRecord | null>;
   delete(id: string, version: number): Promise<boolean>;
 }

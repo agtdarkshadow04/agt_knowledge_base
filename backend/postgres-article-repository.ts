@@ -21,6 +21,7 @@ interface ArticleRow {
   visibility: ArticleVisibility;
   is_pinned: boolean;
   is_protected: boolean;
+  is_verified: boolean;
   created_at: Date | string;
   created_by: string;
   created_by_name: string;
@@ -38,6 +39,7 @@ interface ArticleRevisionRow {
   visibility: ArticleVisibility;
   is_pinned: boolean;
   is_protected: boolean;
+  is_verified: boolean;
   revised_at: Date | string;
   revised_by: string;
   revised_by_name: string;
@@ -45,14 +47,14 @@ interface ArticleRevisionRow {
 }
 
 const baseSelect = `
-  a.id, a.title, a.content, a.tags, a.visibility, a.is_pinned, a.is_protected,
+  a.id, a.title, a.content, a.tags, a.visibility, a.is_pinned, a.is_protected, a.is_verified,
   a.created_at, a.created_by, creator.display_name AS created_by_name,
   a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
   a.version
 `;
 
 const revisionSelect = `
-  r.article_id, r.title, r.content, r.tags, r.visibility, r.is_pinned, r.is_protected,
+  r.article_id, r.title, r.content, r.tags, r.visibility, r.is_pinned, r.is_protected, r.is_verified,
   r.revised_at, r.revised_by, editor.display_name AS revised_by_name,
   r.version
 `;
@@ -70,6 +72,7 @@ function toArticle(row: ArticleRow): ArticleRecord {
     visibility: row.visibility,
     isPinned: row.is_pinned,
     isProtected: row.is_protected,
+    isVerified: row.is_verified,
     createdAt: iso(row.created_at),
     createdBy: row.created_by,
     createdByName: row.created_by_name,
@@ -89,6 +92,7 @@ function toRevision(row: ArticleRevisionRow): ArticleRevisionRecord {
     visibility: row.visibility,
     isPinned: row.is_pinned,
     isProtected: row.is_protected,
+    isVerified: row.is_verified,
     revisedAt: iso(row.revised_at),
     revisedBy: row.revised_by,
     revisedByName: row.revised_by_name,
@@ -121,9 +125,9 @@ async function upsertActor(client: pg.PoolClient, actor: Actor) {
 async function recordRevision(client: pg.PoolClient, id: string) {
   await client.query(
     `INSERT INTO article_revisions (
-       article_id, version, title, content, tags, visibility, is_pinned, is_protected, revised_at, revised_by
+       article_id, version, title, content, tags, visibility, is_pinned, is_protected, is_verified, revised_at, revised_by
      )
-     SELECT id, version, title, content, tags, visibility, is_pinned, is_protected, modified_at, modified_by
+     SELECT id, version, title, content, tags, visibility, is_pinned, is_protected, is_verified, modified_at, modified_by
      FROM articles
      WHERE id = $1`,
     [id],
@@ -163,7 +167,7 @@ export class PostgresArticleRepository implements ArticleRepository {
       pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM articles a WHERE ${where}`, params),
       pool.query<ArticleRow>(
         `SELECT
-           a.id, a.title, left(a.content, 1000) AS content_preview, a.tags, a.visibility, a.is_pinned, a.is_protected,
+           a.id, a.title, left(a.content, 1000) AS content_preview, a.tags, a.visibility, a.is_pinned, a.is_protected, a.is_verified,
            a.created_at, a.created_by, creator.display_name AS created_by_name,
            a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
            a.version
@@ -188,6 +192,7 @@ export class PostgresArticleRepository implements ArticleRepository {
           visibility: row.visibility,
           isPinned: row.is_pinned,
           isProtected: row.is_protected,
+          isVerified: row.is_verified,
           createdAt: iso(row.created_at),
           createdBy: row.created_by,
           createdByName: row.created_by_name,
@@ -346,6 +351,31 @@ export class PostgresArticleRepository implements ArticleRepository {
     } finally { client.release(); }
   }
 
+  async setVerified(id: string, isVerified: boolean, version: number, actor: Actor) {
+    const pool = await getPool();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await upsertActor(client, actor);
+      const updated = await client.query<{ id: string }>(
+        `UPDATE articles
+         SET is_verified = $1,
+             modified_by = $2,
+             modified_at = now(),
+             version = version + 1
+         WHERE id = $3 AND version = $4
+         RETURNING id`,
+        [isVerified, actor.sub, id, version],
+      );
+      if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
+      await client.query('COMMIT');
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
     const pool = await getPool();
     const client = await pool.connect();
@@ -360,6 +390,7 @@ export class PostgresArticleRepository implements ArticleRepository {
              visibility = r.visibility,
              is_pinned = r.is_pinned,
              is_protected = r.is_protected,
+             is_verified = r.is_verified,
              modified_by = $4,
              modified_at = now(),
              version = a.version + 1

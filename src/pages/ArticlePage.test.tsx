@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getToken: vi.fn(async () => 'token'),
   getArticle: vi.fn(),
   setArticlePinned: vi.fn(),
+  setArticleVerified: vi.fn(),
 }));
 
 vi.mock('../auth/AuthContext', () => ({
@@ -24,6 +25,7 @@ vi.mock('../services/api', async (importOriginal) => {
     ...actual,
     getArticle: mocks.getArticle,
     setArticlePinned: mocks.setArticlePinned,
+    setArticleVerified: mocks.setArticleVerified,
   };
 });
 
@@ -36,6 +38,7 @@ const article: Article = {
   visibility: 'Public',
   isPinned: false,
   isProtected: false,
+  isVerified: false,
   createdAt: '2026-01-01T00:00:00.000Z',
   createdBy: 'author',
   createdByName: 'Apollo',
@@ -51,6 +54,8 @@ describe('ArticlePage', () => {
     mocks.getArticle.mockResolvedValue(article);
     mocks.setArticlePinned.mockReset();
     mocks.setArticlePinned.mockResolvedValue({ ...article, isPinned: true, version: 2 });
+    mocks.setArticleVerified.mockReset();
+    mocks.setArticleVerified.mockResolvedValue({ ...article, isVerified: true, version: 2 });
   });
 
   it('allows an Administrator to pin an article', async () => {
@@ -66,5 +71,20 @@ describe('ArticlePage', () => {
     expect(screen.getByText('Public')).toHaveClass('visibility-public');
     expect(mocks.setArticlePinned).toHaveBeenCalledWith(article.id, true, article.version, 'token');
     expect(await screen.findByRole('button', { name: 'Unpin' })).toBeInTheDocument();
+  });
+
+  it('allows an Administrator to verify an article', async () => {
+    const router = createMemoryRouter(
+      [{ path: '/articles/:id', element: <ArticlePage /> }],
+      { initialEntries: [`/articles/${article.id}`] },
+    );
+    const user = userEvent.setup();
+    render(<RouterProvider router={router} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Verify' }));
+
+    expect(mocks.setArticleVerified).toHaveBeenCalledWith(article.id, true, article.version, 'token');
+    expect(await screen.findByText('Verified')).toHaveClass('verified');
+    expect(screen.getByRole('button', { name: 'Unverify' })).toBeInTheDocument();
   });
 });

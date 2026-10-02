@@ -86,6 +86,14 @@ export function setArticlePinned(id: string, isPinned: boolean, version: number,
   );
 }
 
+export function setArticleVerified(id: string, isVerified: boolean, version: number, token: string) {
+  return request<Article>(
+    `/articles/${encodeURIComponent(id)}/verification`,
+    { method: 'PATCH', body: JSON.stringify({ isVerified, version }) },
+    token,
+  );
+}
+
 export function restoreArticleRevision(id: string, revisionVersion: number, currentVersion: number, token: string) {
   return request<Article>(
     `/articles/${encodeURIComponent(id)}/revisions/${revisionVersion}/restore`,

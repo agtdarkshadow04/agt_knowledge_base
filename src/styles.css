@@ -147,6 +147,7 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .status-chip svg { width: 0.7rem; height: 0.7rem; }
 .status-chip.protected { border: 1px solid rgba(255, 5, 0, 0.38); color: #ff8f8c; background: rgba(255, 5, 0, 0.08); }
 .status-chip.pinned { border: 1px solid rgba(56, 189, 248, 0.45); color: #7dd3fc; background: rgba(14, 165, 233, 0.1); }
+.status-chip.verified { border: 1px solid rgba(125, 211, 252, 0.55); color: #bae6fd; background: rgba(56, 189, 248, 0.12); }
 .status-chip.visibility-public { border: 1px solid rgba(82, 196, 122, 0.45); color: #8be5ab; background: rgba(82, 196, 122, 0.1); }
 .status-chip.visibility-internal { border: 1px solid rgba(226, 85, 48, 0.5); color: #ff9d74; background: rgba(226, 85, 48, 0.1); }
 .status-chip.visibility-admin { border: 1px solid rgba(255, 180, 81, 0.5); color: var(--gold); background: rgba(255, 180, 81, 0.1); }

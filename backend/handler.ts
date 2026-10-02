@@ -4,7 +4,7 @@ import { ArticleService } from './article-service.js';
 import { requireActor } from './auth.js';
 import { AppError } from './domain.js';
 import { PostgresArticleRepository } from './postgres-article-repository.js';
-import { parseArticleWrite, parseListQuery, parsePinWrite, parseProtectionWrite, parseRestoreWrite } from './validation.js';
+import { parseArticleWrite, parseListQuery, parsePinWrite, parseProtectionWrite, parseRestoreWrite, parseVerificationWrite } from './validation.js';
 
 const service = new ArticleService(new PostgresArticleRepository());
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -71,6 +71,10 @@ export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): P
       case 'PATCH /articles/{id}/pinning': {
         const input = parsePinWrite(parseBody(event));
         return json(200, await service.setPinned(articleId(event), input.isPinned, input.version, requireActor(event)));
+      }
+      case 'PATCH /articles/{id}/verification': {
+        const input = parseVerificationWrite(parseBody(event));
+        return json(200, await service.setVerified(articleId(event), input.isVerified, input.version, requireActor(event)));
       }
       case 'POST /articles/{id}/revisions/{version}/restore': {
         const input = parseRestoreWrite(parseBody(event));

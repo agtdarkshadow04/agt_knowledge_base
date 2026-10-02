@@ -12,6 +12,7 @@ const article: ArticleSummary = {
   visibility: 'Internal',
   isPinned: true,
   isProtected: true,
+  isVerified: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   createdBy: 'author',
   createdByName: 'Apollo',
@@ -22,11 +23,12 @@ const article: ArticleSummary = {
 };
 
 describe('ArticleCard', () => {
-  it('shows visibility, pinned, and protected status indicators', () => {
+  it('shows visibility, verified, pinned, and protected status indicators', () => {
     const { container } = render(<MemoryRouter><ArticleCard article={article} /></MemoryRouter>);
 
     expect(screen.getByText('Internal')).toHaveClass('visibility-internal');
     expect(container.querySelector('.visibility-eye-icon')).toBeInTheDocument();
+    expect(screen.getByText('Verified')).toHaveClass('verified');
     expect(screen.getByText('Pinned')).toHaveClass('pinned');
     expect(screen.getByText('Protected')).toHaveClass('protected');
   });

@@ -72,6 +72,23 @@ describe('article request validation', () => {
     expect(response).toMatchObject({ statusCode: 403 });
   });
 
+  it('rejects verification changes by Standard users before accessing persistence', async () => {
+    const event = {
+      routeKey: 'PATCH /articles/{id}/verification',
+      pathParameters: { id: '00000000-0000-4000-8000-000000000001' },
+      body: JSON.stringify({ isVerified: true, version: 1 }),
+      requestContext: {
+        requestId: 'request-5',
+        authorizer: { jwt: { claims: { sub: 'standard-sub', 'cognito:groups': ['Standard'] } } },
+      },
+    } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
+
+    const response = await handler(event);
+
+    if (typeof response === 'string') throw new Error('Expected a structured API response.');
+    expect(response).toMatchObject({ statusCode: 403 });
+  });
+
   it('rejects Admin visibility assignments by Standard users before accessing persistence', async () => {
     const event = {
       routeKey: 'POST /articles',
@@ -82,7 +99,7 @@ describe('article request validation', () => {
         visibility: 'Admin',
       }),
       requestContext: {
-        requestId: 'request-5',
+        requestId: 'request-6',
         authorizer: { jwt: { claims: { sub: 'standard-sub', 'cognito:groups': ['Standard'] } } },
       },
     } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;

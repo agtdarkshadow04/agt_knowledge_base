@@ -34,6 +34,11 @@ const pinSchema = z.object({
   version: z.number().int().positive(),
 }).strict();
 
+const verificationSchema = z.object({
+  isVerified: z.boolean(),
+  version: z.number().int().positive(),
+}).strict();
+
 const restoreSchema = z.object({
   currentVersion: z.number().int().positive(),
 }).strict();
@@ -48,6 +53,10 @@ export function parseProtectionWrite(value: unknown) {
 
 export function parsePinWrite(value: unknown) {
   return pinSchema.parse(value);
+}
+
+export function parseVerificationWrite(value: unknown) {
+  return verificationSchema.parse(value);
 }
 
 export function parseRestoreWrite(value: unknown) {

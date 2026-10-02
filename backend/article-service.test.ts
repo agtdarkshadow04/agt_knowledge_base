@@ -32,6 +32,7 @@ class MemoryRepository implements ArticleRepository {
       visibility: record.visibility,
       isPinned: record.isPinned,
       isProtected: record.isProtected,
+      isVerified: record.isVerified,
       revisedAt: record.modifiedAt,
       revisedBy: record.modifiedBy,
       revisedByName: record.modifiedByName,
@@ -85,7 +86,7 @@ class MemoryRepository implements ArticleRepository {
     const now = this.time();
     const record: ArticleRecord = {
       id, title: input.title, content: input.content, tags: input.tags,
-      visibility: input.visibility ?? 'Internal', isPinned: false, isProtected: false,
+      visibility: input.visibility ?? 'Internal', isPinned: false, isProtected: false, isVerified: false,
       createdAt: now, createdBy: actor.sub, createdByName: actor.displayName,
       modifiedAt: now, modifiedBy: actor.sub, modifiedByName: actor.displayName, version: 1,
     };
@@ -121,6 +122,15 @@ class MemoryRepository implements ArticleRepository {
     return updated;
   }
 
+  async setVerified(id: string, isVerified: boolean, version: number, actor: Actor) {
+    const current = this.records.get(id);
+    if (!current || current.version !== version) return null;
+    const updated = { ...current, isVerified, modifiedAt: this.time(), modifiedBy: actor.sub, modifiedByName: actor.displayName, version: version + 1 };
+    this.records.set(id, updated);
+    this.recordRevision(updated);
+    return updated;
+  }
+
   async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
     const current = this.records.get(id);
     const revision = await this.getRevision(id, revisionVersion);
@@ -133,6 +143,7 @@ class MemoryRepository implements ArticleRepository {
       visibility: revision.visibility,
       isPinned: revision.isPinned,
       isProtected: revision.isProtected,
+      isVerified: revision.isVerified,
       modifiedAt: this.time(),
       modifiedBy: actor.sub,
       modifiedByName: actor.displayName,
@@ -180,9 +191,25 @@ describe('ArticleService authorization and persistence', () => {
     const created = await service.create(articleInput('Security Guide'), standard);
     await expect(service.setProtection(created.id, true, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(service.setPinned(created.id, true, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.setVerified(created.id, true, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(service.delete(created.id, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
     await service.update(created.id, { ...articleInput('Security Guide v2'), version: 1 }, standard);
     await expect(service.update(created.id, { ...articleInput('Stale'), version: 1 }, standard)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('allows only Admins to change verification status', async () => {
+    const repository = new MemoryRepository();
+    const service = new ArticleService(repository);
+    const created = await service.create(articleInput('Verification Guide'), standard);
+
+    const verified = await service.setVerified(created.id, true, created.version, admin);
+    expect(verified).toMatchObject({ isVerified: true, modifiedBy: admin.sub, version: 2 });
+    await expect(service.setVerified(created.id, false, created.version, admin)).rejects.toBeInstanceOf(ConflictError);
+    await expect(service.setVerified(created.id, false, verified.version, standard)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.setVerified(created.id, false, verified.version, admin)).resolves.toMatchObject({
+      isVerified: false,
+      version: 3,
+    });
   });
 
   it('searches, filters, sorts predictably, and paginates', async () => {

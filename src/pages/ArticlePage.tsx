@@ -1,11 +1,11 @@
-import { Clock3, Edit3, History, LockKeyhole, Pin, ShieldCheck, Tag, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
+import { BadgeCheck, Clock3, Edit3, History, LockKeyhole, Pin, ShieldCheck, Tag, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { extractHeadings, MarkdownContent } from '../components/MarkdownContent';
 import { ErrorState, LoadingState } from '../components/States';
 import { VisibilityChip } from '../components/VisibilityChip';
-import { deleteArticle, getArticle, setArticlePinned, setArticleProtection } from '../services/api';
+import { deleteArticle, getArticle, setArticlePinned, setArticleProtection, setArticleVerified } from '../services/api';
 import type { Article } from '../types';
 
 function formatTimestamp(value: string) {
@@ -57,6 +57,17 @@ export function ArticlePage() {
     finally { setActionBusy(false); }
   }
 
+  async function toggleVerified() {
+    if (!article || !isAdmin) return;
+    setActionBusy(true);
+    setError('');
+    try {
+      const token = await getToken();
+      setArticle(await setArticleVerified(article.id, !article.isVerified, article.version, token));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Verification status could not be changed.'); }
+    finally { setActionBusy(false); }
+  }
+
   async function removeArticle() {
     if (!article || !isAdmin || !window.confirm(`Permanently delete “${article.title}”?`)) return;
     setActionBusy(true);
@@ -84,6 +95,7 @@ export function ArticlePage() {
           </div>
           <div className="article-status">
             <VisibilityChip visibility={article.visibility} />
+            {article.isVerified && <span className="status-chip verified"><BadgeCheck aria-hidden="true" />Verified</span>}
             {article.isProtected && <span className="status-chip protected"><LockKeyhole aria-hidden="true" />Protected</span>}
           </div>
         </div>
@@ -101,6 +113,11 @@ export function ArticlePage() {
             {isAdmin && (
               <button className="button button-secondary" disabled={actionBusy} onClick={() => void togglePinned()}>
                 <Pin aria-hidden="true" />{article.isPinned ? 'Unpin' : 'Pin'}
+              </button>
+            )}
+            {isAdmin && (
+              <button className="button button-secondary" disabled={actionBusy} onClick={() => void toggleVerified()}>
+                <BadgeCheck aria-hidden="true" />{article.isVerified ? 'Unverify' : 'Verify'}
               </button>
             )}
             {isAdmin && (

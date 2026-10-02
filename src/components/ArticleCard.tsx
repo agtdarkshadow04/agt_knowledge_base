@@ -1,4 +1,4 @@
-import { CalendarClock, LockKeyhole, Pin, Tag } from 'lucide-react';
+import { BadgeCheck, CalendarClock, LockKeyhole, Pin, Tag } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ArticleSummary } from '../types';
 import { VisibilityChip } from './VisibilityChip';
@@ -17,6 +17,9 @@ export function ArticleCard({ article }: { article: ArticleSummary }) {
         </div>
         <div className="article-card-status">
           <VisibilityChip visibility={article.visibility} />
+          {article.isVerified && (
+            <span className="status-chip verified"><BadgeCheck aria-hidden="true" /> Verified</span>
+          )}
           {article.isPinned && (
             <span className="status-chip pinned"><Pin aria-hidden="true" /> Pinned</span>
           )}

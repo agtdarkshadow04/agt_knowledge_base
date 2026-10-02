@@ -91,4 +91,14 @@ export const migrations: Migration[] = [
         ON articles (visibility, modified_at DESC, id DESC);
     `,
   },
+  {
+    id: '005_article_verification',
+    sql: `
+      ALTER TABLE articles
+        ADD COLUMN is_verified boolean NOT NULL DEFAULT false;
+
+      ALTER TABLE article_revisions
+        ADD COLUMN is_verified boolean NOT NULL DEFAULT false;
+    `,
+  },
 ];

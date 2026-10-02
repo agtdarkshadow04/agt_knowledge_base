@@ -66,6 +66,14 @@ export class ArticleService {
     return updated;
   }
 
+  async setVerified(id: string, isVerified: boolean, version: number, actor: Actor) {
+    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can change verification status.');
+    if (!(await this.repository.get(id, actor.role))) throw new NotFoundError();
+    const updated = await this.repository.setVerified(id, isVerified, version, actor);
+    if (!updated) throw new ConflictError();
+    return updated;
+  }
+
   async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
     if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can restore article revisions.');
     if (!(await this.repository.get(id, actor.role))) throw new NotFoundError();

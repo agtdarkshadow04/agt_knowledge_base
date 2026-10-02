@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { roleFromClaims } from './auth.js';
-import { parseArticleWrite, parseListQuery } from './validation.js';
+import { parseArticleWrite, parseListQuery, parseVerificationWrite } from './validation.js';
 
 describe('authentication and validation', () => {
   it('recognizes Admin group claims and defaults authenticated users to Standard', () => {
@@ -23,5 +23,11 @@ describe('authentication and validation', () => {
     expect(() => parseListQuery({ pinned: 'true' })).toThrow();
     expect(() => parseListQuery({ sort: 'created_at; DROP TABLE articles' })).toThrow();
     expect(() => parseListQuery({ pageSize: '5000' })).toThrow();
+  });
+
+  it('requires a boolean verification value and positive article version', () => {
+    expect(parseVerificationWrite({ isVerified: true, version: 2 })).toEqual({ isVerified: true, version: 2 });
+    expect(() => parseVerificationWrite({ isVerified: 'true', version: 2 })).toThrow();
+    expect(() => parseVerificationWrite({ isVerified: true, version: 0 })).toThrow();
   });
 });
