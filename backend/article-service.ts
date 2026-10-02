@@ -1,6 +1,7 @@
 import {
   ConflictError,
   ForbiddenError,
+  NoChangesError,
   NotFoundError,
   type Actor,
   type ArticleWrite,
@@ -45,6 +46,13 @@ export class ArticleService {
     if (actor.role !== 'Admin' && visibility === 'Admin') {
       throw new ForbiddenError('Standard users cannot assign Admin visibility.');
     }
+    if (existing.version !== input.version) throw new ConflictError();
+    const unchanged = existing.title === input.title
+      && existing.content === input.content
+      && existing.visibility === visibility
+      && existing.tags.length === input.tags.length
+      && existing.tags.every((tag, index) => tag === input.tags[index]);
+    if (unchanged) throw new NoChangesError();
     const updated = await this.repository.update(id, { ...input, visibility, version: input.version }, actor);
     if (!updated) throw new ConflictError();
     return updated;

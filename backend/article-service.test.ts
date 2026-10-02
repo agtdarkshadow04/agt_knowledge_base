@@ -175,6 +175,24 @@ describe('ArticleService authorization and persistence', () => {
     expect(updated).toMatchObject({ createdBy: standard.sub, modifiedBy: admin.sub, version: 2 });
   });
 
+  it('rejects updates that do not change document fields', async () => {
+    const repository = new MemoryRepository();
+    const service = new ArticleService(repository);
+    const created = await service.create(articleInput('Unchanged Guide'), standard);
+
+    await expect(service.update(
+      created.id,
+      { ...articleInput('Unchanged Guide'), version: created.version },
+      standard,
+    )).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'NO_CHANGES',
+      message: 'No changes were made to the article.',
+    });
+    expect(repository.records.get(created.id)).toMatchObject({ version: 1 });
+    expect(await repository.listRevisions(created.id)).toHaveLength(1);
+  });
+
   it('allows Standard users to edit open articles but blocks protected articles', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);

@@ -92,3 +92,7 @@ export class ForbiddenError extends AppError {
 export class ConflictError extends AppError {
   constructor(message = 'The article has changed. Reload the latest version before saving.') { super(message, 409, 'VERSION_CONFLICT'); }
 }
+
+export class NoChangesError extends AppError {
+  constructor() { super('No changes were made to the article.', 400, 'NO_CHANGES'); }
+}
