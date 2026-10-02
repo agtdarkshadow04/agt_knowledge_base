@@ -76,6 +76,14 @@ export function setArticleProtection(id: string, isProtected: boolean, version: 
   );
 }
 
+export function setArticlePinned(id: string, isPinned: boolean, version: number, token: string) {
+  return request<Article>(
+    `/articles/${encodeURIComponent(id)}/pinning`,
+    { method: 'PATCH', body: JSON.stringify({ isPinned, version }) },
+    token,
+  );
+}
+
 export function restoreArticleRevision(id: string, revisionVersion: number, currentVersion: number, token: string) {
   return request<Article>(
     `/articles/${encodeURIComponent(id)}/revisions/${revisionVersion}/restore`,

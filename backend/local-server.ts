@@ -19,6 +19,7 @@ function routeKey(method: string, pathname: string) {
   }
   if (/^\/articles\/[^/]+\/revisions$/.test(pathname) && method === 'GET') return 'GET /articles/{id}/revisions';
   if (/^\/articles\/[^/]+\/protection$/.test(pathname) && method === 'PATCH') return 'PATCH /articles/{id}/protection';
+  if (/^\/articles\/[^/]+\/pinning$/.test(pathname) && method === 'PATCH') return 'PATCH /articles/{id}/pinning';
   if (/^\/articles\/[^/]+$/.test(pathname)) return `${method} /articles/{id}`;
   return `${method} ${pathname}`;
 }

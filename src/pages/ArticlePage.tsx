@@ -1,10 +1,10 @@
-import { Clock3, Edit3, History, LockKeyhole, ShieldCheck, Tag, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
+import { Clock3, Edit3, History, LockKeyhole, Pin, ShieldCheck, Tag, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { extractHeadings, MarkdownContent } from '../components/MarkdownContent';
 import { ErrorState, LoadingState } from '../components/States';
-import { deleteArticle, getArticle, setArticleProtection } from '../services/api';
+import { deleteArticle, getArticle, setArticlePinned, setArticleProtection } from '../services/api';
 import type { Article } from '../types';
 
 function formatTimestamp(value: string) {
@@ -41,6 +41,17 @@ export function ArticlePage() {
       const token = await getToken();
       setArticle(await setArticleProtection(article.id, !article.isProtected, article.version, token));
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Protection status could not be changed.'); }
+    finally { setActionBusy(false); }
+  }
+
+  async function togglePinned() {
+    if (!article || !isAdmin) return;
+    setActionBusy(true);
+    setError('');
+    try {
+      const token = await getToken();
+      setArticle(await setArticlePinned(article.id, !article.isPinned, article.version, token));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Pin status could not be changed.'); }
     finally { setActionBusy(false); }
   }
 
@@ -82,6 +93,11 @@ export function ArticlePage() {
           <div className="article-actions">
             <Link className="button button-secondary" to={`/articles/${article.id}/history`}><History aria-hidden="true" />Revision history</Link>
             {canEdit && <Link className="button button-primary" to={`/articles/${article.id}/edit`}><Edit3 aria-hidden="true" />Edit article</Link>}
+            {isAdmin && (
+              <button className="button button-secondary" disabled={actionBusy} onClick={() => void togglePinned()}>
+                <Pin aria-hidden="true" />{article.isPinned ? 'Unpin' : 'Pin'}
+              </button>
+            )}
             {isAdmin && (
               <button className="button button-secondary" disabled={actionBusy} onClick={() => void toggleProtection()}>
                 {article.isProtected ? <UnlockKeyhole aria-hidden="true" /> : <ShieldCheck aria-hidden="true" />}

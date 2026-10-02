@@ -28,6 +28,7 @@ class MemoryRepository implements ArticleRepository {
       title: record.title,
       content: record.content,
       tags: record.tags,
+      isPinned: record.isPinned,
       isProtected: record.isProtected,
       revisedAt: record.modifiedAt,
       revisedBy: record.modifiedBy,
@@ -45,8 +46,10 @@ class MemoryRepository implements ArticleRepository {
     const search = query.search.toLowerCase();
     if (search) items = items.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(search));
     if (query.tag) items = items.filter((item) => item.tags.includes(query.tag));
+    if (query.pinned === 'pinned') items = items.filter((item) => item.isPinned);
     if (query.protection !== 'all') items = items.filter((item) => item.isProtected === (query.protection === 'protected'));
     items.sort((left, right) => {
+      if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1;
       const leftValue = query.sort === 'title' ? left.title.toLowerCase() : left[query.sort];
       const rightValue = query.sort === 'title' ? right.title.toLowerCase() : right[query.sort];
       const result = leftValue.localeCompare(rightValue) || left.id.localeCompare(right.id);
@@ -70,7 +73,7 @@ class MemoryRepository implements ArticleRepository {
     const id = `00000000-0000-4000-8000-${String(this.records.size + 1).padStart(12, '0')}`;
     const now = this.time();
     const record: ArticleRecord = {
-      id, title: input.title, content: input.content, tags: input.tags, isProtected: false,
+      id, title: input.title, content: input.content, tags: input.tags, isPinned: false, isProtected: false,
       createdAt: now, createdBy: actor.sub, createdByName: actor.displayName,
       modifiedAt: now, modifiedBy: actor.sub, modifiedByName: actor.displayName, version: 1,
     };
@@ -97,6 +100,15 @@ class MemoryRepository implements ArticleRepository {
     return updated;
   }
 
+  async setPinned(id: string, isPinned: boolean, version: number, actor: Actor) {
+    const current = this.records.get(id);
+    if (!current || current.version !== version) return null;
+    const updated = { ...current, isPinned, modifiedAt: this.time(), modifiedBy: actor.sub, modifiedByName: actor.displayName, version: version + 1 };
+    this.records.set(id, updated);
+    this.recordRevision(updated);
+    return updated;
+  }
+
   async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
     const current = this.records.get(id);
     const revision = await this.getRevision(id, revisionVersion);
@@ -106,6 +118,7 @@ class MemoryRepository implements ArticleRepository {
       title: revision.title,
       content: revision.content,
       tags: revision.tags,
+      isPinned: revision.isPinned,
       isProtected: revision.isProtected,
       modifiedAt: this.time(),
       modifiedBy: actor.sub,
@@ -123,7 +136,7 @@ class MemoryRepository implements ArticleRepository {
   }
 }
 
-const query: ListArticlesQuery = { search: '', tag: '', protection: 'all', sort: 'title', direction: 'asc', page: 1, pageSize: 10 };
+const query: ListArticlesQuery = { search: '', tag: '', pinned: 'all', protection: 'all', sort: 'title', direction: 'asc', page: 1, pageSize: 10 };
 const articleInput = (title: string, tags: string[] = []): ArticleWrite => ({ title, tags, content: `${title} contains enough persistent Markdown content.` });
 
 describe('ArticleService authorization and persistence', () => {
@@ -153,6 +166,7 @@ describe('ArticleService authorization and persistence', () => {
     const service = new ArticleService(repository);
     const created = await service.create(articleInput('Security Guide'), standard);
     await expect(service.setProtection(created.id, true, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.setPinned(created.id, true, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(service.delete(created.id, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
     await service.update(created.id, { ...articleInput('Security Guide v2'), version: 1 }, standard);
     await expect(service.update(created.id, { ...articleInput('Stale'), version: 1 }, standard)).rejects.toBeInstanceOf(ConflictError);
@@ -169,6 +183,21 @@ describe('ArticleService authorization and persistence', () => {
     expect(result.total).toBe(2);
     expect(result.totalPages).toBe(2);
     expect(result.items[0].title).toBe('Alpha Portal');
+  });
+
+  it('places pinned articles first and filters to pinned articles', async () => {
+    const repository = new MemoryRepository();
+    const service = new ArticleService(repository);
+    await service.create(articleInput('Alpha Portal'), standard);
+    const beta = await service.create(articleInput('Beta Portal'), standard);
+    await service.setPinned(beta.id, true, beta.version, admin);
+
+    const result = await service.list(query);
+    expect(result.items.map((article) => article.title)).toEqual(['Beta Portal', 'Alpha Portal']);
+
+    const pinned = await service.list({ ...query, pinned: 'pinned' });
+    expect(pinned.items).toHaveLength(1);
+    expect(pinned.items[0]).toMatchObject({ title: 'Beta Portal', isPinned: true });
   });
 
   it('retains five dated revisions for Standard users and restricts restoration to Admins', async () => {

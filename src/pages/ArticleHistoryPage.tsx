@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Clock3, History, RotateCcw, ShieldCheck, UserRound } from 'lucide-react';
+import { ArrowLeftRight, Clock3, History, Pin, RotateCcw, ShieldCheck, UserRound } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -150,6 +150,11 @@ export function ArticleHistoryPage() {
             <dt>Protection</dt>
             <dd><ShieldCheck aria-hidden="true" />{left.isProtected ? 'Protected' : 'Unprotected'}</dd>
             <dd><ShieldCheck aria-hidden="true" />{right.isProtected ? 'Protected' : 'Unprotected'}</dd>
+          </div>
+          <div className={left.isPinned === right.isPinned ? '' : 'changed'}>
+            <dt>Pin status</dt>
+            <dd><Pin aria-hidden="true" />{left.isPinned ? 'Pinned' : 'Not pinned'}</dd>
+            <dd><Pin aria-hidden="true" />{right.isPinned ? 'Pinned' : 'Not pinned'}</dd>
           </div>
         </dl>
 

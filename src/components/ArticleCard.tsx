@@ -1,4 +1,4 @@
-import { CalendarClock, LockKeyhole, Tag } from 'lucide-react';
+import { CalendarClock, LockKeyhole, Pin, Tag } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ArticleSummary } from '../types';
 
@@ -14,9 +14,14 @@ export function ArticleCard({ article }: { article: ArticleSummary }) {
           <p className="eyebrow">Archive entry</p>
           <h2><Link to={`/articles/${article.id}`}>{article.title}</Link></h2>
         </div>
-        {article.isProtected && (
-          <span className="status-chip protected"><LockKeyhole aria-hidden="true" /> Protected</span>
-        )}
+        <div className="article-card-status">
+          {article.isPinned && (
+            <span className="status-chip pinned"><Pin aria-hidden="true" /> Pinned</span>
+          )}
+          {article.isProtected && (
+            <span className="status-chip protected"><LockKeyhole aria-hidden="true" /> Protected</span>
+          )}
+        </div>
       </div>
       <p className="excerpt">{article.excerpt || 'Open this transmission to read the full article.'}</p>
       <div className="tag-list" aria-label="Article tags">

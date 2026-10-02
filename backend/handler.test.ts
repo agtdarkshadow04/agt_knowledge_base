@@ -54,4 +54,21 @@ describe('article request validation', () => {
     if (typeof response === 'string') throw new Error('Expected a structured API response.');
     expect(response).toMatchObject({ statusCode: 403 });
   });
+
+  it('rejects pin changes by Standard users before accessing persistence', async () => {
+    const event = {
+      routeKey: 'PATCH /articles/{id}/pinning',
+      pathParameters: { id: '00000000-0000-4000-8000-000000000001' },
+      body: JSON.stringify({ isPinned: true, version: 1 }),
+      requestContext: {
+        requestId: 'request-4',
+        authorizer: { jwt: { claims: { sub: 'standard-sub', 'cognito:groups': ['Standard'] } } },
+      },
+    } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
+
+    const response = await handler(event);
+
+    if (typeof response === 'string') throw new Error('Expected a structured API response.');
+    expect(response).toMatchObject({ statusCode: 403 });
+  });
 });

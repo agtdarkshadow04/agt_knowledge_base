@@ -12,6 +12,7 @@ export interface ArticleRecord {
   title: string;
   content: string;
   tags: string[];
+  isPinned: boolean;
   isProtected: boolean;
   createdAt: string;
   createdBy: string;
@@ -31,6 +32,7 @@ export interface ArticleRevisionRecord {
   title: string;
   content: string;
   tags: string[];
+  isPinned: boolean;
   isProtected: boolean;
   revisedAt: string;
   revisedBy: string;
@@ -41,6 +43,7 @@ export interface ArticleRevisionRecord {
 export interface ListArticlesQuery {
   search: string;
   tag: string;
+  pinned: 'all' | 'pinned';
   protection: 'all' | 'protected' | 'unprotected';
   sort: 'createdAt' | 'modifiedAt' | 'title';
   direction: 'asc' | 'desc';

@@ -28,6 +28,11 @@ const protectionSchema = z.object({
   version: z.number().int().positive(),
 }).strict();
 
+const pinSchema = z.object({
+  isPinned: z.boolean(),
+  version: z.number().int().positive(),
+}).strict();
+
 const restoreSchema = z.object({
   currentVersion: z.number().int().positive(),
 }).strict();
@@ -38,6 +43,10 @@ export function parseArticleWrite(value: unknown): ArticleWrite {
 
 export function parseProtectionWrite(value: unknown) {
   return protectionSchema.parse(value);
+}
+
+export function parsePinWrite(value: unknown) {
+  return pinSchema.parse(value);
 }
 
 export function parseRestoreWrite(value: unknown) {
@@ -52,6 +61,7 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
   return z.object({
     search: z.string().trim().max(200).default(''),
     tag: z.string().trim().toLowerCase().max(40).default(''),
+    pinned: z.enum(['all', 'pinned']).default('all'),
     protection: z.enum(['all', 'protected', 'unprotected']).default('all'),
     sort: z.enum(['createdAt', 'modifiedAt', 'title']).default('modifiedAt'),
     direction: z.enum(['asc', 'desc']).default('desc'),
@@ -60,6 +70,7 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
   }).parse({
     search: first(query.search),
     tag: first(query.tag),
+    pinned: first(query.pinned),
     protection: first(query.protection),
     sort: first(query.sort),
     direction: first(query.direction),

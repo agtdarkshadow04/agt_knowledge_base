@@ -21,6 +21,7 @@ export function HomePage() {
     return {
       search: current.get('search') ?? '',
       tag: current.get('tag') ?? '',
+      pinned: (current.get('pinned') ?? 'all') as 'all' | 'pinned',
       protection: (current.get('protection') ?? 'all') as 'all' | 'protected' | 'unprotected',
       sort: (current.get('sort') ?? 'modifiedAt') as ArticleSort,
       direction: (current.get('direction') ?? 'desc') as SortDirection,
@@ -64,7 +65,7 @@ export function HomePage() {
     setSearchParams(next);
   }
 
-  const hasFilters = Boolean(params.search || params.tag || params.protection !== 'all');
+  const hasFilters = Boolean(params.search || params.tag || params.pinned !== 'all' || params.protection !== 'all');
 
   return (
     <div className="page home-page">
@@ -93,6 +94,12 @@ export function HomePage() {
           <button className="button button-primary" type="submit">Search</button>
         </form>
         <div className="sort-row">
+          <label>Pin status
+            <select value={params.pinned} onChange={(event) => updateParam('pinned', event.target.value)}>
+              <option value="all">All articles</option>
+              <option value="pinned">Pinned only</option>
+            </select>
+          </label>
           <label>Protection
             <select value={params.protection} onChange={(event) => updateParam('protection', event.target.value)}>
               <option value="all">All articles</option>

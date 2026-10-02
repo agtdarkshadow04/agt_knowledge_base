@@ -16,6 +16,7 @@ interface ArticleRow {
   content?: string;
   content_preview?: string;
   tags: string[];
+  is_pinned: boolean;
   is_protected: boolean;
   created_at: Date | string;
   created_by: string;
@@ -31,6 +32,7 @@ interface ArticleRevisionRow {
   title: string;
   content: string;
   tags: string[];
+  is_pinned: boolean;
   is_protected: boolean;
   revised_at: Date | string;
   revised_by: string;
@@ -39,14 +41,14 @@ interface ArticleRevisionRow {
 }
 
 const baseSelect = `
-  a.id, a.title, a.content, a.tags, a.is_protected,
+  a.id, a.title, a.content, a.tags, a.is_pinned, a.is_protected,
   a.created_at, a.created_by, creator.display_name AS created_by_name,
   a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
   a.version
 `;
 
 const revisionSelect = `
-  r.article_id, r.title, r.content, r.tags, r.is_protected,
+  r.article_id, r.title, r.content, r.tags, r.is_pinned, r.is_protected,
   r.revised_at, r.revised_by, editor.display_name AS revised_by_name,
   r.version
 `;
@@ -61,6 +63,7 @@ function toArticle(row: ArticleRow): ArticleRecord {
     title: row.title,
     content: row.content ?? '',
     tags: row.tags,
+    isPinned: row.is_pinned,
     isProtected: row.is_protected,
     createdAt: iso(row.created_at),
     createdBy: row.created_by,
@@ -78,6 +81,7 @@ function toRevision(row: ArticleRevisionRow): ArticleRevisionRecord {
     title: row.title,
     content: row.content,
     tags: row.tags,
+    isPinned: row.is_pinned,
     isProtected: row.is_protected,
     revisedAt: iso(row.revised_at),
     revisedBy: row.revised_by,
@@ -111,9 +115,9 @@ async function upsertActor(client: pg.PoolClient, actor: Actor) {
 async function recordRevision(client: pg.PoolClient, id: string) {
   await client.query(
     `INSERT INTO article_revisions (
-       article_id, version, title, content, tags, is_protected, revised_at, revised_by
+       article_id, version, title, content, tags, is_pinned, is_protected, revised_at, revised_by
      )
-     SELECT id, version, title, content, tags, is_protected, modified_at, modified_by
+     SELECT id, version, title, content, tags, is_pinned, is_protected, modified_at, modified_by
      FROM articles
      WHERE id = $1`,
     [id],
@@ -138,19 +142,20 @@ export class PostgresArticleRepository implements ArticleRepository {
     const conditions = [
       `($1 = '' OR a.search_vector @@ websearch_to_tsquery('simple', $1))`,
       `($2 = '' OR $2 = ANY(a.tags))`,
-      `($3 = 'all' OR ($3 = 'protected' AND a.is_protected) OR ($3 = 'unprotected' AND NOT a.is_protected))`,
+      `($3 = 'all' OR a.is_pinned)`,
+      `($4 = 'all' OR ($4 = 'protected' AND a.is_protected) OR ($4 = 'unprotected' AND NOT a.is_protected))`,
     ];
     const where = conditions.join(' AND ');
     const sortColumns = { createdAt: 'a.created_at', modifiedAt: 'a.modified_at', title: 'lower(a.title)' } as const;
     const direction = query.direction === 'asc' ? 'ASC' : 'DESC';
     const offset = (query.page - 1) * query.pageSize;
-    const params = [query.search, query.tag, query.protection];
+    const params = [query.search, query.tag, query.pinned, query.protection];
 
     const [countResult, dataResult] = await Promise.all([
       pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM articles a WHERE ${where}`, params),
       pool.query<ArticleRow>(
         `SELECT
-           a.id, a.title, left(a.content, 1000) AS content_preview, a.tags, a.is_protected,
+           a.id, a.title, left(a.content, 1000) AS content_preview, a.tags, a.is_pinned, a.is_protected,
            a.created_at, a.created_by, creator.display_name AS created_by_name,
            a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
            a.version
@@ -158,8 +163,8 @@ export class PostgresArticleRepository implements ArticleRepository {
          JOIN app_users creator ON creator.cognito_sub = a.created_by
          JOIN app_users editor ON editor.cognito_sub = a.modified_by
          WHERE ${where}
-         ORDER BY ${sortColumns[query.sort]} ${direction}, a.id ${direction}
-         LIMIT $4 OFFSET $5`,
+         ORDER BY a.is_pinned DESC, ${sortColumns[query.sort]} ${direction}, a.id ${direction}
+         LIMIT $5 OFFSET $6`,
         [...params, query.pageSize, offset],
       ),
     ]);
@@ -172,6 +177,7 @@ export class PostgresArticleRepository implements ArticleRepository {
           title: row.title,
           excerpt: excerpt(row.content_preview ?? ''),
           tags: row.tags,
+          isPinned: row.is_pinned,
           isProtected: row.is_protected,
           createdAt: iso(row.created_at),
           createdBy: row.created_by,
@@ -303,6 +309,31 @@ export class PostgresArticleRepository implements ArticleRepository {
     } finally { client.release(); }
   }
 
+  async setPinned(id: string, isPinned: boolean, version: number, actor: Actor) {
+    const pool = await getPool();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await upsertActor(client, actor);
+      const updated = await client.query<{ id: string }>(
+        `UPDATE articles
+         SET is_pinned = $1,
+             modified_by = $2,
+             modified_at = now(),
+             version = version + 1
+         WHERE id = $3 AND version = $4
+         RETURNING id`,
+        [isPinned, actor.sub, id, version],
+      );
+      if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
+      await client.query('COMMIT');
+      return updated.rows[0] ? this.get(updated.rows[0].id) : null;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
     const pool = await getPool();
     const client = await pool.connect();
@@ -314,6 +345,7 @@ export class PostgresArticleRepository implements ArticleRepository {
          SET title = r.title,
              content = r.content,
              tags = r.tags,
+             is_pinned = r.is_pinned,
              is_protected = r.is_protected,
              modified_by = $4,
              modified_at = now(),

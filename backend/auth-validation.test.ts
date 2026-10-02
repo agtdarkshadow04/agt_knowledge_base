@@ -17,7 +17,8 @@ describe('authentication and validation', () => {
   });
 
   it('bounds pagination and only accepts allowlisted sort fields', () => {
-    expect(parseListQuery({ sort: 'title', direction: 'asc', page: '2' })).toMatchObject({ sort: 'title', direction: 'asc', page: 2 });
+    expect(parseListQuery({ pinned: 'pinned', sort: 'title', direction: 'asc', page: '2' })).toMatchObject({ pinned: 'pinned', sort: 'title', direction: 'asc', page: 2 });
+    expect(() => parseListQuery({ pinned: 'true' })).toThrow();
     expect(() => parseListQuery({ sort: 'created_at; DROP TABLE articles' })).toThrow();
     expect(() => parseListQuery({ pageSize: '5000' })).toThrow();
   });

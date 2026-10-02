@@ -13,6 +13,7 @@ export interface ArticleSummary {
   title: string;
   excerpt: string;
   tags: string[];
+  isPinned: boolean;
   isProtected: boolean;
   createdAt: string;
   createdBy: string;
@@ -32,6 +33,7 @@ export interface ArticleRevision {
   title: string;
   content: string;
   tags: string[];
+  isPinned: boolean;
   isProtected: boolean;
   revisedAt: string;
   revisedBy: string;
@@ -53,6 +55,7 @@ export interface ArticleListResponse {
 export interface ArticleListParams {
   search?: string;
   tag?: string;
+  pinned?: 'all' | 'pinned';
   protection?: 'all' | 'protected' | 'unprotected';
   sort?: ArticleSort;
   direction?: SortDirection;

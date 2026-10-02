@@ -48,6 +48,14 @@ export class ArticleService {
     return updated;
   }
 
+  async setPinned(id: string, isPinned: boolean, version: number, actor: Actor) {
+    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can change pin status.');
+    if (!(await this.repository.get(id))) throw new NotFoundError();
+    const updated = await this.repository.setPinned(id, isPinned, version, actor);
+    if (!updated) throw new ConflictError();
+    return updated;
+  }
+
   async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
     if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can restore article revisions.');
     if (!(await this.repository.get(id))) throw new NotFoundError();
