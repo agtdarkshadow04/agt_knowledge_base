@@ -73,7 +73,6 @@ export function ArticlePage() {
     const articleBody = articleBodyRef.current.cloneNode(true) as HTMLElement;
     articleBody.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
     pdfSource.append(title, articleBody);
-    document.body.append(pdfSource);
 
     try {
       const { default: html2pdf } = await import('html2pdf.js');
@@ -90,7 +89,6 @@ export function ArticlePage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'PDF could not be created.');
     } finally {
-      pdfSource.remove();
       setPdfBusy(false);
     }
   }

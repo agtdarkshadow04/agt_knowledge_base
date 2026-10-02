@@ -135,6 +135,8 @@ describe('ArticlePage', () => {
   });
 
   it('renders and saves the sanitized article as a client-side PDF', async () => {
+    let finishPdf!: () => void;
+    mocks.pdfWorker.save.mockReturnValue(new Promise<void>((resolve) => { finishPdf = resolve; }));
     const router = createMemoryRouter(
       [{ path: '/articles/:id', element: <ArticlePage /> }],
       { initialEntries: [`/articles/${article.id}`] },
@@ -150,6 +152,8 @@ describe('ArticlePage', () => {
     expect(pdfSource).toHaveTextContent('Portal Guide');
     expect(pdfSource).toHaveTextContent('Safe portal navigation instructions.');
     expect(document.body).not.toContainElement(pdfSource);
+    finishPdf();
+    await screen.findByRole('button', { name: 'Download PDF' });
   });
 
   it('allows an Administrator to pin an article', async () => {

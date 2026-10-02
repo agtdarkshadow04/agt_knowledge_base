@@ -188,7 +188,7 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .toc a { color: #aaa39a; text-decoration: none; }
 .toc a:hover { color: var(--gold); }
 .article-body { min-width: 0; padding: clamp(1.2rem, 4vw, 3rem); border: 1px solid rgba(255, 180, 81, 0.1); border-radius: 0.85rem; color: #ded8d1; background: rgba(18, 18, 18, 0.7); }
-.pdf-export { position: fixed; top: 0; left: -10000px; width: 760px; padding: 48px; color: #1a1a1a; background: #fff; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+.pdf-export { width: 100%; padding: 48px; color: #1a1a1a; background: #fff; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
 .pdf-export-title { margin-bottom: 2rem; color: #1a1a1a; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 2.5rem; font-weight: 700; }
 .pdf-export .article-body { padding: 0; border: 0; color: #1a1a1a; background: #fff; }
 .pdf-export .markdown-content { color: #1a1a1a; }
