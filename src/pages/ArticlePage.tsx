@@ -1,4 +1,4 @@
-import { Clock3, Edit3, LockKeyhole, ShieldCheck, Tag, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
+import { Clock3, Edit3, History, LockKeyhole, ShieldCheck, Tag, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -78,8 +78,9 @@ export function ArticlePage() {
           <div><dt><UserRound aria-hidden="true" />Last edited by</dt><dd>{article.modifiedByName}</dd></div>
           <div><dt><Clock3 aria-hidden="true" />Last modified</dt><dd>{formatTimestamp(article.modifiedAt)}</dd></div>
         </dl>
-        {(canEdit || isAdmin) && (
+        {user && (
           <div className="article-actions">
+            <Link className="button button-secondary" to={`/articles/${article.id}/history`}><History aria-hidden="true" />Revision history</Link>
             {canEdit && <Link className="button button-primary" to={`/articles/${article.id}/edit`}><Edit3 aria-hidden="true" />Edit article</Link>}
             {isAdmin && (
               <button className="button button-secondary" disabled={actionBusy} onClick={() => void toggleProtection()}>

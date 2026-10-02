@@ -24,4 +24,34 @@ describe('article request validation', () => {
       message: 'The request is invalid: Executable MDX and raw HTML are not allowed.',
     });
   });
+
+  it('requires authentication to view revision history', async () => {
+    const event = {
+      routeKey: 'GET /articles/{id}/revisions',
+      pathParameters: { id: '00000000-0000-4000-8000-000000000001' },
+      requestContext: { requestId: 'request-2', authorizer: { jwt: { claims: {} } } },
+    } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
+
+    const response = await handler(event);
+
+    if (typeof response === 'string') throw new Error('Expected a structured API response.');
+    expect(response).toMatchObject({ statusCode: 401 });
+  });
+
+  it('rejects revision restoration by Standard users before accessing persistence', async () => {
+    const event = {
+      routeKey: 'POST /articles/{id}/revisions/{version}/restore',
+      pathParameters: { id: '00000000-0000-4000-8000-000000000001', version: '1' },
+      body: JSON.stringify({ currentVersion: 2 }),
+      requestContext: {
+        requestId: 'request-3',
+        authorizer: { jwt: { claims: { sub: 'standard-sub', 'cognito:groups': ['Standard'] } } },
+      },
+    } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
+
+    const response = await handler(event);
+
+    if (typeof response === 'string') throw new Error('Expected a structured API response.');
+    expect(response).toMatchObject({ statusCode: 403 });
+  });
 });

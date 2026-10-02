@@ -26,6 +26,18 @@ export interface ArticleSummaryRecord extends Omit<ArticleRecord, 'content'> {
   excerpt: string;
 }
 
+export interface ArticleRevisionRecord {
+  articleId: string;
+  title: string;
+  content: string;
+  tags: string[];
+  isProtected: boolean;
+  revisedAt: string;
+  revisedBy: string;
+  revisedByName: string;
+  version: number;
+}
+
 export interface ListArticlesQuery {
   search: string;
   tag: string;

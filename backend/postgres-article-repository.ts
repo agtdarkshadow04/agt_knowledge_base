@@ -1,5 +1,12 @@
 import type pg from 'pg';
-import type { Actor, ArticleListResult, ArticleRecord, ArticleWrite, ListArticlesQuery } from './domain.js';
+import type {
+  Actor,
+  ArticleListResult,
+  ArticleRecord,
+  ArticleRevisionRecord,
+  ArticleWrite,
+  ListArticlesQuery,
+} from './domain.js';
 import { getPool } from './db.js';
 import type { ArticleRepository } from './repository.js';
 
@@ -19,11 +26,29 @@ interface ArticleRow {
   version: number;
 }
 
+interface ArticleRevisionRow {
+  article_id: string;
+  title: string;
+  content: string;
+  tags: string[];
+  is_protected: boolean;
+  revised_at: Date | string;
+  revised_by: string;
+  revised_by_name: string;
+  version: number;
+}
+
 const baseSelect = `
   a.id, a.title, a.content, a.tags, a.is_protected,
   a.created_at, a.created_by, creator.display_name AS created_by_name,
   a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
   a.version
+`;
+
+const revisionSelect = `
+  r.article_id, r.title, r.content, r.tags, r.is_protected,
+  r.revised_at, r.revised_by, editor.display_name AS revised_by_name,
+  r.version
 `;
 
 function iso(value: Date | string) {
@@ -47,6 +72,20 @@ function toArticle(row: ArticleRow): ArticleRecord {
   };
 }
 
+function toRevision(row: ArticleRevisionRow): ArticleRevisionRecord {
+  return {
+    articleId: row.article_id,
+    title: row.title,
+    content: row.content,
+    tags: row.tags,
+    isProtected: row.is_protected,
+    revisedAt: iso(row.revised_at),
+    revisedBy: row.revised_by,
+    revisedByName: row.revised_by_name,
+    version: row.version,
+  };
+}
+
 function excerpt(markdown: string) {
   return markdown
     .replace(/```[\s\S]*?```/g, ' ')
@@ -66,6 +105,30 @@ async function upsertActor(client: pg.PoolClient, actor: Actor) {
            email = EXCLUDED.email,
            last_seen_at = now()`,
     [actor.sub, actor.displayName, actor.email ?? null],
+  );
+}
+
+async function recordRevision(client: pg.PoolClient, id: string) {
+  await client.query(
+    `INSERT INTO article_revisions (
+       article_id, version, title, content, tags, is_protected, revised_at, revised_by
+     )
+     SELECT id, version, title, content, tags, is_protected, modified_at, modified_by
+     FROM articles
+     WHERE id = $1`,
+    [id],
+  );
+  await client.query(
+    `DELETE FROM article_revisions
+     WHERE article_id = $1
+       AND version NOT IN (
+         SELECT version
+         FROM article_revisions
+         WHERE article_id = $1
+         ORDER BY version DESC
+         LIMIT 5
+       )`,
+    [id],
   );
 }
 
@@ -139,6 +202,32 @@ export class PostgresArticleRepository implements ArticleRepository {
     return result.rows[0] ? toArticle(result.rows[0]) : null;
   }
 
+  async listRevisions(id: string) {
+    const pool = await getPool();
+    const result = await pool.query<ArticleRevisionRow>(
+      `SELECT ${revisionSelect}
+       FROM article_revisions r
+       JOIN app_users editor ON editor.cognito_sub = r.revised_by
+       WHERE r.article_id = $1
+       ORDER BY r.version DESC
+       LIMIT 5`,
+      [id],
+    );
+    return result.rows.map(toRevision);
+  }
+
+  async getRevision(id: string, version: number) {
+    const pool = await getPool();
+    const result = await pool.query<ArticleRevisionRow>(
+      `SELECT ${revisionSelect}
+       FROM article_revisions r
+       JOIN app_users editor ON editor.cognito_sub = r.revised_by
+       WHERE r.article_id = $1 AND r.version = $2`,
+      [id, version],
+    );
+    return result.rows[0] ? toRevision(result.rows[0]) : null;
+  }
+
   async create(input: ArticleWrite, actor: Actor) {
     const pool = await getPool();
     const client = await pool.connect();
@@ -151,6 +240,7 @@ export class PostgresArticleRepository implements ArticleRepository {
          RETURNING id`,
         [input.title, input.content, input.tags, actor.sub],
       );
+      await recordRevision(client, inserted.rows[0].id);
       await client.query('COMMIT');
       return (await this.get(inserted.rows[0].id))!;
     } catch (error) {
@@ -179,6 +269,7 @@ export class PostgresArticleRepository implements ArticleRepository {
          RETURNING id`,
         [input.title, input.content, input.tags, actor.sub, id, input.version, actor.role === 'Admin'],
       );
+      if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
       return updated.rows[0] ? this.get(updated.rows[0].id) : null;
     } catch (error) {
@@ -203,6 +294,39 @@ export class PostgresArticleRepository implements ArticleRepository {
          RETURNING id`,
         [isProtected, actor.sub, id, version],
       );
+      if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
+      await client.query('COMMIT');
+      return updated.rows[0] ? this.get(updated.rows[0].id) : null;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
+    const pool = await getPool();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await upsertActor(client, actor);
+      const updated = await client.query<{ id: string }>(
+        `UPDATE articles AS a
+         SET title = r.title,
+             content = r.content,
+             tags = r.tags,
+             is_protected = r.is_protected,
+             modified_by = $4,
+             modified_at = now(),
+             version = a.version + 1
+         FROM article_revisions r
+         WHERE a.id = $1
+           AND a.version = $3
+           AND r.article_id = a.id
+           AND r.version = $2
+         RETURNING a.id`,
+        [id, revisionVersion, currentVersion, actor.sub],
+      );
+      if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
       return updated.rows[0] ? this.get(updated.rows[0].id) : null;
     } catch (error) {

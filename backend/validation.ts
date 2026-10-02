@@ -28,12 +28,20 @@ const protectionSchema = z.object({
   version: z.number().int().positive(),
 }).strict();
 
+const restoreSchema = z.object({
+  currentVersion: z.number().int().positive(),
+}).strict();
+
 export function parseArticleWrite(value: unknown): ArticleWrite {
   return articleSchema.parse(value);
 }
 
 export function parseProtectionWrite(value: unknown) {
   return protectionSchema.parse(value);
+}
+
+export function parseRestoreWrite(value: unknown) {
+  return restoreSchema.parse(value);
 }
 
 function first(value: string | string[] | undefined) {

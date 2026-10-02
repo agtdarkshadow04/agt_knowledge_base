@@ -1,7 +1,15 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { ArticleService } from './article-service.js';
-import { ConflictError, ForbiddenError, type Actor, type ArticleRecord, type ArticleWrite, type ListArticlesQuery } from './domain.js';
+import {
+  ConflictError,
+  ForbiddenError,
+  type Actor,
+  type ArticleRecord,
+  type ArticleRevisionRecord,
+  type ArticleWrite,
+  type ListArticlesQuery,
+} from './domain.js';
 import type { ArticleRepository } from './repository.js';
 
 const admin: Actor = { sub: 'admin-sub', displayName: 'Atlas', role: 'Admin' };
@@ -9,9 +17,28 @@ const standard: Actor = { sub: 'standard-sub', displayName: 'Apollo', role: 'Sta
 
 class MemoryRepository implements ArticleRepository {
   records = new Map<string, ArticleRecord>();
+  revisions = new Map<string, ArticleRevisionRecord[]>();
   clock = 0;
 
   private time() { return new Date(Date.UTC(2026, 0, 1, 0, 0, this.clock++)).toISOString(); }
+
+  private recordRevision(record: ArticleRecord) {
+    const revision: ArticleRevisionRecord = {
+      articleId: record.id,
+      title: record.title,
+      content: record.content,
+      tags: record.tags,
+      isProtected: record.isProtected,
+      revisedAt: record.modifiedAt,
+      revisedBy: record.modifiedBy,
+      revisedByName: record.modifiedByName,
+      version: record.version,
+    };
+    const history = [revision, ...(this.revisions.get(record.id) ?? [])]
+      .sort((left, right) => right.version - left.version)
+      .slice(0, 5);
+    this.revisions.set(record.id, history);
+  }
 
   async list(query: ListArticlesQuery) {
     let items = [...this.records.values()];
@@ -34,6 +61,10 @@ class MemoryRepository implements ArticleRepository {
   }
 
   async get(id: string) { return this.records.get(id) ?? null; }
+  async listRevisions(id: string) { return this.revisions.get(id) ?? []; }
+  async getRevision(id: string, version: number) {
+    return this.revisions.get(id)?.find((revision) => revision.version === version) ?? null;
+  }
 
   async create(input: ArticleWrite, actor: Actor) {
     const id = `00000000-0000-4000-8000-${String(this.records.size + 1).padStart(12, '0')}`;
@@ -44,6 +75,7 @@ class MemoryRepository implements ArticleRepository {
       modifiedAt: now, modifiedBy: actor.sub, modifiedByName: actor.displayName, version: 1,
     };
     this.records.set(id, record);
+    this.recordRevision(record);
     return record;
   }
 
@@ -52,6 +84,7 @@ class MemoryRepository implements ArticleRepository {
     if (!current || current.version !== input.version || (current.isProtected && actor.role !== 'Admin')) return null;
     const updated = { ...current, ...input, modifiedAt: this.time(), modifiedBy: actor.sub, modifiedByName: actor.displayName, version: current.version + 1 };
     this.records.set(id, updated);
+    this.recordRevision(updated);
     return updated;
   }
 
@@ -60,7 +93,28 @@ class MemoryRepository implements ArticleRepository {
     if (!current || current.version !== version) return null;
     const updated = { ...current, isProtected, modifiedAt: this.time(), modifiedBy: actor.sub, modifiedByName: actor.displayName, version: version + 1 };
     this.records.set(id, updated);
+    this.recordRevision(updated);
     return updated;
+  }
+
+  async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
+    const current = this.records.get(id);
+    const revision = await this.getRevision(id, revisionVersion);
+    if (!current || !revision || current.version !== currentVersion) return null;
+    const restored: ArticleRecord = {
+      ...current,
+      title: revision.title,
+      content: revision.content,
+      tags: revision.tags,
+      isProtected: revision.isProtected,
+      modifiedAt: this.time(),
+      modifiedBy: actor.sub,
+      modifiedByName: actor.displayName,
+      version: current.version + 1,
+    };
+    this.records.set(id, restored);
+    this.recordRevision(restored);
+    return restored;
   }
 
   async delete(id: string, version: number) {
@@ -115,5 +169,27 @@ describe('ArticleService authorization and persistence', () => {
     expect(result.total).toBe(2);
     expect(result.totalPages).toBe(2);
     expect(result.items[0].title).toBe('Alpha Portal');
+  });
+
+  it('retains five dated revisions for Standard users and restricts restoration to Admins', async () => {
+    const repository = new MemoryRepository();
+    const service = new ArticleService(repository);
+    let article = await service.create(articleInput('Portal Guide v1'), standard);
+    for (let version = 2; version <= 7; version += 1) {
+      article = await service.update(article.id, { ...articleInput(`Portal Guide v${version}`), version: article.version }, standard);
+    }
+
+    const history = await service.listRevisions(article.id);
+    expect(history.map((revision) => revision.version)).toEqual([7, 6, 5, 4, 3]);
+    expect(history.every((revision) => revision.revisedAt.endsWith('Z'))).toBe(true);
+    await expect(service.restore(article.id, 4, article.version, standard)).rejects.toBeInstanceOf(ForbiddenError);
+
+    const restored = await service.restore(article.id, 4, article.version, admin);
+    expect(restored).toMatchObject({ title: 'Portal Guide v4', version: 8, modifiedBy: admin.sub });
+    await expect(service.restore(article.id, 2, restored.version, admin)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(service.restore(article.id, 4, 7, admin)).rejects.toBeInstanceOf(ConflictError);
+    await expect(service.listRevisions(article.id)).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ version: 8, title: 'Portal Guide v4' })]),
+    );
   });
 });

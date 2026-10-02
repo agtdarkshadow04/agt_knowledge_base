@@ -14,6 +14,10 @@ const verifier = userPoolId && clientId
 function routeKey(method: string, pathname: string) {
   if (method === 'GET' && pathname === '/articles') return 'GET /articles';
   if (method === 'POST' && pathname === '/articles') return 'POST /articles';
+  if (/^\/articles\/[^/]+\/revisions\/[^/]+\/restore$/.test(pathname) && method === 'POST') {
+    return 'POST /articles/{id}/revisions/{version}/restore';
+  }
+  if (/^\/articles\/[^/]+\/revisions$/.test(pathname) && method === 'GET') return 'GET /articles/{id}/revisions';
   if (/^\/articles\/[^/]+\/protection$/.test(pathname) && method === 'PATCH') return 'PATCH /articles/{id}/protection';
   if (/^\/articles\/[^/]+$/.test(pathname)) return `${method} /articles/{id}`;
   return `${method} ${pathname}`;
@@ -27,10 +31,12 @@ createServer(async (request, response) => {
 
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   const method = request.method ?? 'GET';
-  const writeRequest = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  const matchedRoute = routeKey(method, url.pathname);
+  const authenticatedRequest = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+    || matchedRoute === 'GET /articles/{id}/revisions';
   let claims: Record<string, unknown> = {};
 
-  if (writeRequest) {
+  if (authenticatedRequest) {
     const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
     if (!token || !verifier) { response.writeHead(401).end(JSON.stringify({ message: 'Authentication is not configured.' })); return; }
     try { claims = await verifier.verify(token); }
@@ -43,12 +49,12 @@ createServer(async (request, response) => {
   const queryStringParameters = Object.fromEntries(url.searchParams.entries());
   const event = {
     version: '2.0',
-    routeKey: routeKey(method, url.pathname),
+    routeKey: matchedRoute,
     rawPath: url.pathname,
     rawQueryString: url.searchParams.toString(),
     headers: Object.fromEntries(Object.entries(request.headers).map(([key, value]) => [key, String(value)])),
     queryStringParameters,
-    pathParameters: pathParts[1] ? { id: pathParts[1] } : undefined,
+    pathParameters: pathParts[1] ? { id: pathParts[1], version: pathParts[3] } : undefined,
     requestContext: {
       requestId: crypto.randomUUID(),
       authorizer: { jwt: { claims, scopes: [] } },

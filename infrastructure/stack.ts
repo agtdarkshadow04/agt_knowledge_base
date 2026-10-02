@@ -186,9 +186,11 @@ export class AgtKnowledgeBaseStack extends Stack {
 
     api.addRoutes({ path: '/articles', methods: [apigwv2.HttpMethod.GET], integration });
     api.addRoutes({ path: '/articles/{id}', methods: [apigwv2.HttpMethod.GET], integration });
+    api.addRoutes({ path: '/articles/{id}/revisions', methods: [apigwv2.HttpMethod.GET], integration, authorizer });
     api.addRoutes({ path: '/articles', methods: [apigwv2.HttpMethod.POST], integration, authorizer });
     api.addRoutes({ path: '/articles/{id}', methods: [apigwv2.HttpMethod.PUT, apigwv2.HttpMethod.DELETE], integration, authorizer });
     api.addRoutes({ path: '/articles/{id}/protection', methods: [apigwv2.HttpMethod.PATCH], integration, authorizer });
+    api.addRoutes({ path: '/articles/{id}/revisions/{version}/restore', methods: [apigwv2.HttpMethod.POST], integration, authorizer });
 
     const defaultStage = api.defaultStage?.node.defaultChild as apigwv2.CfnStage | undefined;
     if (defaultStage) defaultStage.defaultRouteSettings = { throttlingBurstLimit: 100, throttlingRateLimit: 50 };

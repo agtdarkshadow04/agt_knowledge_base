@@ -1,5 +1,5 @@
 import { appConfig } from '../config';
-import type { Article, ArticleInput, ArticleListParams, ArticleListResponse } from '../types';
+import type { Article, ArticleInput, ArticleListParams, ArticleListResponse, ArticleRevision } from '../types';
 
 export class ApiError extends Error {
   constructor(
@@ -44,6 +44,10 @@ export function getArticle(id: string, signal?: AbortSignal) {
   return request<Article>(`/articles/${encodeURIComponent(id)}`, { signal });
 }
 
+export function listArticleRevisions(id: string, token: string, signal?: AbortSignal) {
+  return request<ArticleRevision[]>(`/articles/${encodeURIComponent(id)}/revisions`, { signal }, token);
+}
+
 export function createArticle(input: ArticleInput, token: string) {
   return request<Article>('/articles', { method: 'POST', body: JSON.stringify(input) }, token);
 }
@@ -68,6 +72,14 @@ export function setArticleProtection(id: string, isProtected: boolean, version: 
   return request<Article>(
     `/articles/${encodeURIComponent(id)}/protection`,
     { method: 'PATCH', body: JSON.stringify({ isProtected, version }) },
+    token,
+  );
+}
+
+export function restoreArticleRevision(id: string, revisionVersion: number, currentVersion: number, token: string) {
+  return request<Article>(
+    `/articles/${encodeURIComponent(id)}/revisions/${revisionVersion}/restore`,
+    { method: 'POST', body: JSON.stringify({ currentVersion }) },
     token,
   );
 }

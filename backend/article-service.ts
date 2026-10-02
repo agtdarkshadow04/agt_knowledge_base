@@ -19,6 +19,11 @@ export class ArticleService {
     return article;
   }
 
+  async listRevisions(id: string) {
+    if (!(await this.repository.get(id))) throw new NotFoundError();
+    return this.repository.listRevisions(id);
+  }
+
   create(input: ArticleWrite, actor: Actor) {
     return this.repository.create(input, actor);
   }
@@ -41,6 +46,17 @@ export class ArticleService {
     const updated = await this.repository.setProtection(id, isProtected, version, actor);
     if (!updated) throw new ConflictError();
     return updated;
+  }
+
+  async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
+    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can restore article revisions.');
+    if (!(await this.repository.get(id))) throw new NotFoundError();
+    if (!(await this.repository.getRevision(id, revisionVersion))) {
+      throw new NotFoundError('Article revision not found.');
+    }
+    const restored = await this.repository.restore(id, revisionVersion, currentVersion, actor);
+    if (!restored) throw new ConflictError();
+    return restored;
   }
 
   async delete(id: string, version: number, actor: Actor) {

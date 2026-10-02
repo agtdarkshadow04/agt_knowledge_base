@@ -1,6 +1,6 @@
 # AGT Knowledge Base
 
-A production-oriented knowledge base for the Alliance of Galactic Travellers community. The public React/Vite application supports server-paginated browsing, search, tags, deterministic sorting, safe Markdown rendering, article URLs, linked tables of contents, and responsive AGT styling. Cognito-backed authors can create and edit articles; Administrators additionally control protection and deletion.
+A production-oriented knowledge base for the Alliance of Galactic Travellers community. The public React/Vite application supports server-paginated browsing, search, tags, deterministic sorting, safe Markdown rendering, article URLs, linked tables of contents, and responsive AGT styling. Cognito-backed authors can create and edit articles and compare the five most recent revisions; Administrators additionally control protection, restoration, and deletion.
 
 ## Architecture
 
@@ -25,13 +25,13 @@ The browser never connects to PostgreSQL and contains no database credential. AP
 
 ## Roles and editing rules
 
-| User | Read | Create | Edit unprotected | Edit protected | Protect | Delete |
-| --- | --- | --- | --- | --- | --- | --- |
-| Public | Yes | No | No | No | No | No |
-| Standard | Yes | Yes | Yes | No | No | No |
-| Admin | Yes | Yes | Yes | Yes | Yes | Yes |
+| User | Read | View/compare history | Create | Edit unprotected | Edit protected | Protect | Restore | Delete |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Public | Yes | No | No | No | No | No | No | No |
+| Standard | Yes | Yes | Yes | Yes | No | No | No | No |
+| Admin | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
 
-Updates and deletes carry the article version. PostgreSQL applies the mutation only when that version still matches, returning HTTP `409` instead of silently overwriting a concurrent edit.
+Updates, restores, and deletes carry the article version. PostgreSQL applies the mutation only when that version still matches, returning HTTP `409` instead of silently overwriting a concurrent edit. Restoration creates a new latest revision rather than rewriting history.
 
 ## Prerequisites
 

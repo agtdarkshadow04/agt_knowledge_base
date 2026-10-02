@@ -4,7 +4,7 @@ import { ArticleService } from './article-service.js';
 import { requireActor } from './auth.js';
 import { AppError } from './domain.js';
 import { PostgresArticleRepository } from './postgres-article-repository.js';
-import { parseArticleWrite, parseListQuery, parseProtectionWrite } from './validation.js';
+import { parseArticleWrite, parseListQuery, parseProtectionWrite, parseRestoreWrite } from './validation.js';
 
 const service = new ArticleService(new PostgresArticleRepository());
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -37,6 +37,14 @@ function articleId(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
   return id;
 }
 
+function revisionVersion(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
+  const version = Number(event.pathParameters?.version);
+  if (!Number.isSafeInteger(version) || version < 1) {
+    throw new AppError('A valid revision version is required.', 400, 'INVALID_VERSION');
+  }
+  return version;
+}
+
 export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<APIGatewayProxyResultV2> {
   try {
     switch (event.routeKey) {
@@ -44,6 +52,9 @@ export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): P
         return json(200, await service.list(parseListQuery(event.queryStringParameters ?? {})));
       case 'GET /articles/{id}':
         return json(200, await service.get(articleId(event)));
+      case 'GET /articles/{id}/revisions':
+        requireActor(event);
+        return json(200, await service.listRevisions(articleId(event)));
       case 'POST /articles':
         return json(201, await service.create(parseArticleWrite(parseBody(event)), requireActor(event)));
       case 'PUT /articles/{id}':
@@ -51,6 +62,15 @@ export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): P
       case 'PATCH /articles/{id}/protection': {
         const input = parseProtectionWrite(parseBody(event));
         return json(200, await service.setProtection(articleId(event), input.isProtected, input.version, requireActor(event)));
+      }
+      case 'POST /articles/{id}/revisions/{version}/restore': {
+        const input = parseRestoreWrite(parseBody(event));
+        return json(200, await service.restore(
+          articleId(event),
+          revisionVersion(event),
+          input.currentVersion,
+          requireActor(event),
+        ));
       }
       case 'DELETE /articles/{id}': {
         const version = Number(event.queryStringParameters?.version);

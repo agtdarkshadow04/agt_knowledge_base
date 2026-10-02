@@ -27,6 +27,18 @@ export interface Article extends ArticleSummary {
   content: string;
 }
 
+export interface ArticleRevision {
+  articleId: string;
+  title: string;
+  content: string;
+  tags: string[];
+  isProtected: boolean;
+  revisedAt: string;
+  revisedBy: string;
+  revisedByName: string;
+  version: number;
+}
+
 export type ArticleSort = 'createdAt' | 'modifiedAt' | 'title';
 export type SortDirection = 'asc' | 'desc';
 
