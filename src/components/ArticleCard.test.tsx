@@ -32,4 +32,14 @@ describe('ArticleCard', () => {
     expect(screen.getByText('Pinned')).toHaveClass('pinned');
     expect(screen.getByText('Protected')).toHaveClass('protected');
   });
+
+  it('positions status indicators between the title and excerpt', () => {
+    const { container } = render(<MemoryRouter><ArticleCard article={article} /></MemoryRouter>);
+    const heading = container.querySelector('.article-card-heading');
+    const status = container.querySelector('.article-card-status');
+    const excerpt = container.querySelector('.excerpt');
+
+    expect(heading?.nextElementSibling).toBe(status);
+    expect(status?.nextElementSibling).toBe(excerpt);
+  });
 });

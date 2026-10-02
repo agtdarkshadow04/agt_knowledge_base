@@ -135,7 +135,7 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .article-card { display: flex; min-height: 18rem; flex-direction: column; padding: 1.4rem; border: 1px solid rgba(255, 5, 0, 0.18); border-radius: 0.8rem; background: linear-gradient(145deg, #151515, #0f0f0f); transition: 160ms ease; }
 .article-card:hover { border-color: rgba(255, 5, 0, 0.55); transform: translateY(-2px); box-shadow: 0 1.4rem 3rem rgba(0, 0, 0, 0.35), inset 3px 0 var(--red); }
 .article-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-.article-card-status { display: flex; align-items: flex-end; flex-direction: column; gap: 0.4rem; }
+.article-card-status { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
 .article-card h2 { margin-bottom: 0; font-size: 1.2rem; line-height: 1.35; }
 .article-card h2 a { text-decoration: none; }
 .article-card h2 a:hover { color: #fff; }
