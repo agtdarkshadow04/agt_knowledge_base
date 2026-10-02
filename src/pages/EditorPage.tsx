@@ -48,6 +48,7 @@ export function EditorPage() {
   const [preview, setPreview] = useState(false);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+  const [saveConfirmationOpen, setSaveConfirmationOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState('');
@@ -94,6 +95,13 @@ export function EditorPage() {
   );
 
   const tags = useMemo(() => draft.tags.split(',').map((tag) => tag.trim()).filter(Boolean), [draft.tags]);
+  const currentRevision = useMemo(() => JSON.parse(baseline) as Draft, [baseline]);
+  const proposedRevision = useMemo(() => ({
+    title: draft.title.trim(),
+    tags: tags.join(', '),
+    content: draft.content,
+    visibility: draft.visibility,
+  }), [draft.content, draft.title, draft.visibility, tags]);
 
   function validate() {
     const next: Record<string, string> = {};
@@ -106,9 +114,14 @@ export function EditorPage() {
     return Object.keys(next).length === 0;
   }
 
-  async function handleSave(event: FormEvent) {
+  function handleSave(event: FormEvent) {
     event.preventDefault();
     if (!validate()) return;
+    setSaveError('');
+    setSaveConfirmationOpen(true);
+  }
+
+  async function confirmSave() {
     setSaving(true);
     setSaveError('');
     try {
@@ -126,6 +139,7 @@ export function EditorPage() {
       } else {
         setSaveError(cause instanceof Error ? cause.message : 'Article could not be saved.');
       }
+      setSaveConfirmationOpen(false);
     } finally { setSaving(false); }
   }
 
@@ -168,6 +182,8 @@ export function EditorPage() {
           </div>
           <div className="editor-toolbar-actions">
             <a className="icon-button" href="https://www.markdownguide.org/basic-syntax/" target="_blank" rel="noreferrer" title="Markdown Guide"><MarkdownGuideIcon /><span className="sr-only">Markdown Guide</span></a>
+            <button className="icon-button" type="button" onClick={cancel} title="Exit without saving"><X aria-hidden="true" /><span className="sr-only">Exit without saving</span></button>
+            <button className="icon-button" type="submit" disabled={saving} title="Save article"><Save aria-hidden="true" /><span className="sr-only">Save article</span></button>
             <button className="icon-button" type="button" aria-pressed={preview} onClick={() => setPreview((value) => !value)} title={preview ? 'Hide preview' : 'Show preview'}>
               {preview ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
               <span className="sr-only">{preview ? 'Hide preview' : 'Show preview'}</span>
@@ -191,11 +207,30 @@ export function EditorPage() {
           {preview && <section className="preview-panel" aria-labelledby="preview-label"><h2 id="preview-label">Preview</h2><MarkdownContent content={draft.content || '*Preview will appear here.*'} /></section>}
         </div>
 
-        <div className="editor-actions">
-          <button className="button button-primary" type="submit" disabled={saving}><Save aria-hidden="true" />{saving ? 'Saving…' : 'Save article'}</button>
-          <button className="button button-secondary" type="button" onClick={cancel}><X aria-hidden="true" />Cancel</button>
-        </div>
       </form>
+
+      {saveConfirmationOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="confirm-dialog save-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="save-confirm-title" aria-describedby="save-confirm-description">
+            <h2 id="save-confirm-title">Review changes before saving</h2>
+            <p id="save-confirm-description">Compare the current revision with your proposed revision, then confirm to save.</p>
+            <div className="save-diff-headings" aria-hidden="true"><span>Field</span><span>Current revision</span><span>New revision</span></div>
+            <dl className="revision-comparison-metadata save-diff-metadata">
+              <div className={currentRevision.title === proposedRevision.title ? '' : 'changed'}><dt>Title</dt><dd>{currentRevision.title || 'Not set'}</dd><dd>{proposedRevision.title || 'Not set'}</dd></div>
+              <div className={currentRevision.tags === proposedRevision.tags ? '' : 'changed'}><dt>Tags</dt><dd>{currentRevision.tags || 'None'}</dd><dd>{proposedRevision.tags || 'None'}</dd></div>
+              <div className={currentRevision.visibility === proposedRevision.visibility ? '' : 'changed'}><dt>Visibility</dt><dd>{currentRevision.visibility}</dd><dd>{proposedRevision.visibility}</dd></div>
+            </dl>
+            <div className={`revision-content-grid save-diff-content ${currentRevision.content === proposedRevision.content ? '' : 'changed'}`}>
+              <section aria-labelledby="current-content-title"><h3 id="current-content-title">Current revision content</h3><pre>{currentRevision.content || 'No content'}</pre></section>
+              <section aria-labelledby="new-content-title"><h3 id="new-content-title">New revision content</h3><pre>{proposedRevision.content || 'No content'}</pre></section>
+            </div>
+            <div className="dialog-actions">
+              <button className="button button-primary" type="button" disabled={saving} onClick={() => void confirmSave()}><Save aria-hidden="true" />{saving ? 'Saving…' : 'Confirm save'}</button>
+              <button className="button button-secondary" type="button" disabled={saving} autoFocus onClick={() => setSaveConfirmationOpen(false)}>Keep editing</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {blocker.state === 'blocked' && (
         <div className="modal-backdrop" role="presentation">
