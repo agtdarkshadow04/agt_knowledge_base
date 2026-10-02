@@ -20,6 +20,7 @@ const articleSchema = z.object({
     message: 'Executable MDX and raw HTML are not allowed.',
   }),
   tags: z.array(z.string().max(40)).max(12).transform(normalizeTags),
+  visibility: z.enum(['Public', 'Internal', 'Admin']).optional(),
   version: z.number().int().positive().optional(),
 }).strict();
 
@@ -61,6 +62,7 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
   return z.object({
     search: z.string().trim().max(200).default(''),
     tag: z.string().trim().toLowerCase().max(40).default(''),
+    visibility: z.enum(['all', 'public', 'internal', 'admin']).default('all'),
     pinned: z.enum(['all', 'pinned']).default('all'),
     protection: z.enum(['all', 'protected', 'unprotected']).default('all'),
     sort: z.enum(['createdAt', 'modifiedAt', 'title']).default('modifiedAt'),
@@ -70,6 +72,7 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
   }).parse({
     search: first(query.search),
     tag: first(query.tag),
+    visibility: first(query.visibility),
     pinned: first(query.pinned),
     protection: first(query.protection),
     sort: first(query.sort),

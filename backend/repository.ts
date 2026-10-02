@@ -5,11 +5,12 @@ import type {
   ArticleRevisionRecord,
   ArticleWrite,
   ListArticlesQuery,
+  Role,
 } from './domain.js';
 
 export interface ArticleRepository {
-  list(query: ListArticlesQuery): Promise<ArticleListResult>;
-  get(id: string): Promise<ArticleRecord | null>;
+  list(query: ListArticlesQuery, viewerRole: Role | null): Promise<ArticleListResult>;
+  get(id: string, viewerRole: Role | null): Promise<ArticleRecord | null>;
   listRevisions(id: string): Promise<ArticleRevisionRecord[]>;
   getRevision(id: string, version: number): Promise<ArticleRevisionRecord | null>;
   create(input: ArticleWrite, actor: Actor): Promise<ArticleRecord>;

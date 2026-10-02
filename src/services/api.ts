@@ -32,16 +32,18 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   return payload as T;
 }
 
-export function listArticles(params: ArticleListParams, signal?: AbortSignal) {
+export function listArticles(params: ArticleListParams, signal?: AbortSignal, token?: string) {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== '' && value !== 'all') query.set(key, String(value));
   });
-  return request<ArticleListResponse>(`/articles?${query.toString()}`, { signal });
+  const prefix = token ? '/member' : '';
+  return request<ArticleListResponse>(`${prefix}/articles?${query.toString()}`, { signal }, token);
 }
 
-export function getArticle(id: string, signal?: AbortSignal) {
-  return request<Article>(`/articles/${encodeURIComponent(id)}`, { signal });
+export function getArticle(id: string, signal?: AbortSignal, token?: string) {
+  const prefix = token ? '/member' : '';
+  return request<Article>(`${prefix}/articles/${encodeURIComponent(id)}`, { signal }, token);
 }
 
 export function listArticleRevisions(id: string, token: string, signal?: AbortSignal) {

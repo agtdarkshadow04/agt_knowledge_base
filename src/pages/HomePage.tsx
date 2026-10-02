@@ -8,7 +8,8 @@ import { listArticles } from '../services/api';
 import type { ArticleListResponse, ArticleSort, SortDirection } from '../types';
 
 export function HomePage() {
-  const { user } = useAuth();
+  const { user, getToken } = useAuth();
+  const viewerSub = user?.sub;
   const [searchParams, setSearchParams] = useSearchParams();
   const [result, setResult] = useState<ArticleListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -21,6 +22,7 @@ export function HomePage() {
     return {
       search: current.get('search') ?? '',
       tag: current.get('tag') ?? '',
+      visibility: (current.get('visibility') ?? 'all') as 'all' | 'public' | 'internal' | 'admin',
       pinned: (current.get('pinned') ?? 'all') as 'all' | 'pinned',
       protection: (current.get('protection') ?? 'all') as 'all' | 'protected' | 'unprotected',
       sort: (current.get('sort') ?? 'modifiedAt') as ArticleSort,
@@ -32,19 +34,22 @@ export function HomePage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError('');
-    listArticles(params, controller.signal)
-      .then(setResult)
-      .catch((cause: unknown) => {
+    async function load() {
+      setLoading(true);
+      setError('');
+      try {
+        const token = viewerSub ? await getToken() : undefined;
+        setResult(await listArticles(params, controller.signal, token));
+      } catch (cause) {
         if (cause instanceof DOMException && cause.name === 'AbortError') return;
         setError(cause instanceof Error ? cause.message : 'The archive could not be loaded.');
-      })
-      .finally(() => {
+      } finally {
         if (!controller.signal.aborted) setLoading(false);
-      });
+      }
+    }
+    void load();
     return () => controller.abort();
-  }, [params, reloadKey]);
+  }, [getToken, params, reloadKey, viewerSub]);
 
   const updateParam = useCallback((key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -65,7 +70,7 @@ export function HomePage() {
     setSearchParams(next);
   }
 
-  const hasFilters = Boolean(params.search || params.tag || params.pinned !== 'all' || params.protection !== 'all');
+  const hasFilters = Boolean(params.search || params.tag || params.visibility !== 'all' || params.pinned !== 'all' || params.protection !== 'all');
 
   return (
     <div className="page home-page">
@@ -94,6 +99,14 @@ export function HomePage() {
           <button className="button button-primary" type="submit">Search</button>
         </form>
         <div className="sort-row">
+          <label>Visibility
+            <select value={params.visibility} onChange={(event) => updateParam('visibility', event.target.value)}>
+              <option value="all">All visible</option>
+              <option value="public">Public</option>
+              <option value="internal">Internal</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
           <label>Pin status
             <select value={params.pinned} onChange={(event) => updateParam('pinned', event.target.value)}>
               <option value="all">All articles</option>

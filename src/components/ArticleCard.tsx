@@ -1,6 +1,7 @@
 import { CalendarClock, LockKeyhole, Pin, Tag } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ArticleSummary } from '../types';
+import { VisibilityChip } from './VisibilityChip';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value));
@@ -15,6 +16,7 @@ export function ArticleCard({ article }: { article: ArticleSummary }) {
           <h2><Link to={`/articles/${article.id}`}>{article.title}</Link></h2>
         </div>
         <div className="article-card-status">
+          <VisibilityChip visibility={article.visibility} />
           {article.isPinned && (
             <span className="status-chip pinned"><Pin aria-hidden="true" /> Pinned</span>
           )}

@@ -1,4 +1,5 @@
 export type UserRole = 'Admin' | 'Standard';
+export type ArticleVisibility = 'Public' | 'Internal' | 'Admin';
 
 export interface SessionUser {
   sub: string;
@@ -13,6 +14,7 @@ export interface ArticleSummary {
   title: string;
   excerpt: string;
   tags: string[];
+  visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
   createdAt: string;
@@ -33,6 +35,7 @@ export interface ArticleRevision {
   title: string;
   content: string;
   tags: string[];
+  visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
   revisedAt: string;
@@ -55,6 +58,7 @@ export interface ArticleListResponse {
 export interface ArticleListParams {
   search?: string;
   tag?: string;
+  visibility?: 'all' | 'public' | 'internal' | 'admin';
   pinned?: 'all' | 'pinned';
   protection?: 'all' | 'protected' | 'unprotected';
   sort?: ArticleSort;
@@ -67,5 +71,6 @@ export interface ArticleInput {
   title: string;
   content: string;
   tags: string[];
+  visibility?: ArticleVisibility;
   version?: number;
 }

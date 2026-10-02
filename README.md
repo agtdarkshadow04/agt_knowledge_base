@@ -21,15 +21,15 @@ AWS Lambda (private VPC subnets)
         +---- Amazon RDS PostgreSQL (private, encrypted)
 ```
 
-The browser never connects to PostgreSQL and contains no database credential. API Gateway validates Cognito tokens on every mutation; the Lambda service repeats role and resource checks before the repository changes data. `created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, and version fields are server-owned.
+The browser never connects to PostgreSQL and contains no database credential. API Gateway validates Cognito tokens on every authenticated route; the Lambda service repeats role, visibility, and resource checks before reading or changing data. `created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, and version fields are server-owned.
 
 ## Roles and editing rules
 
-| User | Read | View/compare history | Create | Edit unprotected | Edit protected | Pin | Protect | Restore | Delete |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Public | Yes | No | No | No | No | No | No | No | No |
-| Standard | Yes | Yes | Yes | Yes | No | No | No | No | No |
-| Admin | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| User | Visible articles | View/compare history | Create | Set visibility | Edit unprotected | Edit protected | Pin | Protect | Restore | Delete |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Public | Public | No | No | No | No | No | No | No | No | No |
+| Standard | Public, Internal | Yes | Yes | Public or Internal on unprotected articles | Yes | No | No | No | No | No |
+| Admin | All | Yes | Yes | Any level | Yes | Yes | Yes | Yes | Yes | Yes |
 
 Updates, restores, and deletes carry the article version. PostgreSQL applies the mutation only when that version still matches, returning HTTP `409` instead of silently overwriting a concurrent edit. Restoration creates a new latest revision rather than rewriting history.
 

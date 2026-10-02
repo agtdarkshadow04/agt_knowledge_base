@@ -9,12 +9,12 @@ import { parseArticleWrite, parseListQuery, parsePinWrite, parseProtectionWrite,
 const service = new ArticleService(new PostgresArticleRepository());
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function json(statusCode: number, body: unknown): APIGatewayProxyResultV2 {
+function json(statusCode: number, body: unknown, publiclyCacheable = false): APIGatewayProxyResultV2 {
   return {
     statusCode,
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      'cache-control': statusCode === 200 ? 'public, max-age=30' : 'no-store',
+      'cache-control': statusCode === 200 && publiclyCacheable ? 'public, max-age=30' : 'no-store',
       'x-content-type-options': 'nosniff',
     },
     body: JSON.stringify(body),
@@ -49,12 +49,17 @@ export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): P
   try {
     switch (event.routeKey) {
       case 'GET /articles':
-        return json(200, await service.list(parseListQuery(event.queryStringParameters ?? {})));
+        return json(200, await service.list(parseListQuery(event.queryStringParameters ?? {}), null), true);
       case 'GET /articles/{id}':
-        return json(200, await service.get(articleId(event)));
-      case 'GET /articles/{id}/revisions':
-        requireActor(event);
-        return json(200, await service.listRevisions(articleId(event)));
+        return json(200, await service.get(articleId(event), null), true);
+      case 'GET /member/articles':
+        return json(200, await service.list(parseListQuery(event.queryStringParameters ?? {}), requireActor(event)));
+      case 'GET /member/articles/{id}':
+        return json(200, await service.get(articleId(event), requireActor(event)));
+      case 'GET /articles/{id}/revisions': {
+        const actor = requireActor(event);
+        return json(200, await service.listRevisions(articleId(event), actor));
+      }
       case 'POST /articles':
         return json(201, await service.create(parseArticleWrite(parseBody(event)), requireActor(event)));
       case 'PUT /articles/{id}':

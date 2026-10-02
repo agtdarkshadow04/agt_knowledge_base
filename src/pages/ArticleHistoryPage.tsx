@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ErrorState, LoadingState } from '../components/States';
+import { VisibilityChip } from '../components/VisibilityChip';
 import { listArticleRevisions, restoreArticleRevision } from '../services/api';
 import type { ArticleRevision } from '../types';
 
@@ -146,6 +147,11 @@ export function ArticleHistoryPage() {
         <dl className="revision-comparison-metadata">
           <div className={left.title === right.title ? '' : 'changed'}><dt>Title</dt><dd>{left.title}</dd><dd>{right.title}</dd></div>
           <div className={sameTags(left.tags, right.tags) ? '' : 'changed'}><dt>Tags</dt><dd>{left.tags.join(', ') || 'None'}</dd><dd>{right.tags.join(', ') || 'None'}</dd></div>
+          <div className={left.visibility === right.visibility ? '' : 'changed'}>
+            <dt>Visibility</dt>
+            <dd><VisibilityChip visibility={left.visibility} /></dd>
+            <dd><VisibilityChip visibility={right.visibility} /></dd>
+          </div>
           <div className={left.isProtected === right.isProtected ? '' : 'changed'}>
             <dt>Protection</dt>
             <dd><ShieldCheck aria-hidden="true" />{left.isProtected ? 'Protected' : 'Unprotected'}</dd>

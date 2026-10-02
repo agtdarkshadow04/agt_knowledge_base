@@ -186,6 +186,8 @@ export class AgtKnowledgeBaseStack extends Stack {
 
     api.addRoutes({ path: '/articles', methods: [apigwv2.HttpMethod.GET], integration });
     api.addRoutes({ path: '/articles/{id}', methods: [apigwv2.HttpMethod.GET], integration });
+    api.addRoutes({ path: '/member/articles', methods: [apigwv2.HttpMethod.GET], integration, authorizer });
+    api.addRoutes({ path: '/member/articles/{id}', methods: [apigwv2.HttpMethod.GET], integration, authorizer });
     api.addRoutes({ path: '/articles/{id}/revisions', methods: [apigwv2.HttpMethod.GET], integration, authorizer });
     api.addRoutes({ path: '/articles', methods: [apigwv2.HttpMethod.POST], integration, authorizer });
     api.addRoutes({ path: '/articles/{id}', methods: [apigwv2.HttpMethod.PUT, apigwv2.HttpMethod.DELETE], integration, authorizer });

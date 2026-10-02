@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { MarkdownContent } from '../components/MarkdownContent';
 import { ErrorState, LoadingState } from '../components/States';
 import { ApiError, createArticle, getArticle, updateArticle } from '../services/api';
+import type { ArticleVisibility } from '../types';
 
 type EditorMode = 'plain' | 'rich';
 
@@ -16,9 +17,10 @@ interface Draft {
   title: string;
   tags: string;
   content: string;
+  visibility: ArticleVisibility;
 }
 
-const emptyDraft: Draft = { title: '', tags: '', content: '' };
+const emptyDraft: Draft = { title: '', tags: '', content: '', visibility: 'Internal' };
 
 function serializeDraft(draft: Draft) {
   return JSON.stringify(draft);
@@ -54,26 +56,28 @@ export function EditorPage() {
 
   useEffect(() => {
     if (!id) return;
+    const articleId = id;
     const controller = new AbortController();
-    setLoading(true);
-    getArticle(id, controller.signal)
-      .then((article) => {
+    async function load() {
+      setLoading(true);
+      try {
+        const article = await getArticle(articleId, controller.signal, await getToken());
         if (article.isProtected && user?.role !== 'Admin') {
           setLoadError('This protected article can only be edited by an Administrator.');
           return;
         }
-        const loaded = { title: article.title, tags: article.tags.join(', '), content: article.content };
+        const loaded = { title: article.title, tags: article.tags.join(', '), content: article.content, visibility: article.visibility };
         setDraft(loaded);
         setBaseline(serializeDraft(loaded));
         setVersion(article.version);
-      })
-      .catch((cause: unknown) => {
+      } catch (cause) {
         if (cause instanceof DOMException && cause.name === 'AbortError') return;
         setLoadError(cause instanceof Error ? cause.message : 'Article could not be opened.');
-      })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      } finally { if (!controller.signal.aborted) setLoading(false); }
+    }
+    void load();
     return () => controller.abort();
-  }, [id, user?.role]);
+  }, [getToken, id, user?.role]);
 
   useEffect(() => {
     const listener = (event: BeforeUnloadEvent) => {
@@ -108,11 +112,11 @@ export function EditorPage() {
     setSaving(true);
     setSaveError('');
     try {
-      const input = { title: draft.title.trim(), content: draft.content, tags, version };
+      const input = { title: draft.title.trim(), content: draft.content, tags, visibility: draft.visibility, version };
       const saved = isNew
         ? await createArticle(input, await getToken())
         : await updateArticle(id, input, await getToken());
-      const savedDraft = { title: saved.title, tags: saved.tags.join(', '), content: saved.content };
+      const savedDraft = { title: saved.title, tags: saved.tags.join(', '), content: saved.content, visibility: saved.visibility };
       setBaseline(serializeDraft(savedDraft));
       allowNavigation.current = true;
       navigate(`/articles/${saved.id}`, { replace: true });
@@ -148,6 +152,13 @@ export function EditorPage() {
           {errors.title && <p className="field-error" id="title-error">{errors.title}</p>}
           <label className="field"><span>Tags <small>Comma separated</small></span><input value={draft.tags} onChange={(event) => setDraft({ ...draft, tags: event.target.value })} placeholder="guides, expeditions, portals" aria-invalid={Boolean(errors.tags)} aria-describedby={errors.tags ? 'tags-error' : undefined} /></label>
           {errors.tags && <p className="field-error" id="tags-error">{errors.tags}</p>}
+          <label className="field"><span>Visibility</span>
+            <select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: event.target.value as ArticleVisibility })}>
+              <option value="Public">Public</option>
+              <option value="Internal">Internal</option>
+              {user?.role === 'Admin' && <option value="Admin">Admin</option>}
+            </select>
+          </label>
         </div>
 
         <div className="editor-toolbar" aria-label="Editor options">

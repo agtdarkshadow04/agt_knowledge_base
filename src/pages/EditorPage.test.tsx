@@ -35,7 +35,7 @@ function renderEditor() {
 describe('EditorPage', () => {
   beforeEach(() => {
     mocks.createArticle.mockReset();
-    mocks.createArticle.mockResolvedValue({ id: 'article-1', title: 'Portal Guide', tags: ['portal'], content: '# Portal Guide\n\nSafe instructions.', version: 1 });
+    mocks.createArticle.mockResolvedValue({ id: 'article-1', title: 'Portal Guide', tags: ['portal'], content: '# Portal Guide\n\nSafe instructions.', visibility: 'Internal', version: 1 });
   });
 
   it('switches editing modes without losing unsaved Markdown', async () => {
@@ -75,7 +75,7 @@ describe('EditorPage', () => {
     await user.type(screen.getByLabelText(/Tags/), 'portal, guide');
     await user.type(screen.getByRole('textbox', { name: /markdown source/i }), '# Portal Guide{enter}{enter}Safe instructions for travellers.');
     await user.click(screen.getByRole('button', { name: 'Save article' }));
-    expect(mocks.createArticle).toHaveBeenCalledWith(expect.objectContaining({ title: 'Portal Guide', tags: ['portal', 'guide'] }), 'token');
+    expect(mocks.createArticle).toHaveBeenCalledWith(expect.objectContaining({ title: 'Portal Guide', tags: ['portal', 'guide'], visibility: 'Internal' }), 'token');
     expect(await screen.findByText('Saved article')).toBeInTheDocument();
   });
 });

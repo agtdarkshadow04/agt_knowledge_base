@@ -4,8 +4,10 @@ import type {
   ArticleListResult,
   ArticleRecord,
   ArticleRevisionRecord,
+  ArticleVisibility,
   ArticleWrite,
   ListArticlesQuery,
+  Role,
 } from './domain.js';
 import { getPool } from './db.js';
 import type { ArticleRepository } from './repository.js';
@@ -16,6 +18,7 @@ interface ArticleRow {
   content?: string;
   content_preview?: string;
   tags: string[];
+  visibility: ArticleVisibility;
   is_pinned: boolean;
   is_protected: boolean;
   created_at: Date | string;
@@ -32,6 +35,7 @@ interface ArticleRevisionRow {
   title: string;
   content: string;
   tags: string[];
+  visibility: ArticleVisibility;
   is_pinned: boolean;
   is_protected: boolean;
   revised_at: Date | string;
@@ -41,14 +45,14 @@ interface ArticleRevisionRow {
 }
 
 const baseSelect = `
-  a.id, a.title, a.content, a.tags, a.is_pinned, a.is_protected,
+  a.id, a.title, a.content, a.tags, a.visibility, a.is_pinned, a.is_protected,
   a.created_at, a.created_by, creator.display_name AS created_by_name,
   a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
   a.version
 `;
 
 const revisionSelect = `
-  r.article_id, r.title, r.content, r.tags, r.is_pinned, r.is_protected,
+  r.article_id, r.title, r.content, r.tags, r.visibility, r.is_pinned, r.is_protected,
   r.revised_at, r.revised_by, editor.display_name AS revised_by_name,
   r.version
 `;
@@ -63,6 +67,7 @@ function toArticle(row: ArticleRow): ArticleRecord {
     title: row.title,
     content: row.content ?? '',
     tags: row.tags,
+    visibility: row.visibility,
     isPinned: row.is_pinned,
     isProtected: row.is_protected,
     createdAt: iso(row.created_at),
@@ -81,6 +86,7 @@ function toRevision(row: ArticleRevisionRow): ArticleRevisionRecord {
     title: row.title,
     content: row.content,
     tags: row.tags,
+    visibility: row.visibility,
     isPinned: row.is_pinned,
     isProtected: row.is_protected,
     revisedAt: iso(row.revised_at),
@@ -115,9 +121,9 @@ async function upsertActor(client: pg.PoolClient, actor: Actor) {
 async function recordRevision(client: pg.PoolClient, id: string) {
   await client.query(
     `INSERT INTO article_revisions (
-       article_id, version, title, content, tags, is_pinned, is_protected, revised_at, revised_by
+       article_id, version, title, content, tags, visibility, is_pinned, is_protected, revised_at, revised_by
      )
-     SELECT id, version, title, content, tags, is_pinned, is_protected, modified_at, modified_by
+     SELECT id, version, title, content, tags, visibility, is_pinned, is_protected, modified_at, modified_by
      FROM articles
      WHERE id = $1`,
     [id],
@@ -137,25 +143,27 @@ async function recordRevision(client: pg.PoolClient, id: string) {
 }
 
 export class PostgresArticleRepository implements ArticleRepository {
-  async list(query: ListArticlesQuery): Promise<ArticleListResult> {
+  async list(query: ListArticlesQuery, viewerRole: Role | null): Promise<ArticleListResult> {
     const pool = await getPool();
     const conditions = [
       `($1 = '' OR a.search_vector @@ websearch_to_tsquery('simple', $1))`,
       `($2 = '' OR $2 = ANY(a.tags))`,
       `($3 = 'all' OR a.is_pinned)`,
       `($4 = 'all' OR ($4 = 'protected' AND a.is_protected) OR ($4 = 'unprotected' AND NOT a.is_protected))`,
+      `($5 = 'all' OR lower(a.visibility) = $5)`,
+      `($6::text = 'Admin' OR a.visibility = 'Public' OR ($6::text = 'Standard' AND a.visibility = 'Internal'))`,
     ];
     const where = conditions.join(' AND ');
     const sortColumns = { createdAt: 'a.created_at', modifiedAt: 'a.modified_at', title: 'lower(a.title)' } as const;
     const direction = query.direction === 'asc' ? 'ASC' : 'DESC';
     const offset = (query.page - 1) * query.pageSize;
-    const params = [query.search, query.tag, query.pinned, query.protection];
+    const params = [query.search, query.tag, query.pinned, query.protection, query.visibility, viewerRole];
 
     const [countResult, dataResult] = await Promise.all([
       pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM articles a WHERE ${where}`, params),
       pool.query<ArticleRow>(
         `SELECT
-           a.id, a.title, left(a.content, 1000) AS content_preview, a.tags, a.is_pinned, a.is_protected,
+           a.id, a.title, left(a.content, 1000) AS content_preview, a.tags, a.visibility, a.is_pinned, a.is_protected,
            a.created_at, a.created_by, creator.display_name AS created_by_name,
            a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
            a.version
@@ -164,7 +172,7 @@ export class PostgresArticleRepository implements ArticleRepository {
          JOIN app_users editor ON editor.cognito_sub = a.modified_by
          WHERE ${where}
          ORDER BY a.is_pinned DESC, ${sortColumns[query.sort]} ${direction}, a.id ${direction}
-         LIMIT $5 OFFSET $6`,
+         LIMIT $7 OFFSET $8`,
         [...params, query.pageSize, offset],
       ),
     ]);
@@ -177,6 +185,7 @@ export class PostgresArticleRepository implements ArticleRepository {
           title: row.title,
           excerpt: excerpt(row.content_preview ?? ''),
           tags: row.tags,
+          visibility: row.visibility,
           isPinned: row.is_pinned,
           isProtected: row.is_protected,
           createdAt: iso(row.created_at),
@@ -195,15 +204,16 @@ export class PostgresArticleRepository implements ArticleRepository {
     };
   }
 
-  async get(id: string) {
+  async get(id: string, viewerRole: Role | null) {
     const pool = await getPool();
     const result = await pool.query<ArticleRow>(
       `SELECT ${baseSelect}
        FROM articles a
        JOIN app_users creator ON creator.cognito_sub = a.created_by
        JOIN app_users editor ON editor.cognito_sub = a.modified_by
-       WHERE a.id = $1`,
-      [id],
+       WHERE a.id = $1
+         AND ($2::text = 'Admin' OR a.visibility = 'Public' OR ($2::text = 'Standard' AND a.visibility = 'Internal'))`,
+      [id, viewerRole],
     );
     return result.rows[0] ? toArticle(result.rows[0]) : null;
   }
@@ -241,14 +251,14 @@ export class PostgresArticleRepository implements ArticleRepository {
       await client.query('BEGIN');
       await upsertActor(client, actor);
       const inserted = await client.query<{ id: string }>(
-        `INSERT INTO articles (title, content, tags, created_by, modified_by)
-         VALUES ($1, $2, $3::text[], $4, $4)
+        `INSERT INTO articles (title, content, tags, visibility, created_by, modified_by)
+         VALUES ($1, $2, $3::text[], $4, $5, $5)
          RETURNING id`,
-        [input.title, input.content, input.tags, actor.sub],
+        [input.title, input.content, input.tags, input.visibility ?? 'Internal', actor.sub],
       );
       await recordRevision(client, inserted.rows[0].id);
       await client.query('COMMIT');
-      return (await this.get(inserted.rows[0].id))!;
+      return (await this.get(inserted.rows[0].id, actor.role))!;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -266,18 +276,20 @@ export class PostgresArticleRepository implements ArticleRepository {
          SET title = $1,
              content = $2,
              tags = $3::text[],
-             modified_by = $4,
+             visibility = $4,
+             modified_by = $5,
              modified_at = now(),
              version = version + 1
-         WHERE id = $5
-           AND version = $6
-           AND (NOT is_protected OR $7::boolean)
+         WHERE id = $6
+           AND version = $7
+           AND (NOT is_protected OR $8::boolean)
+           AND ($8::boolean OR $4 <> 'Admin')
          RETURNING id`,
-        [input.title, input.content, input.tags, actor.sub, id, input.version, actor.role === 'Admin'],
+        [input.title, input.content, input.tags, input.visibility ?? 'Internal', actor.sub, id, input.version, actor.role === 'Admin'],
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
-      return updated.rows[0] ? this.get(updated.rows[0].id) : null;
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -302,7 +314,7 @@ export class PostgresArticleRepository implements ArticleRepository {
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
-      return updated.rows[0] ? this.get(updated.rows[0].id) : null;
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -327,7 +339,7 @@ export class PostgresArticleRepository implements ArticleRepository {
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
-      return updated.rows[0] ? this.get(updated.rows[0].id) : null;
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -345,6 +357,7 @@ export class PostgresArticleRepository implements ArticleRepository {
          SET title = r.title,
              content = r.content,
              tags = r.tags,
+             visibility = r.visibility,
              is_pinned = r.is_pinned,
              is_protected = r.is_protected,
              modified_by = $4,
@@ -360,7 +373,7 @@ export class PostgresArticleRepository implements ArticleRepository {
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
-      return updated.rows[0] ? this.get(updated.rows[0].id) : null;
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { extractHeadings, MarkdownContent } from '../components/MarkdownContent';
 import { ErrorState, LoadingState } from '../components/States';
+import { VisibilityChip } from '../components/VisibilityChip';
 import { deleteArticle, getArticle, setArticlePinned, setArticleProtection } from '../services/api';
 import type { Article } from '../types';
 
@@ -15,6 +16,7 @@ export function ArticlePage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { user, getToken } = useAuth();
+  const viewerSub = user?.sub;
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
@@ -23,10 +25,10 @@ export function ArticlePage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    try { setArticle(await getArticle(id)); }
+    try { setArticle(await getArticle(id, undefined, viewerSub ? await getToken() : undefined)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Article not found.'); }
     finally { setLoading(false); }
-  }, [id]);
+  }, [getToken, id, viewerSub]);
 
   useEffect(() => { void load(); }, [load]);
   const headings = useMemo(() => extractHeadings(article?.content ?? ''), [article?.content]);
@@ -80,7 +82,10 @@ export function ArticlePage() {
             <p className="eyebrow">Archive entry // version {article.version}</p>
             <h1>{article.title}</h1>
           </div>
-          {article.isProtected && <span className="status-chip protected"><LockKeyhole aria-hidden="true" />Protected</span>}
+          <div className="article-status">
+            <VisibilityChip visibility={article.visibility} />
+            {article.isProtected && <span className="status-chip protected"><LockKeyhole aria-hidden="true" />Protected</span>}
+          </div>
         </div>
         <div className="tag-list">{article.tags.map((tag) => <span className="tag" key={tag}><Tag aria-hidden="true" />{tag}</span>)}</div>
         <dl className="audit-grid">

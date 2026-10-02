@@ -9,6 +9,7 @@ import {
   type ArticleRevisionRecord,
   type ArticleWrite,
   type ListArticlesQuery,
+  type Role,
 } from './domain.js';
 import type { ArticleRepository } from './repository.js';
 
@@ -28,6 +29,7 @@ class MemoryRepository implements ArticleRepository {
       title: record.title,
       content: record.content,
       tags: record.tags,
+      visibility: record.visibility,
       isPinned: record.isPinned,
       isProtected: record.isProtected,
       revisedAt: record.modifiedAt,
@@ -41,13 +43,17 @@ class MemoryRepository implements ArticleRepository {
     this.revisions.set(record.id, history);
   }
 
-  async list(query: ListArticlesQuery) {
+  async list(query: ListArticlesQuery, viewerRole: Role | null) {
     let items = [...this.records.values()];
     const search = query.search.toLowerCase();
     if (search) items = items.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(search));
     if (query.tag) items = items.filter((item) => item.tags.includes(query.tag));
+    if (query.visibility !== 'all') items = items.filter((item) => item.visibility.toLowerCase() === query.visibility);
     if (query.pinned === 'pinned') items = items.filter((item) => item.isPinned);
     if (query.protection !== 'all') items = items.filter((item) => item.isProtected === (query.protection === 'protected'));
+    items = items.filter((item) => viewerRole === 'Admin'
+      || item.visibility === 'Public'
+      || (viewerRole === 'Standard' && item.visibility === 'Internal'));
     items.sort((left, right) => {
       if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1;
       const leftValue = query.sort === 'title' ? left.title.toLowerCase() : left[query.sort];
@@ -63,7 +69,12 @@ class MemoryRepository implements ArticleRepository {
     };
   }
 
-  async get(id: string) { return this.records.get(id) ?? null; }
+  async get(id: string, viewerRole: Role | null) {
+    const article = this.records.get(id);
+    if (!article) return null;
+    if (viewerRole === 'Admin' || article.visibility === 'Public') return article;
+    return viewerRole === 'Standard' && article.visibility === 'Internal' ? article : null;
+  }
   async listRevisions(id: string) { return this.revisions.get(id) ?? []; }
   async getRevision(id: string, version: number) {
     return this.revisions.get(id)?.find((revision) => revision.version === version) ?? null;
@@ -73,7 +84,8 @@ class MemoryRepository implements ArticleRepository {
     const id = `00000000-0000-4000-8000-${String(this.records.size + 1).padStart(12, '0')}`;
     const now = this.time();
     const record: ArticleRecord = {
-      id, title: input.title, content: input.content, tags: input.tags, isPinned: false, isProtected: false,
+      id, title: input.title, content: input.content, tags: input.tags,
+      visibility: input.visibility ?? 'Internal', isPinned: false, isProtected: false,
       createdAt: now, createdBy: actor.sub, createdByName: actor.displayName,
       modifiedAt: now, modifiedBy: actor.sub, modifiedByName: actor.displayName, version: 1,
     };
@@ -118,6 +130,7 @@ class MemoryRepository implements ArticleRepository {
       title: revision.title,
       content: revision.content,
       tags: revision.tags,
+      visibility: revision.visibility,
       isPinned: revision.isPinned,
       isProtected: revision.isProtected,
       modifiedAt: this.time(),
@@ -136,8 +149,8 @@ class MemoryRepository implements ArticleRepository {
   }
 }
 
-const query: ListArticlesQuery = { search: '', tag: '', pinned: 'all', protection: 'all', sort: 'title', direction: 'asc', page: 1, pageSize: 10 };
-const articleInput = (title: string, tags: string[] = []): ArticleWrite => ({ title, tags, content: `${title} contains enough persistent Markdown content.` });
+const query: ListArticlesQuery = { search: '', tag: '', visibility: 'all', pinned: 'all', protection: 'all', sort: 'title', direction: 'asc', page: 1, pageSize: 10 };
+const articleInput = (title: string, tags: string[] = [], visibility?: ArticleWrite['visibility']): ArticleWrite => ({ title, tags, content: `${title} contains enough persistent Markdown content.`, visibility });
 
 describe('ArticleService authorization and persistence', () => {
   it('maintains server-owned creator and editor audit fields', async () => {
@@ -179,7 +192,7 @@ describe('ArticleService authorization and persistence', () => {
     await service.create(articleInput('Alpha Portal', ['portals']), standard);
     await service.create(articleInput('Beta Portal', ['portals']), standard);
 
-    const result = await service.list({ ...query, search: 'portal', tag: 'portals', pageSize: 1 });
+    const result = await service.list({ ...query, search: 'portal', tag: 'portals', pageSize: 1 }, standard);
     expect(result.total).toBe(2);
     expect(result.totalPages).toBe(2);
     expect(result.items[0].title).toBe('Alpha Portal');
@@ -192,12 +205,35 @@ describe('ArticleService authorization and persistence', () => {
     const beta = await service.create(articleInput('Beta Portal'), standard);
     await service.setPinned(beta.id, true, beta.version, admin);
 
-    const result = await service.list(query);
+    const result = await service.list(query, standard);
     expect(result.items.map((article) => article.title)).toEqual(['Beta Portal', 'Alpha Portal']);
 
-    const pinned = await service.list({ ...query, pinned: 'pinned' });
+    const pinned = await service.list({ ...query, pinned: 'pinned' }, standard);
     expect(pinned.items).toHaveLength(1);
     expect(pinned.items[0]).toMatchObject({ title: 'Beta Portal', isPinned: true });
+  });
+
+  it('defaults to Internal visibility and enforces role-based visibility', async () => {
+    const repository = new MemoryRepository();
+    const service = new ArticleService(repository);
+    const internal = await service.create(articleInput('Internal Guide'), standard);
+    const published = await service.create(articleInput('Public Guide', [], 'Public'), standard);
+    const adminOnly = await service.create(articleInput('Admin Guide', [], 'Admin'), admin);
+
+    expect(internal.visibility).toBe('Internal');
+    expect(() => service.create(articleInput('Forbidden Admin Guide', [], 'Admin'), standard)).toThrow(ForbiddenError);
+    await expect(service.update(internal.id, { ...articleInput('Hidden Guide', [], 'Admin'), version: internal.version }, standard)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.get(internal.id, null)).rejects.toMatchObject({ statusCode: 404 });
+
+    await expect(service.list(query, null)).resolves.toMatchObject({
+      items: [expect.objectContaining({ id: published.id })],
+    });
+    await expect(service.list(query, standard)).resolves.toMatchObject({
+      items: expect.not.arrayContaining([expect.objectContaining({ id: adminOnly.id })]),
+    });
+    await expect(service.list({ ...query, visibility: 'admin' }, admin)).resolves.toMatchObject({
+      items: [expect.objectContaining({ id: adminOnly.id })],
+    });
   });
 
   it('retains five dated revisions for Standard users and restricts restoration to Admins', async () => {
@@ -208,7 +244,7 @@ describe('ArticleService authorization and persistence', () => {
       article = await service.update(article.id, { ...articleInput(`Portal Guide v${version}`), version: article.version }, standard);
     }
 
-    const history = await service.listRevisions(article.id);
+    const history = await service.listRevisions(article.id, standard);
     expect(history.map((revision) => revision.version)).toEqual([7, 6, 5, 4, 3]);
     expect(history.every((revision) => revision.revisedAt.endsWith('Z'))).toBe(true);
     await expect(service.restore(article.id, 4, article.version, standard)).rejects.toBeInstanceOf(ForbiddenError);
@@ -217,7 +253,7 @@ describe('ArticleService authorization and persistence', () => {
     expect(restored).toMatchObject({ title: 'Portal Guide v4', version: 8, modifiedBy: admin.sub });
     await expect(service.restore(article.id, 2, restored.version, admin)).rejects.toMatchObject({ statusCode: 404 });
     await expect(service.restore(article.id, 4, 7, admin)).rejects.toBeInstanceOf(ConflictError);
-    await expect(service.listRevisions(article.id)).resolves.toEqual(
+    await expect(service.listRevisions(article.id, admin)).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ version: 8, title: 'Portal Guide v4' })]),
     );
   });

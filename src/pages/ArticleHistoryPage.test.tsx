@@ -30,6 +30,7 @@ const revisions = [
     title: 'Portal Guide',
     content: '# Portal Guide\n\nLatest instructions.',
     tags: ['portal'],
+    visibility: 'Internal',
     isPinned: true,
     isProtected: false,
     revisedAt: '2026-01-02T00:00:00.000Z',
@@ -42,6 +43,7 @@ const revisions = [
     title: 'Portal Guide',
     content: '# Portal Guide\n\nEarlier instructions.',
     tags: ['portal'],
+    visibility: 'Public',
     isPinned: false,
     isProtected: false,
     revisedAt: '2026-01-01T00:00:00.000Z',
@@ -79,6 +81,8 @@ describe('ArticleHistoryPage', () => {
     expect(screen.getByText(/Latest instructions/)).toBeInTheDocument();
     expect(screen.getByText('Not pinned')).toBeInTheDocument();
     expect(screen.getByText('Pinned')).toBeInTheDocument();
+    expect(screen.getByText('Public')).toHaveClass('visibility-public');
+    expect(screen.getByText('Internal')).toHaveClass('visibility-internal');
     expect(screen.queryByRole('button', { name: /Restore version/i })).not.toBeInTheDocument();
   });
 

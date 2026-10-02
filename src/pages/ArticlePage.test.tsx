@@ -33,6 +33,7 @@ const article: Article = {
   excerpt: 'Safe portal navigation.',
   content: '# Portal Guide\n\nSafe portal navigation instructions.',
   tags: ['portal'],
+  visibility: 'Public',
   isPinned: false,
   isProtected: false,
   createdAt: '2026-01-01T00:00:00.000Z',
@@ -62,6 +63,7 @@ describe('ArticlePage', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Pin' }));
 
+    expect(screen.getByText('Public')).toHaveClass('visibility-public');
     expect(mocks.setArticlePinned).toHaveBeenCalledWith(article.id, true, article.version, 'token');
     expect(await screen.findByRole('button', { name: 'Unpin' })).toBeInTheDocument();
   });

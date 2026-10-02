@@ -9,6 +9,7 @@ const article: ArticleSummary = {
   title: 'Portal Guide',
   excerpt: 'Safe portal navigation.',
   tags: ['portal'],
+  visibility: 'Internal',
   isPinned: true,
   isProtected: true,
   createdAt: '2026-01-01T00:00:00.000Z',
@@ -21,9 +22,11 @@ const article: ArticleSummary = {
 };
 
 describe('ArticleCard', () => {
-  it('shows pinned and protected status indicators', () => {
-    render(<MemoryRouter><ArticleCard article={article} /></MemoryRouter>);
+  it('shows visibility, pinned, and protected status indicators', () => {
+    const { container } = render(<MemoryRouter><ArticleCard article={article} /></MemoryRouter>);
 
+    expect(screen.getByText('Internal')).toHaveClass('visibility-internal');
+    expect(container.querySelector('.visibility-eye-icon')).toBeInTheDocument();
     expect(screen.getByText('Pinned')).toHaveClass('pinned');
     expect(screen.getByText('Protected')).toHaveClass('protected');
   });

@@ -1,4 +1,5 @@
 export type Role = 'Admin' | 'Standard';
+export type ArticleVisibility = 'Public' | 'Internal' | 'Admin';
 
 export interface Actor {
   sub: string;
@@ -12,6 +13,7 @@ export interface ArticleRecord {
   title: string;
   content: string;
   tags: string[];
+  visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
   createdAt: string;
@@ -32,6 +34,7 @@ export interface ArticleRevisionRecord {
   title: string;
   content: string;
   tags: string[];
+  visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
   revisedAt: string;
@@ -43,6 +46,7 @@ export interface ArticleRevisionRecord {
 export interface ListArticlesQuery {
   search: string;
   tag: string;
+  visibility: 'all' | 'public' | 'internal' | 'admin';
   pinned: 'all' | 'pinned';
   protection: 'all' | 'protected' | 'unprotected';
   sort: 'createdAt' | 'modifiedAt' | 'title';
@@ -63,6 +67,7 @@ export interface ArticleWrite {
   title: string;
   content: string;
   tags: string[];
+  visibility?: ArticleVisibility;
   version?: number;
 }
 
