@@ -154,6 +154,7 @@ export function ArticlePage() {
           <div className="article-status">
             <VisibilityChip visibility={article.visibility} />
             {article.isVerified && <span className="status-chip verified"><BadgeCheck aria-hidden="true" />Verified</span>}
+            {article.isPinned && <span className="status-chip pinned"><Pin aria-hidden="true" />Pinned</span>}
             {article.isProtected && <span className="status-chip protected"><LockKeyhole aria-hidden="true" />Protected</span>}
           </div>
         </div>

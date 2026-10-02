@@ -168,6 +168,7 @@ describe('ArticlePage', () => {
 
     expect(screen.getByText('Public')).toHaveClass('visibility-public');
     expect(mocks.setArticlePinned).toHaveBeenCalledWith(article.id, true, article.version, 'token');
+    expect(await screen.findByText('Pinned')).toHaveClass('pinned');
     expect(await screen.findByRole('button', { name: 'Unpin' })).toBeInTheDocument();
   });
 
