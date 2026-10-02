@@ -155,13 +155,14 @@ export class PostgresArticleRepository implements ArticleRepository {
       `($3 = 'all' OR a.is_pinned)`,
       `($4 = 'all' OR ($4 = 'protected' AND a.is_protected) OR ($4 = 'unprotected' AND NOT a.is_protected))`,
       `($5 = 'all' OR lower(a.visibility) = $5)`,
-      `($6::text = 'Admin' OR a.visibility = 'Public' OR ($6::text = 'Standard' AND a.visibility = 'Internal'))`,
+      `($6 = 'all' OR ($6 = 'verified' AND a.is_verified) OR ($6 = 'unverified' AND NOT a.is_verified))`,
+      `($7::text = 'Admin' OR a.visibility = 'Public' OR ($7::text = 'Standard' AND a.visibility = 'Internal'))`,
     ];
     const where = conditions.join(' AND ');
     const sortColumns = { createdAt: 'a.created_at', modifiedAt: 'a.modified_at', title: 'lower(a.title)' } as const;
     const direction = query.direction === 'asc' ? 'ASC' : 'DESC';
     const offset = (query.page - 1) * query.pageSize;
-    const params = [query.search, query.tag, query.pinned, query.protection, query.visibility, viewerRole];
+    const params = [query.search, query.tag, query.pinned, query.protection, query.visibility, query.verification, viewerRole];
 
     const [countResult, dataResult] = await Promise.all([
       pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM articles a WHERE ${where}`, params),
@@ -176,7 +177,7 @@ export class PostgresArticleRepository implements ArticleRepository {
          JOIN app_users editor ON editor.cognito_sub = a.modified_by
          WHERE ${where}
          ORDER BY a.is_pinned DESC, ${sortColumns[query.sort]} ${direction}, a.id ${direction}
-         LIMIT $7 OFFSET $8`,
+         LIMIT $8 OFFSET $9`,
         [...params, query.pageSize, offset],
       ),
     ]);

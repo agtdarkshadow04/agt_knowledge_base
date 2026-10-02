@@ -52,6 +52,7 @@ class MemoryRepository implements ArticleRepository {
     if (query.visibility !== 'all') items = items.filter((item) => item.visibility.toLowerCase() === query.visibility);
     if (query.pinned === 'pinned') items = items.filter((item) => item.isPinned);
     if (query.protection !== 'all') items = items.filter((item) => item.isProtected === (query.protection === 'protected'));
+    if (query.verification !== 'all') items = items.filter((item) => item.isVerified === (query.verification === 'verified'));
     items = items.filter((item) => viewerRole === 'Admin'
       || item.visibility === 'Public'
       || (viewerRole === 'Standard' && item.visibility === 'Internal'));
@@ -160,7 +161,7 @@ class MemoryRepository implements ArticleRepository {
   }
 }
 
-const query: ListArticlesQuery = { search: '', tag: '', visibility: 'all', pinned: 'all', protection: 'all', sort: 'title', direction: 'asc', page: 1, pageSize: 10 };
+const query: ListArticlesQuery = { search: '', tag: '', visibility: 'all', pinned: 'all', protection: 'all', verification: 'all', sort: 'title', direction: 'asc', page: 1, pageSize: 10 };
 const articleInput = (title: string, tags: string[] = [], visibility?: ArticleWrite['visibility']): ArticleWrite => ({ title, tags, content: `${title} contains enough persistent Markdown content.`, visibility });
 
 describe('ArticleService authorization and persistence', () => {
@@ -238,6 +239,21 @@ describe('ArticleService authorization and persistence', () => {
     const pinned = await service.list({ ...query, pinned: 'pinned' }, standard);
     expect(pinned.items).toHaveLength(1);
     expect(pinned.items[0]).toMatchObject({ title: 'Beta Portal', isPinned: true });
+  });
+
+  it('filters articles by verification status', async () => {
+    const repository = new MemoryRepository();
+    const service = new ArticleService(repository);
+    await service.create(articleInput('Unverified Portal'), standard);
+    const verified = await service.create(articleInput('Verified Portal'), standard);
+    await service.setVerified(verified.id, true, verified.version, admin);
+
+    await expect(service.list({ ...query, verification: 'verified' }, standard)).resolves.toMatchObject({
+      items: [expect.objectContaining({ title: 'Verified Portal', isVerified: true })],
+    });
+    await expect(service.list({ ...query, verification: 'unverified' }, standard)).resolves.toMatchObject({
+      items: [expect.objectContaining({ title: 'Unverified Portal', isVerified: false })],
+    });
   });
 
   it('defaults to Internal visibility and enforces role-based visibility', async () => {

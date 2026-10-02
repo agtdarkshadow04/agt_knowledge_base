@@ -63,6 +63,7 @@ export interface ArticleListParams {
   visibility?: 'all' | 'public' | 'internal' | 'admin';
   pinned?: 'all' | 'pinned';
   protection?: 'all' | 'protected' | 'unprotected';
+  verification?: 'all' | 'verified' | 'unverified';
   sort?: ArticleSort;
   direction?: SortDirection;
   page?: number;

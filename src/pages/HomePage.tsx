@@ -25,6 +25,7 @@ export function HomePage() {
       visibility: (current.get('visibility') ?? 'all') as 'all' | 'public' | 'internal' | 'admin',
       pinned: (current.get('pinned') ?? 'all') as 'all' | 'pinned',
       protection: (current.get('protection') ?? 'all') as 'all' | 'protected' | 'unprotected',
+      verification: (current.get('verification') ?? 'all') as 'all' | 'verified' | 'unverified',
       sort: (current.get('sort') ?? 'modifiedAt') as ArticleSort,
       direction: (current.get('direction') ?? 'desc') as SortDirection,
       page: Math.max(1, Number(current.get('page') ?? 1) || 1),
@@ -70,7 +71,7 @@ export function HomePage() {
     setSearchParams(next);
   }
 
-  const hasFilters = Boolean(params.search || params.tag || params.visibility !== 'all' || params.pinned !== 'all' || params.protection !== 'all');
+  const hasFilters = Boolean(params.search || params.tag || params.visibility !== 'all' || params.pinned !== 'all' || params.protection !== 'all' || params.verification !== 'all');
 
   return (
     <div className="page home-page">
@@ -118,6 +119,13 @@ export function HomePage() {
               <option value="all">All articles</option>
               <option value="unprotected">Open to editors</option>
               <option value="protected">Protected</option>
+            </select>
+          </label>
+          <label>Verified
+            <select value={params.verification} onChange={(event) => updateParam('verification', event.target.value)}>
+              <option value="all">All</option>
+              <option value="verified">Verified</option>
+              <option value="unverified">Unverified</option>
             </select>
           </label>
           <label>Sort by

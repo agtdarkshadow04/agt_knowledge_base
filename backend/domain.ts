@@ -51,6 +51,7 @@ export interface ListArticlesQuery {
   visibility: 'all' | 'public' | 'internal' | 'admin';
   pinned: 'all' | 'pinned';
   protection: 'all' | 'protected' | 'unprotected';
+  verification: 'all' | 'verified' | 'unverified';
   sort: 'createdAt' | 'modifiedAt' | 'title';
   direction: 'asc' | 'desc';
   page: number;

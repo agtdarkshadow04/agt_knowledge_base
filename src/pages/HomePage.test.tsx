@@ -23,17 +23,30 @@ describe('HomePage', () => {
     mocks.listArticles.mockResolvedValue({ items: [], page: 1, pageSize: 12, total: 0, totalPages: 1 });
   });
 
-  it('loads visibility and pin filters from search parameters', async () => {
+  it('loads visibility, pin, and verification filters from search parameters', async () => {
     const router = createMemoryRouter(
       [{ path: '/', element: <HomePage /> }],
-      { initialEntries: ['/?visibility=public&pinned=pinned'] },
+      { initialEntries: ['/?visibility=public&pinned=pinned&verification=verified'] },
     );
     render(<RouterProvider router={router} />);
 
     expect(screen.getByRole('combobox', { name: 'Pin status' })).toHaveValue('pinned');
     expect(screen.getByRole('combobox', { name: 'Visibility' })).toHaveValue('public');
+    expect(screen.getByRole('combobox', { name: 'Verified' })).toHaveValue('verified');
     await waitFor(() => expect(mocks.listArticles).toHaveBeenCalledWith(
-      expect.objectContaining({ visibility: 'public', pinned: 'pinned' }),
+      expect.objectContaining({ visibility: 'public', pinned: 'pinned', verification: 'verified' }),
+      expect.any(AbortSignal),
+      undefined,
+    ));
+  });
+
+  it('defaults the verification filter to all articles', async () => {
+    const router = createMemoryRouter([{ path: '/', element: <HomePage /> }]);
+    render(<RouterProvider router={router} />);
+
+    expect(screen.getByRole('combobox', { name: 'Verified' })).toHaveValue('all');
+    await waitFor(() => expect(mocks.listArticles).toHaveBeenCalledWith(
+      expect.objectContaining({ verification: 'all' }),
       expect.any(AbortSignal),
       undefined,
     ));
