@@ -15,8 +15,16 @@ export function stringToPastelHex(value: string) {
 }
 
 export function TagChip({ tag }: { tag: string }) {
+  const color = stringToPastelHex(tag);
+  const red = Number.parseInt(color.slice(1, 3), 16);
+  const green = Number.parseInt(color.slice(3, 5), 16);
+  const blue = Number.parseInt(color.slice(5, 7), 16);
+
   return (
-    <span className="tag" style={{ backgroundColor: stringToPastelHex(tag), color: '#0a0a0a' }}>
+    <span
+      className="tag"
+      style={{ color, border: `1px solid ${color}`, backgroundColor: `rgba(${red}, ${green}, ${blue}, 0.1)` }}
+    >
       <Tag aria-hidden="true" />{tag}
     </span>
   );
