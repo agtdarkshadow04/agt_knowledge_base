@@ -93,7 +93,15 @@ export function ArticlePage() {
           margin: [12, 12],
           filename: downloadFilename(article.title, 'pdf'),
           image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { backgroundColor: '#ffffff', scale: 2, useCORS: true },
+          html2canvas: {
+            backgroundColor: '#ffffff',
+            scale: 2,
+            useCORS: true,
+            onclone: (clonedDocument: Document) => {
+              clonedDocument.documentElement.dataset.uiScale = '1.00';
+              clonedDocument.documentElement.dataset.fontSize = 'normal';
+            },
+          },
           jsPDF: { format: 'a4', orientation: 'portrait', unit: 'mm' },
         })
         .from(pdfSource)

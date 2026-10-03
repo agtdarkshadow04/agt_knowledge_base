@@ -181,6 +181,15 @@ describe('ArticlePage', () => {
 
     await waitFor(() => expect(mocks.pdfWorker.save).toHaveBeenCalled());
     expect(mocks.pdfWorker.set).toHaveBeenCalledWith(expect.objectContaining({ filename: 'Portal Guide.pdf' }));
+    const pdfOptions = mocks.pdfWorker.set.mock.calls[0][0] as {
+      html2canvas: { onclone(clonedDocument: Document): void };
+    };
+    const clonedDocument = document.implementation.createHTMLDocument();
+    clonedDocument.documentElement.dataset.uiScale = '2.00';
+    clonedDocument.documentElement.dataset.fontSize = 'extra-large';
+    pdfOptions.html2canvas.onclone(clonedDocument);
+    expect(clonedDocument.documentElement.dataset.uiScale).toBe('1.00');
+    expect(clonedDocument.documentElement.dataset.fontSize).toBe('normal');
     const pdfSource = mocks.pdfWorker.from.mock.calls[0][0] as HTMLElement;
     expect(pdfSource).toHaveTextContent('Portal Guide');
     expect(pdfSource).toHaveTextContent('Safe portal navigation instructions.');
