@@ -38,8 +38,10 @@ describe('ArticleCard', () => {
     const heading = container.querySelector('.article-card-heading');
     const status = container.querySelector('.article-card-status');
     const excerpt = container.querySelector('.excerpt');
+    const tags = container.querySelector('.tag-list');
 
     expect(heading?.nextElementSibling).toBe(status);
     expect(status?.nextElementSibling).toBe(excerpt);
+    expect(excerpt?.nextElementSibling).toBe(tags);
   });
 });

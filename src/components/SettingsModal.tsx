@@ -3,8 +3,10 @@ import type { SessionUser } from '../types';
 
 const uiScales = ['0.50', '0.75', '1.00', '1.25', '1.50', '2.00'] as const;
 const fontSizes = ['small', 'normal', 'large', 'extra-large'] as const;
+const searchResultsViews = ['cards', 'rows'] as const;
 type UiScale = typeof uiScales[number];
 type FontSize = typeof fontSizes[number];
+type SearchResultsView = typeof searchResultsViews[number];
 
 function storedSetting<T extends string>(key: string, values: readonly T[], fallback: T) {
   const value = localStorage.getItem(key);
@@ -12,6 +14,7 @@ function storedSetting<T extends string>(key: string, values: readonly T[], fall
 }
 
 export function applyStoredAccessibilitySettings() {
+  document.documentElement.dataset.searchResults = storedSetting('agt-search-results', searchResultsViews, 'cards');
   document.documentElement.dataset.uiScale = storedSetting('agt-ui-scale', uiScales, '1.00');
   document.documentElement.dataset.fontSize = storedSetting('agt-font-size', fontSizes, 'normal');
 }
@@ -30,6 +33,7 @@ export function SettingsIcon() {
 export function SettingsModal({ user, onClose }: { user: SessionUser | null; onClose(): void }) {
   const titleId = useId();
   const dialog = useRef<HTMLElement>(null);
+  const [searchResultsView, setSearchResultsView] = useState<SearchResultsView>(() => storedSetting('agt-search-results', searchResultsViews, 'cards'));
   const [uiScale, setUiScale] = useState<UiScale>(() => storedSetting('agt-ui-scale', uiScales, '1.00'));
   const [fontSize, setFontSize] = useState<FontSize>(() => storedSetting('agt-font-size', fontSizes, 'normal'));
 
@@ -57,6 +61,11 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [onClose]);
+
+  useEffect(() => {
+    localStorage.setItem('agt-search-results', searchResultsView);
+    document.documentElement.dataset.searchResults = searchResultsView;
+  }, [searchResultsView]);
 
   useEffect(() => {
     localStorage.setItem('agt-ui-scale', uiScale);
@@ -90,6 +99,19 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
             <div><dt>Email</dt><dd>{user?.email ?? 'N/A'}</dd></div>
             <div><dt>Account type</dt><dd>{user ? user.role === 'Admin' ? 'Administrator' : 'Standard' : 'N/A'}</dd></div>
           </dl>
+        </section>
+
+        <section className="settings-section" aria-labelledby={`${titleId}-user-interface`}>
+          <h3 id={`${titleId}-user-interface`}>User Interface</h3>
+          <div className="settings-controls">
+            <label className="field">
+              Search Results
+              <select value={searchResultsView} onChange={(event) => setSearchResultsView(event.target.value as SearchResultsView)}>
+                <option value="cards">Cards</option>
+                <option value="rows">Rows</option>
+              </select>
+            </label>
+          </div>
         </section>
 
         <section className="settings-section" aria-labelledby={`${titleId}-accessibility`}>

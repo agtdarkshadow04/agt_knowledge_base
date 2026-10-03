@@ -6,6 +6,7 @@ import { SettingsModal } from './SettingsModal';
 describe('SettingsModal', () => {
   beforeEach(() => {
     localStorage.clear();
+    delete document.documentElement.dataset.searchResults;
     delete document.documentElement.dataset.uiScale;
     delete document.documentElement.dataset.fontSize;
   });
@@ -35,7 +36,7 @@ describe('SettingsModal', () => {
     expect(screen.getByText(accountType)).toBeInTheDocument();
   });
 
-  it('displays account details and persists accessibility settings', async () => {
+  it('displays account details and persists interface and accessibility settings', async () => {
     const user = userEvent.setup();
     render(
       <SettingsModal
@@ -54,10 +55,20 @@ describe('SettingsModal', () => {
     expect(screen.getByText('traveller@example.com')).toBeInTheDocument();
     expect(screen.getByText('Administrator')).toBeInTheDocument();
 
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual([
+      'Account',
+      'User Interface',
+      'Accessibility',
+    ]);
+    expect(screen.getByRole('combobox', { name: 'Search Results' })).toHaveValue('cards');
+
+    await user.selectOptions(screen.getByLabelText('Search Results'), 'rows');
     await user.selectOptions(screen.getByLabelText('UI scale'), '1.50');
     await user.selectOptions(screen.getByLabelText('Font size'), 'large');
+    expect(localStorage.getItem('agt-search-results')).toBe('rows');
     expect(localStorage.getItem('agt-ui-scale')).toBe('1.50');
     expect(localStorage.getItem('agt-font-size')).toBe('large');
+    expect(document.documentElement).toHaveAttribute('data-search-results', 'rows');
     expect(document.documentElement).toHaveAttribute('data-ui-scale', '1.50');
     expect(document.documentElement).toHaveAttribute('data-font-size', 'large');
   });
