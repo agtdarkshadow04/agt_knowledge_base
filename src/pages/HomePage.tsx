@@ -150,7 +150,7 @@ export function HomePage() {
       <section className="results-section" aria-labelledby="results-title">
         <div className="results-heading">
           <div><p className="eyebrow">Transmissions</p><h2 id="results-title">Published articles</h2></div>
-          {result && <p aria-live="polite">{result.total.toLocaleString()} result{result.total === 1 ? '' : 's'}</p>}
+          {result && <p aria-live="polite">{result.total.toLocaleString()} results • {result.items.length.toLocaleString()} shown</p>}
         </div>
 
         {loading && <LoadingState />}

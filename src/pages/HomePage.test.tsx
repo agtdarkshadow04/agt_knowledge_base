@@ -51,4 +51,34 @@ describe('HomePage', () => {
       undefined,
     ));
   });
+
+  it('shows the total result count and the number of articles on the current page', async () => {
+    mocks.listArticles.mockResolvedValueOnce({
+      items: [{
+        id: 'article-1',
+        title: 'Test article',
+        excerpt: '',
+        tags: [],
+        visibility: 'Public',
+        isPinned: false,
+        isProtected: false,
+        isVerified: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        createdBy: 'user-1',
+        createdByName: 'Test User',
+        modifiedAt: '2026-01-01T00:00:00.000Z',
+        modifiedBy: 'user-1',
+        modifiedByName: 'Test User',
+        version: 1,
+      }],
+      page: 2,
+      pageSize: 12,
+      total: 13,
+      totalPages: 2,
+    });
+    const router = createMemoryRouter([{ path: '/', element: <HomePage /> }]);
+    render(<RouterProvider router={router} />);
+
+    expect(await screen.findByText('13 results • 1 shown')).toBeInTheDocument();
+  });
 });
