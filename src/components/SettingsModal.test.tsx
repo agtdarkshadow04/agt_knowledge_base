@@ -18,7 +18,7 @@ describe('SettingsModal', () => {
 
     expect(screen.getByText('Public user')).toBeInTheDocument();
     expect(screen.getAllByText('N/A')).toHaveLength(2);
-    expect(screen.queryByRole('switch', { name: 'Allow Downloads' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Allow Downloads' })).not.toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -35,7 +35,7 @@ describe('SettingsModal', () => {
     );
 
     expect(screen.getByText(accountType)).toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: 'Allow Downloads' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Allow Downloads' })).toHaveValue('false');
   });
 
   it('displays account details and persists interface and accessibility settings', async () => {
@@ -63,10 +63,10 @@ describe('SettingsModal', () => {
       'Accessibility',
     ]);
     expect(screen.getByRole('combobox', { name: 'Search Results' })).toHaveValue('cards');
-    expect(screen.getByRole('switch', { name: 'Allow Downloads' })).not.toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'Allow Downloads' })).toHaveValue('false');
 
     await user.selectOptions(screen.getByLabelText('Search Results'), 'rows');
-    await user.click(screen.getByRole('switch', { name: 'Allow Downloads' }));
+    await user.selectOptions(screen.getByLabelText('Allow Downloads'), 'true');
     await user.selectOptions(screen.getByLabelText('UI scale'), '1.50');
     await user.selectOptions(screen.getByLabelText('Font size'), 'large');
     expect(localStorage.getItem('agt-search-results')).toBe('rows');

@@ -124,17 +124,12 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
               </select>
             </label>
             {user && (
-              <label className="toggle-field">
+              <label className="field">
                 Allow Downloads
-                <span className="toggle-control">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={allowDownloads}
-                    onChange={(event) => setAllowDownloads(event.target.checked)}
-                  />
-                  <span className="toggle-slider" aria-hidden="true" />
-                </span>
+                <select value={String(allowDownloads)} onChange={(event) => setAllowDownloads(event.target.value === 'true')}>
+                  <option value="false">Don't Allow (Default)</option>
+                  <option value="true">Allow</option>
+                </select>
               </label>
             )}
           </div>
