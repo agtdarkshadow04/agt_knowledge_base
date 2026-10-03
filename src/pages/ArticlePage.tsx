@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { extractHeadings, MarkdownContent } from '../components/MarkdownContent';
 import { ErrorState, LoadingState } from '../components/States';
+import { allowDownloadsChangedEvent, storedAllowDownloadsSetting } from '../components/SettingsModal';
 import { TagChip } from '../components/TagChip';
 import { VisibilityChip } from '../components/VisibilityChip';
 import { deleteArticle, getArticle, setArticlePinned, setArticleProtection, setArticleVerified } from '../services/api';
@@ -32,6 +33,7 @@ export function ArticlePage() {
   const articleBodyRef = useRef<HTMLElement>(null);
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
+  const [allowDownloads, setAllowDownloads] = useState(storedAllowDownloadsSetting);
   const [actionBusy, setActionBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [error, setError] = useState('');
@@ -45,6 +47,15 @@ export function ArticlePage() {
   }, [getToken, id, viewerSub]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const syncAllowDownloads = () => setAllowDownloads(storedAllowDownloadsSetting());
+    window.addEventListener(allowDownloadsChangedEvent, syncAllowDownloads);
+    window.addEventListener('storage', syncAllowDownloads);
+    return () => {
+      window.removeEventListener(allowDownloadsChangedEvent, syncAllowDownloads);
+      window.removeEventListener('storage', syncAllowDownloads);
+    };
+  }, []);
   const headings = useMemo(() => extractHeadings(article?.content ?? ''), [article?.content]);
   const isAdmin = user?.role === 'Admin';
   const canEdit = Boolean(user && article && (isAdmin || !article.isProtected));
@@ -168,12 +179,16 @@ export function ArticlePage() {
         </dl>
         {user && (
           <div className="article-actions">
-            <button className="button button-secondary" onClick={downloadMarkdown}>
-              <Download aria-hidden="true" />Download raw Markdown
-            </button>
-            <button className="button button-secondary" disabled={pdfBusy} onClick={() => void downloadPdf()}>
-              <FileText aria-hidden="true" />{pdfBusy ? 'Creating PDF…' : 'Download PDF'}
-            </button>
+            {allowDownloads && (
+              <>
+                <button className="button button-secondary" onClick={downloadMarkdown}>
+                  <Download aria-hidden="true" />Download Markdown Source
+                </button>
+                <button className="button button-secondary" disabled={pdfBusy} onClick={() => void downloadPdf()}>
+                  <FileText aria-hidden="true" />{pdfBusy ? 'Creating PDF…' : 'Download PDF'}
+                </button>
+              </>
+            )}
             <Link className="button button-secondary" to={`/articles/${article.id}/history`}><History aria-hidden="true" />Revision history</Link>
             {canEdit && <Link className="button button-primary" to={`/articles/${article.id}/edit`}><Edit3 aria-hidden="true" />Edit article</Link>}
             {isAdmin && (

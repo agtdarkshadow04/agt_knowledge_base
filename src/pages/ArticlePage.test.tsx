@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { allowDownloadsChangedEvent } from '../components/SettingsModal';
 import type { Article, SessionUser } from '../types';
 import { ArticlePage } from './ArticlePage';
 
@@ -58,6 +59,7 @@ const article: Article = {
 
 describe('ArticlePage', () => {
   beforeEach(() => {
+    localStorage.clear();
     mocks.user = { sub: 'admin', username: 'atlas', displayName: 'Atlas', role: 'Admin' };
     mocks.getArticle.mockReset();
     mocks.getArticle.mockResolvedValue(article);
@@ -75,7 +77,7 @@ describe('ArticlePage', () => {
     mocks.pdfWorker.save.mockResolvedValue(undefined);
   });
 
-  it('offers raw Markdown and PDF downloads to Standard users', async () => {
+  it('hides Markdown and PDF downloads by default for Standard users', async () => {
     mocks.user = { sub: 'standard', username: 'apollo', displayName: 'Apollo', role: 'Standard' };
     const router = createMemoryRouter(
       [{ path: '/articles/:id', element: <ArticlePage /> }],
@@ -83,11 +85,40 @@ describe('ArticlePage', () => {
     );
     render(<RouterProvider router={router} />);
 
-    expect(await screen.findByRole('button', { name: 'Download raw Markdown' })).toBeInTheDocument();
+    await screen.findByText('Created by');
+    expect(screen.queryByRole('button', { name: 'Download Markdown Source' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download PDF' })).not.toBeInTheDocument();
+  });
+
+  it('offers Markdown and PDF downloads to Standard users when enabled', async () => {
+    localStorage.setItem('agt-allow-downloads', 'true');
+    mocks.user = { sub: 'standard', username: 'apollo', displayName: 'Apollo', role: 'Standard' };
+    const router = createMemoryRouter(
+      [{ path: '/articles/:id', element: <ArticlePage /> }],
+      { initialEntries: [`/articles/${article.id}`] },
+    );
+    render(<RouterProvider router={router} />);
+
+    expect(await screen.findByRole('button', { name: 'Download Markdown Source' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download PDF' })).toBeInTheDocument();
   });
 
+  it('applies download setting changes without reloading the article', async () => {
+    const router = createMemoryRouter(
+      [{ path: '/articles/:id', element: <ArticlePage /> }],
+      { initialEntries: [`/articles/${article.id}`] },
+    );
+    render(<RouterProvider router={router} />);
+
+    await screen.findByText('Created by');
+    localStorage.setItem('agt-allow-downloads', 'true');
+    window.dispatchEvent(new Event(allowDownloadsChangedEvent));
+
+    expect(await screen.findByRole('button', { name: 'Download Markdown Source' })).toBeInTheDocument();
+  });
+
   it('does not offer downloads to anonymous visitors', async () => {
+    localStorage.setItem('agt-allow-downloads', 'true');
     mocks.user = null;
     const router = createMemoryRouter(
       [{ path: '/articles/:id', element: <ArticlePage /> }],
@@ -96,11 +127,12 @@ describe('ArticlePage', () => {
     render(<RouterProvider router={router} />);
 
     await screen.findByText('Created by');
-    expect(screen.queryByRole('button', { name: 'Download raw Markdown' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download Markdown Source' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Download PDF' })).not.toBeInTheDocument();
   });
 
   it('downloads the unmodified Markdown source', async () => {
+    localStorage.setItem('agt-allow-downloads', 'true');
     const createObjectURL = vi.fn((blob: Blob) => {
       void blob;
       return 'blob:article';
@@ -119,7 +151,7 @@ describe('ArticlePage', () => {
     const user = userEvent.setup();
     render(<RouterProvider router={router} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Download raw Markdown' }));
+    await user.click(await screen.findByRole('button', { name: 'Download Markdown Source' }));
 
     const blob = createObjectURL.mock.calls[0][0] as Blob;
     const contents = await new Promise<string>((resolve, reject) => {
@@ -135,6 +167,7 @@ describe('ArticlePage', () => {
   });
 
   it('renders and saves the sanitized article as a client-side PDF', async () => {
+    localStorage.setItem('agt-allow-downloads', 'true');
     let finishPdf!: () => void;
     mocks.pdfWorker.save.mockReturnValue(new Promise<void>((resolve) => { finishPdf = resolve; }));
     const router = createMemoryRouter(

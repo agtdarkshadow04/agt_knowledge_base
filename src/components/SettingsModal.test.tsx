@@ -18,6 +18,7 @@ describe('SettingsModal', () => {
 
     expect(screen.getByText('Public user')).toBeInTheDocument();
     expect(screen.getAllByText('N/A')).toHaveLength(2);
+    expect(screen.queryByRole('switch', { name: 'Allow Downloads' })).not.toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -34,6 +35,7 @@ describe('SettingsModal', () => {
     );
 
     expect(screen.getByText(accountType)).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Allow Downloads' })).toBeInTheDocument();
   });
 
   it('displays account details and persists interface and accessibility settings', async () => {
@@ -61,11 +63,14 @@ describe('SettingsModal', () => {
       'Accessibility',
     ]);
     expect(screen.getByRole('combobox', { name: 'Search Results' })).toHaveValue('cards');
+    expect(screen.getByRole('switch', { name: 'Allow Downloads' })).not.toBeChecked();
 
     await user.selectOptions(screen.getByLabelText('Search Results'), 'rows');
+    await user.click(screen.getByRole('switch', { name: 'Allow Downloads' }));
     await user.selectOptions(screen.getByLabelText('UI scale'), '1.50');
     await user.selectOptions(screen.getByLabelText('Font size'), 'large');
     expect(localStorage.getItem('agt-search-results')).toBe('rows');
+    expect(localStorage.getItem('agt-allow-downloads')).toBe('true');
     expect(localStorage.getItem('agt-ui-scale')).toBe('1.50');
     expect(localStorage.getItem('agt-font-size')).toBe('large');
     expect(document.documentElement).toHaveAttribute('data-search-results', 'rows');

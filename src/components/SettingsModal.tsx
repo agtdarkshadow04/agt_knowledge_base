@@ -4,6 +4,7 @@ import type { SessionUser } from '../types';
 const uiScales = ['0.50', '0.75', '1.00', '1.25', '1.50', '2.00'] as const;
 const fontSizes = ['small', 'normal', 'large', 'extra-large'] as const;
 const searchResultsViews = ['cards', 'rows'] as const;
+export const allowDownloadsChangedEvent = 'agt-allow-downloads-changed';
 type UiScale = typeof uiScales[number];
 type FontSize = typeof fontSizes[number];
 type SearchResultsView = typeof searchResultsViews[number];
@@ -11,6 +12,10 @@ type SearchResultsView = typeof searchResultsViews[number];
 function storedSetting<T extends string>(key: string, values: readonly T[], fallback: T) {
   const value = localStorage.getItem(key);
   return values.includes(value as T) ? value as T : fallback;
+}
+
+export function storedAllowDownloadsSetting() {
+  return localStorage.getItem('agt-allow-downloads') === 'true';
 }
 
 export function applyStoredAccessibilitySettings() {
@@ -34,6 +39,7 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
   const titleId = useId();
   const dialog = useRef<HTMLElement>(null);
   const [searchResultsView, setSearchResultsView] = useState<SearchResultsView>(() => storedSetting('agt-search-results', searchResultsViews, 'cards'));
+  const [allowDownloads, setAllowDownloads] = useState(storedAllowDownloadsSetting);
   const [uiScale, setUiScale] = useState<UiScale>(() => storedSetting('agt-ui-scale', uiScales, '1.00'));
   const [fontSize, setFontSize] = useState<FontSize>(() => storedSetting('agt-font-size', fontSizes, 'normal'));
 
@@ -66,6 +72,12 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
     localStorage.setItem('agt-search-results', searchResultsView);
     document.documentElement.dataset.searchResults = searchResultsView;
   }, [searchResultsView]);
+
+  useEffect(() => {
+    if (!user) return;
+    localStorage.setItem('agt-allow-downloads', String(allowDownloads));
+    window.dispatchEvent(new Event(allowDownloadsChangedEvent));
+  }, [allowDownloads, user]);
 
   useEffect(() => {
     localStorage.setItem('agt-ui-scale', uiScale);
@@ -111,6 +123,20 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
                 <option value="rows">Rows</option>
               </select>
             </label>
+            {user && (
+              <label className="toggle-field">
+                Allow Downloads
+                <span className="toggle-control">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={allowDownloads}
+                    onChange={(event) => setAllowDownloads(event.target.checked)}
+                  />
+                  <span className="toggle-slider" aria-hidden="true" />
+                </span>
+              </label>
+            )}
           </div>
         </section>
 
