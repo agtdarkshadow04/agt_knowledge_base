@@ -1,6 +1,7 @@
-import { BadgeCheck, CalendarClock, LockKeyhole, Pin, Tag } from 'lucide-react';
+import { BadgeCheck, CalendarClock, LockKeyhole, Pin } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ArticleSummary } from '../types';
+import { TagChip } from './TagChip';
 import { VisibilityChip } from './VisibilityChip';
 
 function formatDate(value: string) {
@@ -30,7 +31,7 @@ export function ArticleCard({ article }: { article: ArticleSummary }) {
       </div>
       <p className="excerpt">{article.excerpt || 'Open this transmission to read the full article.'}</p>
       <div className="tag-list" aria-label="Article tags">
-        {article.tags.map((tag) => <span className="tag" key={tag}><Tag aria-hidden="true" />{tag}</span>)}
+        {article.tags.map((tag) => <TagChip key={tag} tag={tag} />)}
       </div>
       <footer className="article-card-meta">
         <span><CalendarClock aria-hidden="true" /> Updated {formatDate(article.modifiedAt)}</span>

@@ -1,9 +1,10 @@
-import { BadgeCheck, Clock3, Download, Edit3, FileText, History, LockKeyhole, Pin, ShieldCheck, Tag, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
+import { BadgeCheck, Clock3, Download, Edit3, FileText, History, LockKeyhole, Pin, ShieldCheck, Trash2, UnlockKeyhole, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { extractHeadings, MarkdownContent } from '../components/MarkdownContent';
 import { ErrorState, LoadingState } from '../components/States';
+import { TagChip } from '../components/TagChip';
 import { VisibilityChip } from '../components/VisibilityChip';
 import { deleteArticle, getArticle, setArticlePinned, setArticleProtection, setArticleVerified } from '../services/api';
 import type { Article } from '../types';
@@ -158,7 +159,7 @@ export function ArticlePage() {
             {article.isProtected && <span className="status-chip protected"><LockKeyhole aria-hidden="true" />Protected</span>}
           </div>
         </div>
-        <div className="tag-list">{article.tags.map((tag) => <span className="tag" key={tag}><Tag aria-hidden="true" />{tag}</span>)}</div>
+        <div className="tag-list">{article.tags.map((tag) => <TagChip key={tag} tag={tag} />)}</div>
         <dl className="audit-grid">
           <div><dt><UserRound aria-hidden="true" />Created by</dt><dd>{article.createdByName}</dd></div>
           <div><dt><Clock3 aria-hidden="true" />Created</dt><dd>{formatTimestamp(article.createdAt)}</dd></div>
