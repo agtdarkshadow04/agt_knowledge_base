@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManageTagsModal } from './ManageTagsModal';
+import { stringToPastelHex } from './TagChip';
 
 const mocks = vi.hoisted(() => ({
   createTag: vi.fn(),
@@ -77,6 +78,25 @@ describe('ManageTagsModal', () => {
     expect(mocks.createTag).not.toHaveBeenCalled();
   });
 
+  it('generates a color from each nonblank name and resets it for blank names', async () => {
+    const user = userEvent.setup();
+    render(<ManageTagsModal onClose={() => undefined} />);
+    await screen.findByText('Portal');
+
+    const name = screen.getByLabelText('Name');
+    const color = screen.getByLabelText('Color');
+
+    await user.type(name, 'P');
+    expect(color).toHaveValue(stringToPastelHex('P'));
+
+    await user.type(name, 'ortal');
+    expect(color).toHaveValue(stringToPastelHex('Portal'));
+
+    await user.clear(name);
+    await user.type(name, '   ');
+    expect(color).toHaveValue('#FFB451');
+  });
+
   it('creates and updates tags using trimmed canonical values', async () => {
     const user = userEvent.setup();
     render(<ManageTagsModal onClose={() => undefined} />);
@@ -97,7 +117,7 @@ describe('ManageTagsModal', () => {
     await user.click(screen.getByRole('button', { name: 'Save tag' }));
     await waitFor(() => expect(mocks.updateTag).toHaveBeenCalledWith(
       portalTag.id,
-      { name: 'Gateway', color: portalTag.color },
+      { name: 'Gateway', color: stringToPastelHex('Gateway').toUpperCase() },
       'token',
     ));
   });

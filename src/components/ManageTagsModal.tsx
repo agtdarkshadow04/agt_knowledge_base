@@ -11,7 +11,7 @@ import {
   updateTag,
 } from '../services/api';
 import type { CanonicalTag, OrphanTagReference } from '../types';
-import { TagChip } from './TagChip';
+import { stringToPastelHex, TagChip } from './TagChip';
 
 const colorPattern = /^#[0-9a-f]{6}$/i;
 
@@ -92,6 +92,14 @@ export function ManageTagsModal({ onClose }: { onClose(): void }) {
     setForm(emptyForm);
     setEditingId(undefined);
     setFormErrors({});
+  }
+
+  function updateName(name: string) {
+    const canonicalName = name.trim();
+    setForm({
+      name,
+      color: canonicalName ? stringToPastelHex(canonicalName) : emptyForm.color,
+    });
   }
 
   function validateForm() {
@@ -195,7 +203,7 @@ export function ManageTagsModal({ onClose }: { onClose(): void }) {
                 maxLength={40}
                 aria-invalid={Boolean(formErrors.name)}
                 aria-describedby={formErrors.name ? `${titleId}-name-error` : undefined}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
+                onChange={(event) => updateName(event.target.value)}
               />
             </label>
             {formErrors.name && <p className="field-error" id={`${titleId}-name-error`}>{formErrors.name}</p>}
