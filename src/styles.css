@@ -178,8 +178,7 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 [data-search-results='rows'] .article-card { min-height: 0; padding: 1.4rem 0; border: 0; border-radius: 0; background: transparent; transition: none; }
 [data-search-results='rows'] .article-card + .article-card { border-top: 1px solid var(--red); }
 [data-search-results='rows'] .article-card:hover { transform: none; box-shadow: none; }
-[data-search-results='rows'] .article-card-heading .eyebrow,
-[data-search-results='rows'] .article-card-meta { display: none; }
+[data-search-results='rows'] .article-card-heading .eyebrow { display: none; }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 2rem; color: #aaa39a; font-family: ui-monospace, monospace; font-size: 0.72rem; }
 
 .state-panel { display: flex; min-height: 19rem; flex-direction: column; align-items: center; justify-content: center; gap: 0.8rem; padding: 2rem; border: 1px solid rgba(255, 180, 81, 0.1); border-radius: 0.9rem; text-align: center; background: rgba(255, 180, 81, 0.018); }
