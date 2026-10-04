@@ -1,11 +1,12 @@
 import { Eye, EyeOff, FilePenLine, Save, X } from 'lucide-react';
-import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBlocker, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { MarkdownContent } from '../components/MarkdownContent';
 import { ErrorState, LoadingState } from '../components/States';
-import { ApiError, createArticle, getArticle, updateArticle } from '../services/api';
-import type { ArticleVisibility } from '../types';
+import { TagPicker } from '../components/TagPicker';
+import { ApiError, createArticle, getArticle, listTags, updateArticle } from '../services/api';
+import type { ArticleVisibility, CanonicalTag } from '../types';
 
 type EditorMode = 'plain' | 'rich';
 
@@ -15,12 +16,12 @@ const RichMarkdownEditor = lazy(() => import('../components/RichMarkdownEditor')
 
 interface Draft {
   title: string;
-  tags: string;
+  tagIds: string[];
   content: string;
   visibility: ArticleVisibility;
 }
 
-const emptyDraft: Draft = { title: '', tags: '', content: '', visibility: 'Internal' };
+const emptyDraft: Draft = { title: '', tagIds: [], content: '', visibility: 'Internal' };
 
 function serializeDraft(draft: Draft) {
   return JSON.stringify(draft);
@@ -52,8 +53,47 @@ export function EditorPage() {
   const [loadError, setLoadError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState('');
+  const [catalogTags, setCatalogTags] = useState<CanonicalTag[]>([]);
+  const [knownTags, setKnownTags] = useState<CanonicalTag[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
+  const [tagsReady, setTagsReady] = useState(false);
+  const [tagsError, setTagsError] = useState('');
   const allowNavigation = useRef(false);
   const dirty = serializeDraft(draft) !== baseline;
+
+  const rememberTags = useCallback((nextTags: CanonicalTag[]) => {
+    setKnownTags((current) => {
+      const byId = new Map(current.map((tag) => [tag.id, tag]));
+      nextTags.forEach((tag) => byId.set(tag.id, tag));
+      return [...byId.values()];
+    });
+  }, []);
+
+  const refreshTagCatalog = useCallback(async (signal?: AbortSignal) => {
+    setTagsLoading(true);
+    setTagsReady(false);
+    setTagsError('');
+    try {
+      const nextTags = await listTags('', signal);
+      if (signal?.aborted) return null;
+      setCatalogTags(nextTags);
+      rememberTags(nextTags);
+      setTagsReady(true);
+      return nextTags;
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') return null;
+      setTagsError(cause instanceof Error ? cause.message : 'Tags could not be verified.');
+      return null;
+    } finally {
+      if (!signal?.aborted) setTagsLoading(false);
+    }
+  }, [rememberTags]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void refreshTagCatalog(controller.signal);
+    return () => controller.abort();
+  }, [refreshTagCatalog]);
 
   useEffect(() => {
     if (!id) return;
@@ -67,7 +107,8 @@ export function EditorPage() {
           setLoadError('This protected article can only be edited by an Administrator.');
           return;
         }
-        const loaded = { title: article.title, tags: article.tags.join(', '), content: article.content, visibility: article.visibility };
+        const loaded = { title: article.title, tagIds: article.tags.map((tag) => tag.id), content: article.content, visibility: article.visibility };
+        rememberTags(article.tags);
         setDraft(loaded);
         setBaseline(serializeDraft(loaded));
         setVersion(article.version);
@@ -78,7 +119,7 @@ export function EditorPage() {
     }
     void load();
     return () => controller.abort();
-  }, [getToken, id, user?.role]);
+  }, [getToken, id, rememberTags, user?.role]);
 
   useEffect(() => {
     const listener = (event: BeforeUnloadEvent) => {
@@ -94,30 +135,51 @@ export function EditorPage() {
     dirty && !allowNavigation.current && currentLocation.pathname !== nextLocation.pathname,
   );
 
-  const tags = useMemo(() => draft.tags.split(',').map((tag) => tag.trim()).filter(Boolean), [draft.tags]);
   const currentRevision = useMemo(() => JSON.parse(baseline) as Draft, [baseline]);
   const proposedRevision = useMemo(() => ({
     title: draft.title.trim(),
-    tags: tags.join(', '),
+    tagIds: draft.tagIds,
     content: draft.content,
     visibility: draft.visibility,
-  }), [draft.content, draft.title, draft.visibility, tags]);
+  }), [draft.content, draft.tagIds, draft.title, draft.visibility]);
+  const knownTagsById = useMemo(() => new Map(knownTags.map((tag) => [tag.id, tag])), [knownTags]);
+  const invalidTagIds = useMemo(() => {
+    if (!tagsReady) return [];
+    const available = new Set(catalogTags.map((tag) => tag.id));
+    return draft.tagIds.filter((tagId) => !available.has(tagId));
+  }, [catalogTags, draft.tagIds, tagsReady]);
 
-  function validate() {
+  function tagNames(tagIds: string[]) {
+    return tagIds.map((tagId) => knownTagsById.get(tagId)?.name ?? 'Unavailable tag').join(', ');
+  }
+
+  function sameTagIds(left: string[], right: string[]) {
+    return left.length === right.length && left.every((tagId, index) => tagId === right[index]);
+  }
+
+  function validate(verifiedTags: CanonicalTag[] | null = tagsReady ? catalogTags : null) {
     const next: Record<string, string> = {};
     if (draft.title.trim().length < 3) next.title = 'Enter a title with at least 3 characters.';
     if (draft.title.length > 180) next.title = 'Keep the title to 180 characters or fewer.';
     if (draft.content.trim().length < 20) next.content = 'Article content must contain at least 20 characters.';
-    if (tags.length > 12) next.tags = 'Use no more than 12 tags.';
-    if (tags.some((tag) => tag.length > 40)) next.tags = 'Each tag must be 40 characters or fewer.';
+    if (draft.tagIds.length > 12) next.tags = 'Use no more than 12 tags.';
+    if (!verifiedTags) next.tags = 'Tags could not be verified. Refresh the tag catalog and try again.';
+    else {
+      const available = new Set(verifiedTags.map((tag) => tag.id));
+      if (draft.tagIds.some((tagId) => !available.has(tagId))) {
+        next.tags = 'A selected tag was renamed or deleted. Refresh the catalog, remove unavailable tags, and try again.';
+      }
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   }
 
-  function handleSave(event: FormEvent) {
+  async function handleSave(event: FormEvent) {
     event.preventDefault();
     if (!validate()) return;
     setSaveError('');
+    const verifiedTags = await refreshTagCatalog();
+    if (!validate(verifiedTags)) return;
     setSaveConfirmationOpen(true);
   }
 
@@ -125,17 +187,20 @@ export function EditorPage() {
     setSaving(true);
     setSaveError('');
     try {
-      const input = { title: draft.title.trim(), content: draft.content, tags, visibility: draft.visibility, version };
+      const input = { title: draft.title.trim(), content: draft.content, tagIds: draft.tagIds, visibility: draft.visibility, version };
       const saved = isNew
         ? await createArticle(input, await getToken())
         : await updateArticle(id, input, await getToken());
-      const savedDraft = { title: saved.title, tags: saved.tags.join(', '), content: saved.content, visibility: saved.visibility };
+      const savedDraft = { title: saved.title, tagIds: saved.tags.map((tag) => tag.id), content: saved.content, visibility: saved.visibility };
       setBaseline(serializeDraft(savedDraft));
       allowNavigation.current = true;
       navigate(`/articles/${saved.id}`, { replace: true });
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         setSaveError('This article changed after you opened it. Copy your work, reload the latest version, and merge your changes.');
+      } else if (cause instanceof ApiError && cause.status === 400 && /tag/i.test(cause.message)) {
+        setSaveError('One or more selected tags is no longer valid. Refresh the tag catalog, review your selections, and try again.');
+        await refreshTagCatalog();
       } else {
         setSaveError(cause instanceof Error ? cause.message : 'Article could not be saved.');
       }
@@ -160,12 +225,22 @@ export function EditorPage() {
       </header>
 
       {saveError && <div className="inline-alert" role="alert">{saveError}</div>}
-      <form onSubmit={handleSave} noValidate>
+      <form onSubmit={(event) => void handleSave(event)} noValidate>
         <div className="editor-fields">
           <label className="field"><span>Title</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} aria-invalid={Boolean(errors.title)} aria-describedby={errors.title ? 'title-error' : undefined} /></label>
           {errors.title && <p className="field-error" id="title-error">{errors.title}</p>}
-          <label className="field"><span>Tags <small>Comma separated</small></span><input value={draft.tags} onChange={(event) => setDraft({ ...draft, tags: event.target.value })} placeholder="guides, expeditions, portals" aria-invalid={Boolean(errors.tags)} aria-describedby={errors.tags ? 'tags-error' : undefined} /></label>
-          {errors.tags && <p className="field-error" id="tags-error">{errors.tags}</p>}
+          <TagPicker
+            tags={catalogTags}
+            knownTags={knownTags}
+            selectedIds={draft.tagIds}
+            loading={tagsLoading}
+            error={errors.tags || tagsError}
+            onChange={(tagIds) => {
+              setDraft({ ...draft, tagIds });
+              setErrors((current) => ({ ...current, tags: '' }));
+            }}
+            onRefresh={() => void refreshTagCatalog()}
+          />
           <label className="field"><span>Visibility</span>
             <select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: event.target.value as ArticleVisibility })}>
               <option value="Public">Public</option>
@@ -183,7 +258,7 @@ export function EditorPage() {
           <div className="editor-toolbar-actions">
             <a className="icon-button" href="https://www.markdownguide.org/basic-syntax/" target="_blank" rel="noreferrer" title="Markdown Guide"><MarkdownGuideIcon /><span className="sr-only">Markdown Guide</span></a>
             <button className="icon-button" type="button" onClick={cancel} title="Exit without saving"><X aria-hidden="true" /><span className="sr-only">Exit without saving</span></button>
-            <button className="icon-button" type="submit" disabled={saving} title="Save article"><Save aria-hidden="true" /><span className="sr-only">Save article</span></button>
+            <button className="icon-button" type="submit" disabled={saving || tagsLoading || !tagsReady || invalidTagIds.length > 0} title="Save article"><Save aria-hidden="true" /><span className="sr-only">Save article</span></button>
             <button className="icon-button" type="button" aria-pressed={preview} onClick={() => setPreview((value) => !value)} title={preview ? 'Hide preview' : 'Show preview'}>
               {preview ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
               <span className="sr-only">{preview ? 'Hide preview' : 'Show preview'}</span>
@@ -217,7 +292,7 @@ export function EditorPage() {
             <div className="save-diff-headings" aria-hidden="true"><span>Field</span><span>Current revision</span><span>New revision</span></div>
             <dl className="revision-comparison-metadata save-diff-metadata">
               <div className={currentRevision.title === proposedRevision.title ? '' : 'changed'}><dt>Title</dt><dd>{currentRevision.title || 'Not set'}</dd><dd>{proposedRevision.title || 'Not set'}</dd></div>
-              <div className={currentRevision.tags === proposedRevision.tags ? '' : 'changed'}><dt>Tags</dt><dd>{currentRevision.tags || 'None'}</dd><dd>{proposedRevision.tags || 'None'}</dd></div>
+              <div className={sameTagIds(currentRevision.tagIds, proposedRevision.tagIds) ? '' : 'changed'}><dt>Tags</dt><dd>{tagNames(currentRevision.tagIds) || 'None'}</dd><dd>{tagNames(proposedRevision.tagIds) || 'None'}</dd></div>
               <div className={currentRevision.visibility === proposedRevision.visibility ? '' : 'changed'}><dt>Visibility</dt><dd>{currentRevision.visibility}</dd><dd>{proposedRevision.visibility}</dd></div>
             </dl>
             <div className={`revision-content-grid save-diff-content ${currentRevision.content === proposedRevision.content ? '' : 'changed'}`}>

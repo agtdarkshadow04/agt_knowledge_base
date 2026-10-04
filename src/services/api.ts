@@ -1,5 +1,14 @@
 import { appConfig } from '../config';
-import type { Article, ArticleInput, ArticleListParams, ArticleListResponse, ArticleRevision } from '../types';
+import type {
+  Article,
+  ArticleInput,
+  ArticleListParams,
+  ArticleListResponse,
+  ArticleRevision,
+  CanonicalTag,
+  OrphanTagReference,
+  TagInput,
+} from '../types';
 
 export class ApiError extends Error {
   constructor(
@@ -44,6 +53,46 @@ export function listArticles(params: ArticleListParams, signal?: AbortSignal, to
 export function getArticle(id: string, signal?: AbortSignal, token?: string) {
   const prefix = token ? '/member' : '';
   return request<Article>(`${prefix}/articles/${encodeURIComponent(id)}`, { signal }, token);
+}
+
+export function listTags(search = '', signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  if (search.trim()) query.set('search', search.trim());
+  const suffix = query.size ? `?${query.toString()}` : '';
+  return request<CanonicalTag[]>(`/tags${suffix}`, { signal });
+}
+
+export function createTag(input: TagInput, token: string) {
+  return request<CanonicalTag>('/tags', { method: 'POST', body: JSON.stringify(input) }, token);
+}
+
+export function updateTag(id: string, input: TagInput, token: string) {
+  return request<CanonicalTag>(
+    `/tags/${encodeURIComponent(id)}`,
+    { method: 'PUT', body: JSON.stringify(input) },
+    token,
+  );
+}
+
+export function deleteTag(id: string, token: string) {
+  return request<void>(`/tags/${encodeURIComponent(id)}`, { method: 'DELETE' }, token);
+}
+
+export function listOrphanTagReferences(token: string, signal?: AbortSignal) {
+  return request<OrphanTagReference[]>('/tags/orphans', { signal }, token);
+}
+
+export function removeOrphanTagReference(
+  articleId: string,
+  tagId: string,
+  version: number,
+  token: string,
+) {
+  return request<Article>(
+    `/articles/${encodeURIComponent(articleId)}/orphan-tags/${encodeURIComponent(tagId)}?version=${version}`,
+    { method: 'DELETE' },
+    token,
+  );
 }
 
 export function listArticleRevisions(id: string, token: string, signal?: AbortSignal) {

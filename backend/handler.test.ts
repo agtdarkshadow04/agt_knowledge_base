@@ -10,7 +10,7 @@ describe('article request validation', () => {
       body: JSON.stringify({
         title: 'Portal Guide',
         content: '<script>unsafe</script> content is rejected by the API.',
-        tags: [],
+        tagIds: [],
       }),
       requestContext: { requestId: 'request-1' },
     } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
@@ -95,11 +95,47 @@ describe('article request validation', () => {
       body: JSON.stringify({
         title: 'Restricted Guide',
         content: 'Restricted guidance with enough content for validation.',
-        tags: [],
+        tagIds: [],
         visibility: 'Admin',
       }),
       requestContext: {
         requestId: 'request-6',
+        authorizer: { jwt: { claims: { sub: 'standard-sub', 'cognito:groups': ['Standard'] } } },
+      },
+    } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
+
+    const response = await handler(event);
+
+    if (typeof response === 'string') throw new Error('Expected a structured API response.');
+    expect(response).toMatchObject({ statusCode: 403 });
+  });
+
+  it('rejects tag management by Standard users before accessing persistence', async () => {
+    const event = {
+      routeKey: 'POST /tags',
+      body: JSON.stringify({ name: 'Portal', color: '#B5C3B7' }),
+      requestContext: {
+        requestId: 'request-7',
+        authorizer: { jwt: { claims: { sub: 'standard-sub', 'cognito:groups': ['Standard'] } } },
+      },
+    } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
+
+    const response = await handler(event);
+
+    if (typeof response === 'string') throw new Error('Expected a structured API response.');
+    expect(response).toMatchObject({ statusCode: 403 });
+  });
+
+  it('rejects orphan cleanup by Standard users before accessing persistence', async () => {
+    const event = {
+      routeKey: 'DELETE /articles/{id}/orphan-tags/{tagId}',
+      pathParameters: {
+        id: '00000000-0000-4000-8000-000000000001',
+        tagId: '10000000-0000-4000-8000-000000000099',
+      },
+      queryStringParameters: { version: '3' },
+      requestContext: {
+        requestId: 'request-8',
         authorizer: { jwt: { claims: { sub: 'standard-sub', 'cognito:groups': ['Standard'] } } },
       },
     } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;

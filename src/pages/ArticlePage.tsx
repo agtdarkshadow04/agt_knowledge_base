@@ -178,7 +178,7 @@ export function ArticlePage() {
             {article.isProtected && <span className="status-chip protected"><LockKeyhole aria-hidden="true" />Protected</span>}
           </div>
         </div>
-        <div className="tag-list">{article.tags.map((tag) => <TagChip key={tag} tag={tag} />)}</div>
+        <div className="tag-list">{article.tags.map((tag) => <TagChip key={tag.id} tag={tag} />)}</div>
         <dl className="audit-grid">
           <div><dt><UserRound aria-hidden="true" />Created by</dt><dd>{article.createdByName}</dd></div>
           <div><dt><Clock3 aria-hidden="true" />Created</dt><dd>{formatTimestamp(article.createdAt)}</dd></div>

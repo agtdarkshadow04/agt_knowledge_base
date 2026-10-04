@@ -8,11 +8,29 @@ export interface Actor {
   role: Role;
 }
 
+export interface CanonicalTag {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface TagWrite {
+  name: string;
+  color: string;
+}
+
+export interface TagOrphan {
+  articleId: string;
+  articleTitle: string;
+  version: number;
+  missingTagIds: string[];
+}
+
 export interface ArticleRecord {
   id: string;
   title: string;
   content: string;
-  tags: string[];
+  tags: CanonicalTag[];
   visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
@@ -34,7 +52,7 @@ export interface ArticleRevisionRecord {
   articleId: string;
   title: string;
   content: string;
-  tags: string[];
+  tags: CanonicalTag[];
   visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
@@ -47,7 +65,7 @@ export interface ArticleRevisionRecord {
 
 export interface ListArticlesQuery {
   search: string;
-  tag: string;
+  tagId: string;
   visibility: 'all' | 'public' | 'internal' | 'admin';
   pinned: 'all' | 'pinned';
   protection: 'all' | 'protected' | 'unprotected';
@@ -69,10 +87,16 @@ export interface ArticleListResult {
 export interface ArticleWrite {
   title: string;
   content: string;
-  tags: string[];
+  tagIds: string[];
   visibility?: ArticleVisibility;
   version?: number;
 }
+
+export type OrphanCleanupResult =
+  | { status: 'updated'; article: ArticleRecord }
+  | { status: 'not-found' }
+  | { status: 'conflict' }
+  | { status: 'not-orphan' };
 
 export class AppError extends Error {
   constructor(message: string, readonly statusCode: number, readonly code: string) {
@@ -95,4 +119,20 @@ export class ConflictError extends AppError {
 
 export class NoChangesError extends AppError {
   constructor() { super('No changes were made to the article.', 400, 'NO_CHANGES'); }
+}
+
+export class InvalidTagIdsError extends AppError {
+  constructor() { super('One or more selected tags do not exist. Refresh the tag list and try again.', 400, 'INVALID_TAG_IDS'); }
+}
+
+export class TagNameConflictError extends AppError {
+  constructor() { super('A tag with that name already exists.', 409, 'TAG_NAME_CONFLICT'); }
+}
+
+export class TagNotFoundError extends AppError {
+  constructor() { super('Tag not found.', 404, 'TAG_NOT_FOUND'); }
+}
+
+export class NotOrphanedTagError extends AppError {
+  constructor() { super('The selected tag ID is not an unresolved reference on this article.', 400, 'TAG_NOT_ORPHANED'); }
 }

@@ -31,7 +31,7 @@ export function ArticleCard({ article }: { article: ArticleSummary }) {
       </div>
       <p className="excerpt">{article.excerpt || 'Open this transmission to read the full article.'}</p>
       <div className="tag-list" aria-label="Article tags">
-        {article.tags.map((tag) => <TagChip key={tag} tag={tag} />)}
+        {article.tags.map((tag) => <TagChip key={tag.id} tag={tag} />)}
       </div>
       <footer className="article-card-meta">
         <span><CalendarClock aria-hidden="true" /> Updated {formatDate(article.modifiedAt)}</span>

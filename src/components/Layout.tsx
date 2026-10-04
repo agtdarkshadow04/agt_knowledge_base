@@ -1,14 +1,21 @@
-import { BookOpen, LogIn, LogOut, Plus, ShieldCheck } from 'lucide-react';
+import { BookOpen, LogIn, LogOut, Plus, ShieldCheck, Tag } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { ManageTagsModal } from './ManageTagsModal';
 import { applyStoredAccessibilitySettings, SettingsIcon, SettingsModal } from './SettingsModal';
 
 export function Layout() {
   const { user, signOut } = useAuth();
   const [logoFailed, setLogoFailed] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const tagsButton = useRef<HTMLButtonElement>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
+  const closeTags = useCallback(() => {
+    setTagsOpen(false);
+    requestAnimationFrame(() => tagsButton.current?.focus());
+  }, []);
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
     requestAnimationFrame(() => settingsButton.current?.focus());
@@ -59,6 +66,19 @@ export function Layout() {
                 <LogIn aria-hidden="true" /><span className="sr-only">Sign in</span>
               </NavLink>
             )}
+            {user?.role === 'Admin' && (
+              <button
+                ref={tagsButton}
+                className="icon-button"
+                type="button"
+                onClick={() => setTagsOpen(true)}
+                title="Manage Tags"
+                aria-haspopup="dialog"
+                aria-expanded={tagsOpen}
+              >
+                <Tag aria-hidden="true" /><span className="sr-only">Manage Tags</span>
+              </button>
+            )}
             <button
               ref={settingsButton}
               className="icon-button"
@@ -89,6 +109,7 @@ export function Layout() {
         </nav>
         <p>© {new Date().getUTCFullYear()} Alliance of Galactic Travellers</p>
       </footer>
+      {user?.role === 'Admin' && tagsOpen && <ManageTagsModal onClose={closeTags} />}
       {settingsOpen && <SettingsModal user={user} onClose={closeSettings} />}
     </div>
   );

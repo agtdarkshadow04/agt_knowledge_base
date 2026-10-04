@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HomePage } from './HomePage';
@@ -6,6 +7,7 @@ import { HomePage } from './HomePage';
 const mocks = vi.hoisted(() => ({
   getToken: vi.fn(async () => 'token'),
   listArticles: vi.fn(),
+  listTags: vi.fn(),
 }));
 
 vi.mock('../auth/AuthContext', () => ({
@@ -14,13 +16,17 @@ vi.mock('../auth/AuthContext', () => ({
 
 vi.mock('../services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/api')>();
-  return { ...actual, listArticles: mocks.listArticles };
+  return { ...actual, listArticles: mocks.listArticles, listTags: mocks.listTags };
 });
 
 describe('HomePage', () => {
   beforeEach(() => {
     mocks.listArticles.mockReset();
     mocks.listArticles.mockResolvedValue({ items: [], page: 1, pageSize: 12, total: 0, totalPages: 1 });
+    mocks.listTags.mockReset();
+    mocks.listTags.mockResolvedValue([
+      { id: '10000000-0000-4000-8000-000000000001', name: 'portal', color: '#B5C3B7' },
+    ]);
   });
 
   it('loads visibility, pin, and verification filters from search parameters', async () => {
@@ -47,6 +53,22 @@ describe('HomePage', () => {
     expect(screen.getByRole('combobox', { name: 'Verified' })).toHaveValue('all');
     await waitFor(() => expect(mocks.listArticles).toHaveBeenCalledWith(
       expect.objectContaining({ verification: 'all' }),
+      expect.any(AbortSignal),
+      undefined,
+    ));
+  });
+
+  it('filters by a canonical tag ID instead of free text', async () => {
+    const user = userEvent.setup();
+    const router = createMemoryRouter([{ path: '/', element: <HomePage /> }]);
+    render(<RouterProvider router={router} />);
+
+    const tagFilter = await screen.findByRole('combobox', { name: 'Tag' });
+    await waitFor(() => expect(tagFilter).toBeEnabled());
+    await user.selectOptions(tagFilter, '10000000-0000-4000-8000-000000000001');
+
+    await waitFor(() => expect(mocks.listArticles).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tagId: '10000000-0000-4000-8000-000000000001' }),
       expect.any(AbortSignal),
       undefined,
     ));

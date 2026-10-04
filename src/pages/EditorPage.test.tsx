@@ -1,5 +1,5 @@
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorPage } from './EditorPage';
@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   createArticle: vi.fn(),
   getArticle: vi.fn(),
   getToken: vi.fn(async () => 'token'),
+  listTags: vi.fn(),
   updateArticle: vi.fn(),
 }));
 
@@ -20,7 +21,13 @@ vi.mock('../auth/AuthContext', () => ({
 
 vi.mock('../services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/api')>();
-  return { ...actual, createArticle: mocks.createArticle, getArticle: mocks.getArticle, updateArticle: mocks.updateArticle };
+  return {
+    ...actual,
+    createArticle: mocks.createArticle,
+    getArticle: mocks.getArticle,
+    listTags: mocks.listTags,
+    updateArticle: mocks.updateArticle,
+  };
 });
 
 vi.mock('../components/RichMarkdownEditor', () => ({
@@ -38,15 +45,20 @@ function renderEditor(initialEntry = '/articles/new') {
   return render(<RouterProvider router={router} />);
 }
 
+const portalTag = { id: '10000000-0000-4000-8000-000000000001', name: 'portal', color: '#B5C3B7' };
+const guideTag = { id: '10000000-0000-4000-8000-000000000002', name: 'guide', color: '#FD9CF0' };
+
 describe('EditorPage', () => {
   beforeEach(() => {
     mocks.createArticle.mockReset();
-    mocks.createArticle.mockResolvedValue({ id: 'article-1', title: 'Portal Guide', tags: ['portal'], content: '# Portal Guide\n\nSafe instructions.', visibility: 'Internal', version: 1 });
+    mocks.createArticle.mockResolvedValue({ id: 'article-1', title: 'Portal Guide', tags: [portalTag, guideTag], content: '# Portal Guide\n\nSafe instructions.', visibility: 'Internal', version: 1 });
     mocks.getArticle.mockReset();
-    mocks.getArticle.mockResolvedValue({ id: 'article-1', title: 'Portal Guide', tags: ['portal'], content: '# Portal Guide\n\nCurrent instructions.', visibility: 'Internal', isProtected: false, version: 1 });
+    mocks.getArticle.mockResolvedValue({ id: 'article-1', title: 'Portal Guide', tags: [portalTag], content: '# Portal Guide\n\nCurrent instructions.', visibility: 'Internal', isProtected: false, version: 1 });
     mocks.getToken.mockClear();
+    mocks.listTags.mockReset();
+    mocks.listTags.mockResolvedValue([portalTag, guideTag]);
     mocks.updateArticle.mockReset();
-    mocks.updateArticle.mockResolvedValue({ id: 'article-1', title: 'Updated Portal Guide', tags: ['portal'], content: '# Portal Guide\n\nUpdated instructions.', visibility: 'Internal', version: 2 });
+    mocks.updateArticle.mockResolvedValue({ id: 'article-1', title: 'Updated Portal Guide', tags: [portalTag], content: '# Portal Guide\n\nUpdated instructions.', visibility: 'Internal', version: 2 });
   });
 
   it('switches editing modes without losing unsaved Markdown', async () => {
@@ -92,7 +104,10 @@ describe('EditorPage', () => {
     const user = userEvent.setup();
     renderEditor();
     await user.type(screen.getByLabelText('Title'), 'Portal Guide');
-    await user.type(screen.getByLabelText(/Tags/), 'portal, guide');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save article' })).toBeEnabled());
+    await user.click(screen.getByRole('combobox', { name: 'Tags' }));
+    await user.click(screen.getByRole('option', { name: /portal/i }));
+    await user.click(screen.getByRole('option', { name: /guide/i }));
     await user.type(screen.getByRole('textbox', { name: /markdown source/i }), '# Portal Guide{enter}{enter}Safe instructions for travellers.');
     await user.click(screen.getByRole('button', { name: 'Save article' }));
 
@@ -107,7 +122,11 @@ describe('EditorPage', () => {
     expect(mocks.createArticle).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Save article' }));
     await user.click(screen.getByRole('button', { name: 'Confirm save' }));
-    expect(mocks.createArticle).toHaveBeenCalledWith(expect.objectContaining({ title: 'Portal Guide', tags: ['portal', 'guide'], visibility: 'Internal' }), 'token');
+    expect(mocks.createArticle).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Portal Guide',
+      tagIds: [portalTag.id, guideTag.id],
+      visibility: 'Internal',
+    }), 'token');
     expect(await screen.findByText('Saved article')).toBeInTheDocument();
   });
 

@@ -9,11 +9,29 @@ export interface SessionUser {
   role: UserRole;
 }
 
+export interface CanonicalTag {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface TagInput {
+  name: string;
+  color: string;
+}
+
+export interface OrphanTagReference {
+  articleId: string;
+  articleTitle: string;
+  version: number;
+  missingTagIds: string[];
+}
+
 export interface ArticleSummary {
   id: string;
   title: string;
   excerpt: string;
-  tags: string[];
+  tags: CanonicalTag[];
   visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
@@ -35,7 +53,7 @@ export interface ArticleRevision {
   articleId: string;
   title: string;
   content: string;
-  tags: string[];
+  tags: CanonicalTag[];
   visibility: ArticleVisibility;
   isPinned: boolean;
   isProtected: boolean;
@@ -59,7 +77,7 @@ export interface ArticleListResponse {
 
 export interface ArticleListParams {
   search?: string;
-  tag?: string;
+  tagId?: string;
   visibility?: 'all' | 'public' | 'internal' | 'admin';
   pinned?: 'all' | 'pinned';
   protection?: 'all' | 'protected' | 'unprotected';
@@ -73,7 +91,7 @@ export interface ArticleListParams {
 export interface ArticleInput {
   title: string;
   content: string;
-  tags: string[];
+  tagIds: string[];
   visibility?: ArticleVisibility;
   version?: number;
 }

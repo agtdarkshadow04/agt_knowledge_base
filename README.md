@@ -109,6 +109,26 @@ cat migration-result.json
 
 The migration function is not attached to an HTTP route. Only principals allowed to invoke that Lambda can run it. Migrations are recorded in `schema_migrations` and are idempotent.
 
+Migrations marked as requiring an explicit target are destructive contract phases and are not applied by the default invocation. For the canonical-tag rollout, apply the additive phase before deploying the new API, verify it, deploy the API, and only then apply the contract phase:
+
+```bash
+aws lambda invoke \
+  --function-name <MigrationFunctionName> \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"targetId":"006_canonical_tags_expand"}' \
+  migration-expand-result.json
+
+# Deploy and verify the canonical-tag API before continuing.
+
+aws lambda invoke \
+  --function-name <MigrationFunctionName> \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"targetId":"007_canonical_tags_contract"}' \
+  migration-contract-result.json
+```
+
+For local migration runs, set `MIGRATION_TARGET_ID` to apply through a specific migration. Do not target a contract migration until its corresponding application version is active.
+
 ## Establish the first Admin safely
 
 Self-registration is disabled. The bootstrap script requires active AWS credentials, explicit identifiers, and `--confirm`; it never accepts or stores a password. Cognito sends a temporary credential to a newly created user.

@@ -8,7 +8,7 @@ const article: ArticleSummary = {
   id: '00000000-0000-4000-8000-000000000001',
   title: 'Portal Guide',
   excerpt: 'Safe portal navigation.',
-  tags: ['portal'],
+  tags: [{ id: '10000000-0000-4000-8000-000000000001', name: 'portal', color: '#B5C3B7' }],
   visibility: 'Internal',
   isPinned: true,
   isProtected: true,

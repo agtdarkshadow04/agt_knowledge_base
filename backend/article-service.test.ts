@@ -8,6 +8,7 @@ import {
   type ArticleRecord,
   type ArticleRevisionRecord,
   type ArticleWrite,
+  type CanonicalTag,
   type ListArticlesQuery,
   type Role,
 } from './domain.js';
@@ -15,6 +16,17 @@ import type { ArticleRepository } from './repository.js';
 
 const admin: Actor = { sub: 'admin-sub', displayName: 'Atlas', role: 'Admin' };
 const standard: Actor = { sub: 'standard-sub', displayName: 'Apollo', role: 'Standard' };
+const tagCatalog: Record<string, CanonicalTag> = {
+  ships: { id: '10000000-0000-4000-8000-000000000001', name: 'ships', color: '#AABBCC' },
+  portals: { id: '10000000-0000-4000-8000-000000000002', name: 'portals', color: '#B5C3B7' },
+};
+
+function tagsForIds(tagIds: string[]) {
+  return tagIds.flatMap((tagId) => {
+    const tag = Object.values(tagCatalog).find((candidate) => candidate.id === tagId);
+    return tag ? [tag] : [];
+  });
+}
 
 class MemoryRepository implements ArticleRepository {
   records = new Map<string, ArticleRecord>();
@@ -48,7 +60,7 @@ class MemoryRepository implements ArticleRepository {
     let items = [...this.records.values()];
     const search = query.search.toLowerCase();
     if (search) items = items.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(search));
-    if (query.tag) items = items.filter((item) => item.tags.includes(query.tag));
+    if (query.tagId) items = items.filter((item) => item.tags.some((tag) => tag.id === query.tagId));
     if (query.visibility !== 'all') items = items.filter((item) => item.visibility.toLowerCase() === query.visibility);
     if (query.pinned === 'pinned') items = items.filter((item) => item.isPinned);
     if (query.protection !== 'all') items = items.filter((item) => item.isProtected === (query.protection === 'protected'));
@@ -86,7 +98,7 @@ class MemoryRepository implements ArticleRepository {
     const id = `00000000-0000-4000-8000-${String(this.records.size + 1).padStart(12, '0')}`;
     const now = this.time();
     const record: ArticleRecord = {
-      id, title: input.title, content: input.content, tags: input.tags,
+      id, title: input.title, content: input.content, tags: tagsForIds(input.tagIds),
       visibility: input.visibility ?? 'Internal', isPinned: false, isProtected: false, isVerified: false,
       createdAt: now, createdBy: actor.sub, createdByName: actor.displayName,
       modifiedAt: now, modifiedBy: actor.sub, modifiedByName: actor.displayName, version: 1,
@@ -99,7 +111,17 @@ class MemoryRepository implements ArticleRepository {
   async update(id: string, input: ArticleWrite & { version: number }, actor: Actor) {
     const current = this.records.get(id);
     if (!current || current.version !== input.version || (current.isProtected && actor.role !== 'Admin')) return null;
-    const updated = { ...current, ...input, modifiedAt: this.time(), modifiedBy: actor.sub, modifiedByName: actor.displayName, version: current.version + 1 };
+    const updated: ArticleRecord = {
+      ...current,
+      title: input.title,
+      content: input.content,
+      tags: tagsForIds(input.tagIds),
+      visibility: input.visibility ?? 'Internal',
+      modifiedAt: this.time(),
+      modifiedBy: actor.sub,
+      modifiedByName: actor.displayName,
+      version: current.version + 1,
+    };
     this.records.set(id, updated);
     this.recordRevision(updated);
     return updated;
@@ -159,10 +181,19 @@ class MemoryRepository implements ArticleRepository {
     if (this.records.get(id)?.version !== version) return false;
     return this.records.delete(id);
   }
+
+  async removeOrphanTag() {
+    return { status: 'not-orphan' as const };
+  }
 }
 
-const query: ListArticlesQuery = { search: '', tag: '', visibility: 'all', pinned: 'all', protection: 'all', verification: 'all', sort: 'title', direction: 'asc', page: 1, pageSize: 10 };
-const articleInput = (title: string, tags: string[] = [], visibility?: ArticleWrite['visibility']): ArticleWrite => ({ title, tags, content: `${title} contains enough persistent Markdown content.`, visibility });
+const query: ListArticlesQuery = { search: '', tagId: '', visibility: 'all', pinned: 'all', protection: 'all', verification: 'all', sort: 'title', direction: 'asc', page: 1, pageSize: 10 };
+const articleInput = (title: string, tags: string[] = [], visibility?: ArticleWrite['visibility']): ArticleWrite => ({
+  title,
+  tagIds: tags.map((tag) => tagCatalog[tag].id),
+  content: `${title} contains enough persistent Markdown content.`,
+  visibility,
+});
 
 describe('ArticleService authorization and persistence', () => {
   it('maintains server-owned creator and editor audit fields', async () => {
@@ -238,7 +269,7 @@ describe('ArticleService authorization and persistence', () => {
     await service.create(articleInput('Alpha Portal', ['portals']), standard);
     await service.create(articleInput('Beta Portal', ['portals']), standard);
 
-    const result = await service.list({ ...query, search: 'portal', tag: 'portals', pageSize: 1 }, standard);
+    const result = await service.list({ ...query, search: 'portal', tagId: tagCatalog.portals.id, pageSize: 1 }, standard);
     expect(result.total).toBe(2);
     expect(result.totalPages).toBe(2);
     expect(result.items[0].title).toBe('Alpha Portal');

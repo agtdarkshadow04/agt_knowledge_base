@@ -9,8 +9,8 @@ describe('TagChip', () => {
     expect(stringToPastelHex('portal')).not.toBe(stringToPastelHex('guide'));
   });
 
-  it('uses the generated color for its content, border, and translucent background', () => {
-    render(<TagChip tag="portal" />);
+  it('uses the stored color for its content, border, and translucent background', () => {
+    render(<TagChip tag={{ id: 'tag-1', name: 'portal', color: '#B5C3B7' }} />);
 
     const chip = screen.getByText('portal');
     expect(chip.style.color).toBe('rgb(181, 195, 183)');

@@ -4,8 +4,12 @@ import type {
   ArticleRecord,
   ArticleRevisionRecord,
   ArticleWrite,
+  CanonicalTag,
   ListArticlesQuery,
+  OrphanCleanupResult,
   Role,
+  TagOrphan,
+  TagWrite,
 } from './domain.js';
 
 export interface ArticleRepository {
@@ -20,4 +24,13 @@ export interface ArticleRepository {
   setVerified(id: string, isVerified: boolean, version: number, actor: Actor): Promise<ArticleRecord | null>;
   restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor): Promise<ArticleRecord | null>;
   delete(id: string, version: number): Promise<boolean>;
+  removeOrphanTag(id: string, tagId: string, version: number, actor: Actor): Promise<OrphanCleanupResult>;
+}
+
+export interface TagRepository {
+  listTags(search: string): Promise<CanonicalTag[]>;
+  createTag(input: TagWrite): Promise<CanonicalTag>;
+  updateTag(id: string, input: TagWrite): Promise<CanonicalTag | null>;
+  deleteTag(id: string): Promise<boolean>;
+  listTagOrphans(): Promise<TagOrphan[]>;
 }

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ErrorState, LoadingState } from '../components/States';
+import { TagChip } from '../components/TagChip';
 import { VisibilityChip } from '../components/VisibilityChip';
 import { listArticleRevisions, restoreArticleRevision } from '../services/api';
 import type { ArticleRevision } from '../types';
@@ -17,8 +18,13 @@ function isoTimestamp(value: string) {
   return new Date(value).toISOString();
 }
 
-function sameTags(left: string[], right: string[]) {
-  return left.length === right.length && left.every((tag, index) => tag === right[index]);
+function sameTags(left: ArticleRevision['tags'], right: ArticleRevision['tags']) {
+  return left.length === right.length && left.every((tag, index) => tag.id === right[index].id);
+}
+
+function tagList(tags: ArticleRevision['tags']) {
+  if (!tags.length) return 'None';
+  return <span className="tag-list">{tags.map((tag) => <TagChip key={tag.id} tag={tag} />)}</span>;
 }
 
 export function ArticleHistoryPage() {
@@ -146,7 +152,7 @@ export function ArticleHistoryPage() {
 
         <dl className="revision-comparison-metadata">
           <div className={left.title === right.title ? '' : 'changed'}><dt>Title</dt><dd>{left.title}</dd><dd>{right.title}</dd></div>
-          <div className={sameTags(left.tags, right.tags) ? '' : 'changed'}><dt>Tags</dt><dd>{left.tags.join(', ') || 'None'}</dd><dd>{right.tags.join(', ') || 'None'}</dd></div>
+          <div className={sameTags(left.tags, right.tags) ? '' : 'changed'}><dt>Tags</dt><dd>{tagList(left.tags)}</dd><dd>{tagList(right.tags)}</dd></div>
           <div className={left.visibility === right.visibility ? '' : 'changed'}>
             <dt>Visibility</dt>
             <dd><VisibilityChip visibility={left.visibility} /></dd>

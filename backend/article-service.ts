@@ -1,6 +1,7 @@
 import {
   ConflictError,
   ForbiddenError,
+  NotOrphanedTagError,
   NoChangesError,
   NotFoundError,
   type Actor,
@@ -50,8 +51,8 @@ export class ArticleService {
     const unchanged = existing.title === input.title
       && existing.content === input.content
       && existing.visibility === visibility
-      && existing.tags.length === input.tags.length
-      && existing.tags.every((tag, index) => tag === input.tags[index]);
+      && existing.tags.length === input.tagIds.length
+      && existing.tags.every((tag, index) => tag.id === input.tagIds[index]);
     if (unchanged) throw new NoChangesError();
     const updated = await this.repository.update(id, { ...input, visibility, version: input.version }, actor);
     if (!updated) throw new ConflictError();
@@ -97,5 +98,14 @@ export class ArticleService {
     if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can delete articles.');
     if (!(await this.repository.get(id, actor.role))) throw new NotFoundError();
     if (!(await this.repository.delete(id, version))) throw new ConflictError();
+  }
+
+  async removeOrphanTag(id: string, tagId: string, version: number, actor: Actor) {
+    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can clean up unresolved tag references.');
+    const result = await this.repository.removeOrphanTag(id, tagId, version, actor);
+    if (result.status === 'not-found') throw new NotFoundError();
+    if (result.status === 'conflict') throw new ConflictError();
+    if (result.status === 'not-orphan') throw new NotOrphanedTagError();
+    return result.article;
   }
 }

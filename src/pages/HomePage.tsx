@@ -4,8 +4,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ArticleCard } from '../components/ArticleCard';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
-import { listArticles } from '../services/api';
-import type { ArticleListResponse, ArticleSort, SortDirection } from '../types';
+import { listArticles, listTags } from '../services/api';
+import type { ArticleListResponse, ArticleSort, CanonicalTag, SortDirection } from '../types';
 
 export function HomePage() {
   const { user, getToken } = useAuth();
@@ -15,13 +15,17 @@ export function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [tags, setTags] = useState<CanonicalTag[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
+  const [tagsError, setTagsError] = useState('');
+  const [tagsReloadKey, setTagsReloadKey] = useState(0);
   const queryString = searchParams.toString();
 
   const params = useMemo(() => {
     const current = new URLSearchParams(queryString);
     return {
       search: current.get('search') ?? '',
-      tag: current.get('tag') ?? '',
+      tagId: current.get('tagId') ?? '',
       visibility: (current.get('visibility') ?? 'all') as 'all' | 'public' | 'internal' | 'admin',
       pinned: (current.get('pinned') ?? 'all') as 'all' | 'pinned',
       protection: (current.get('protection') ?? 'all') as 'all' | 'protected' | 'unprotected',
@@ -52,6 +56,24 @@ export function HomePage() {
     return () => controller.abort();
   }, [getToken, params, reloadKey, viewerSub]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadTagCatalog() {
+      setTagsLoading(true);
+      setTagsError('');
+      try {
+        setTags(await listTags('', controller.signal));
+      } catch (cause) {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
+        setTagsError(cause instanceof Error ? cause.message : 'Tags could not be loaded.');
+      } finally {
+        if (!controller.signal.aborted) setTagsLoading(false);
+      }
+    }
+    void loadTagCatalog();
+    return () => controller.abort();
+  }, [tagsReloadKey]);
+
   const updateParam = useCallback((key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
     if (value && value !== 'all') next.set(key, value); else next.delete(key);
@@ -63,7 +85,7 @@ export function HomePage() {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const next = new URLSearchParams(searchParams);
-    for (const key of ['search', 'tag']) {
+    for (const key of ['search']) {
       const value = String(data.get(key) ?? '').trim();
       if (value) next.set(key, value); else next.delete(key);
     }
@@ -71,7 +93,8 @@ export function HomePage() {
     setSearchParams(next);
   }
 
-  const hasFilters = Boolean(params.search || params.tag || params.visibility !== 'all' || params.pinned !== 'all' || params.protection !== 'all' || params.verification !== 'all');
+  const hasFilters = Boolean(params.search || params.tagId || params.visibility !== 'all' || params.pinned !== 'all' || params.protection !== 'all' || params.verification !== 'all');
+  const selectedTagMissing = Boolean(params.tagId && !tags.some((tag) => tag.id === params.tagId));
 
   return (
     <div className="page home-page">
@@ -95,7 +118,22 @@ export function HomePage() {
           </label>
           <label className="field">
             <span>Tag</span>
-            <input name="tag" defaultValue={params.tag} placeholder="e.g. expedition" />
+            <select
+              name="tagId"
+              value={params.tagId}
+              disabled={tagsLoading || Boolean(tagsError)}
+              onChange={(event) => updateParam('tagId', event.target.value)}
+            >
+              <option value="">All tags</option>
+              {selectedTagMissing && <option value={params.tagId}>Unavailable tag</option>}
+              {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+            </select>
+            {tagsError && (
+              <span className="filter-tag-error">
+                Tag filter unavailable.
+                <button type="button" onClick={() => setTagsReloadKey((value) => value + 1)}>Retry</button>
+              </span>
+            )}
           </label>
           <button className="button button-primary" type="submit">Search</button>
         </form>

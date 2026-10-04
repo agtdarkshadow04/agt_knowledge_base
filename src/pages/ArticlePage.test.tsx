@@ -43,7 +43,7 @@ const article: Article = {
   title: 'Portal Guide',
   excerpt: 'Safe portal navigation.',
   content: '# Portal Guide\n\nSafe portal navigation instructions.',
-  tags: ['portal'],
+  tags: [{ id: '10000000-0000-4000-8000-000000000001', name: 'portal', color: '#B5C3B7' }],
   visibility: 'Public',
   isPinned: false,
   isProtected: false,

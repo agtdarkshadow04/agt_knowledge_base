@@ -13,6 +13,11 @@ const verifier = userPoolId && clientId
 
 function routeKey(method: string, pathname: string) {
   if (method === 'GET' && pathname === '/articles') return 'GET /articles';
+  if (method === 'GET' && pathname === '/tags') return 'GET /tags';
+  if (method === 'POST' && pathname === '/tags') return 'POST /tags';
+  if (method === 'GET' && pathname === '/tags/orphans') return 'GET /tags/orphans';
+  if (/^\/tags\/[^/]+$/.test(pathname) && method === 'PUT') return 'PUT /tags/{tagId}';
+  if (/^\/tags\/[^/]+$/.test(pathname) && method === 'DELETE') return 'DELETE /tags/{tagId}';
   if (method === 'GET' && pathname === '/member/articles') return 'GET /member/articles';
   if (method === 'POST' && pathname === '/articles') return 'POST /articles';
   if (/^\/articles\/[^/]+\/revisions\/[^/]+\/restore$/.test(pathname) && method === 'POST') {
@@ -22,6 +27,9 @@ function routeKey(method: string, pathname: string) {
   if (/^\/articles\/[^/]+\/protection$/.test(pathname) && method === 'PATCH') return 'PATCH /articles/{id}/protection';
   if (/^\/articles\/[^/]+\/pinning$/.test(pathname) && method === 'PATCH') return 'PATCH /articles/{id}/pinning';
   if (/^\/articles\/[^/]+\/verification$/.test(pathname) && method === 'PATCH') return 'PATCH /articles/{id}/verification';
+  if (/^\/articles\/[^/]+\/orphan-tags\/[^/]+$/.test(pathname) && method === 'DELETE') {
+    return 'DELETE /articles/{id}/orphan-tags/{tagId}';
+  }
   if (/^\/member\/articles\/[^/]+$/.test(pathname) && method === 'GET') return 'GET /member/articles/{id}';
   if (/^\/articles\/[^/]+$/.test(pathname)) return `${method} /articles/{id}`;
   return `${method} ${pathname}`;
@@ -38,6 +46,7 @@ createServer(async (request, response) => {
   const matchedRoute = routeKey(method, url.pathname);
   const authenticatedRequest = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
     || matchedRoute === 'GET /articles/{id}/revisions'
+    || matchedRoute === 'GET /tags/orphans'
     || matchedRoute.startsWith('GET /member/');
   let claims: Record<string, unknown> = {};
 
@@ -52,6 +61,8 @@ createServer(async (request, response) => {
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
   const articleMatch = url.pathname.match(/^\/(?:member\/)?articles\/([^/]+)/);
   const revisionMatch = url.pathname.match(/^\/articles\/[^/]+\/revisions\/([^/]+)/);
+  const orphanTagMatch = url.pathname.match(/^\/articles\/[^/]+\/orphan-tags\/([^/]+)/);
+  const catalogTagMatch = url.pathname.match(/^\/tags\/([^/]+)$/);
   const queryStringParameters = Object.fromEntries(url.searchParams.entries());
   const event = {
     version: '2.0',
@@ -60,7 +71,11 @@ createServer(async (request, response) => {
     rawQueryString: url.searchParams.toString(),
     headers: Object.fromEntries(Object.entries(request.headers).map(([key, value]) => [key, String(value)])),
     queryStringParameters,
-    pathParameters: articleMatch ? { id: articleMatch[1], version: revisionMatch?.[1] } : undefined,
+    pathParameters: articleMatch || catalogTagMatch ? {
+      id: articleMatch?.[1],
+      version: revisionMatch?.[1],
+      tagId: orphanTagMatch?.[1] ?? catalogTagMatch?.[1],
+    } : undefined,
     requestContext: {
       requestId: crypto.randomUUID(),
       authorizer: { jwt: { claims, scopes: [] } },

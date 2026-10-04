@@ -4,9 +4,21 @@ import { ArticleService } from './article-service.js';
 import { requireActor } from './auth.js';
 import { AppError } from './domain.js';
 import { PostgresArticleRepository } from './postgres-article-repository.js';
-import { parseArticleWrite, parseListQuery, parsePinWrite, parseProtectionWrite, parseRestoreWrite, parseVerificationWrite } from './validation.js';
+import { TagService } from './tag-service.js';
+import {
+  parseArticleWrite,
+  parseListQuery,
+  parsePinWrite,
+  parseProtectionWrite,
+  parseRestoreWrite,
+  parseTagListQuery,
+  parseTagWrite,
+  parseVerificationWrite,
+} from './validation.js';
 
-const service = new ArticleService(new PostgresArticleRepository());
+const repository = new PostgresArticleRepository();
+const service = new ArticleService(repository);
+const tagService = new TagService(repository);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function json(statusCode: number, body: unknown, publiclyCacheable = false): APIGatewayProxyResultV2 {
@@ -37,6 +49,12 @@ function articleId(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
   return id;
 }
 
+function tagId(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
+  const id = event.pathParameters?.tagId;
+  if (!id || !uuidPattern.test(id)) throw new AppError('A valid tag id is required.', 400, 'INVALID_TAG_ID');
+  return id;
+}
+
 function revisionVersion(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
   const version = Number(event.pathParameters?.version);
   if (!Number.isSafeInteger(version) || version < 1) {
@@ -52,6 +70,10 @@ export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): P
         return json(200, await service.list(parseListQuery(event.queryStringParameters ?? {}), null), true);
       case 'GET /articles/{id}':
         return json(200, await service.get(articleId(event), null), true);
+      case 'GET /tags': {
+        const input = parseTagListQuery(event.queryStringParameters ?? {});
+        return json(200, await tagService.list(input.search));
+      }
       case 'GET /member/articles':
         return json(200, await service.list(parseListQuery(event.queryStringParameters ?? {}), requireActor(event)));
       case 'GET /member/articles/{id}':
@@ -62,6 +84,15 @@ export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): P
       }
       case 'POST /articles':
         return json(201, await service.create(parseArticleWrite(parseBody(event)), requireActor(event)));
+      case 'POST /tags':
+        return json(201, await tagService.create(parseTagWrite(parseBody(event)), requireActor(event)));
+      case 'PUT /tags/{tagId}':
+        return json(200, await tagService.update(tagId(event), parseTagWrite(parseBody(event)), requireActor(event)));
+      case 'DELETE /tags/{tagId}':
+        await tagService.delete(tagId(event), requireActor(event));
+        return { statusCode: 204, headers: { 'cache-control': 'no-store' } };
+      case 'GET /tags/orphans':
+        return json(200, await tagService.listOrphans(requireActor(event)));
       case 'PUT /articles/{id}':
         return json(200, await service.update(articleId(event), parseArticleWrite(parseBody(event)), requireActor(event)));
       case 'PATCH /articles/{id}/protection': {
@@ -82,6 +113,16 @@ export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): P
           articleId(event),
           revisionVersion(event),
           input.currentVersion,
+          requireActor(event),
+        ));
+      }
+      case 'DELETE /articles/{id}/orphan-tags/{tagId}': {
+        const version = Number(event.queryStringParameters?.version);
+        if (!Number.isSafeInteger(version) || version < 1) throw new AppError('A valid version is required.', 400, 'INVALID_VERSION');
+        return json(200, await service.removeOrphanTag(
+          articleId(event),
+          tagId(event),
+          version,
           requireActor(event),
         ));
       }
