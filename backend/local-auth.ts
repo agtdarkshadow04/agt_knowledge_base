@@ -12,6 +12,8 @@ export interface LocalSessionUser {
   displayName: string;
   email?: string;
   role: Role;
+  isSuperAdmin: boolean;
+  sessionVersion: number;
 }
 
 interface LocalUserRow {
@@ -21,6 +23,8 @@ interface LocalUserRow {
   display_name: string;
   email: string | null;
   role: Role;
+  is_super_admin: boolean;
+  session_version: number;
 }
 
 interface LocalTokenPayload extends LocalSessionUser {
@@ -74,7 +78,7 @@ export async function authenticateLocalUser(identifier: string, password: string
   if (!normalized || normalized.length > 254 || !password || password.length > 1024) return null;
   const pool = await getPool();
   const result = await pool.query<LocalUserRow>(
-    `SELECT id, username, password_hash, display_name, email, role
+    `SELECT id, username, password_hash, display_name, email, role, is_super_admin, session_version
      FROM local_users
      WHERE is_active = true AND (username = $1 OR email = $1)
      LIMIT 1`,
@@ -92,6 +96,8 @@ export async function authenticateLocalUser(identifier: string, password: string
     displayName: user.display_name,
     email: user.email ?? undefined,
     role: user.role,
+    isSuperAdmin: user.is_super_admin,
+    sessionVersion: user.session_version,
   };
 }
 
@@ -109,7 +115,7 @@ export function issueLocalToken(user: LocalSessionUser) {
   return `${signed}.${signature}`;
 }
 
-export function verifyLocalToken(token: string): LocalSessionUser {
+export async function verifyLocalToken(token: string): Promise<LocalSessionUser> {
   if (token.length > 4096) throw new Error('Invalid session token.');
   const [header, body, signature, ...extra] = token.split('.');
   if (!header || !body || !signature || extra.length) throw new Error('Invalid session token.');
@@ -133,15 +139,29 @@ export function verifyLocalToken(token: string): LocalSessionUser {
     || typeof payload.username !== 'string' || !payload.username
     || typeof payload.displayName !== 'string' || !payload.displayName
     || (payload.email !== undefined && typeof payload.email !== 'string')
-    || (payload.role !== 'Admin' && payload.role !== 'Standard')) {
+    || (payload.role !== 'Admin' && payload.role !== 'Standard')
+    || typeof payload.isSuperAdmin !== 'boolean'
+    || !Number.isSafeInteger(payload.sessionVersion) || payload.sessionVersion! < 1) {
     throw new Error('Invalid session token.');
   }
+
+  const pool = await getPool();
+  const result = await pool.query<LocalUserRow>(
+    `SELECT id, username, password_hash, display_name, email, role, is_super_admin, session_version
+     FROM local_users
+     WHERE id = $1 AND is_active = true AND session_version = $2`,
+    [payload.sub, payload.sessionVersion],
+  );
+  const current = result.rows[0];
+  if (!current) throw new Error('Invalid session token.');
   return {
-    sub: payload.sub,
-    username: payload.username,
-    displayName: payload.displayName,
-    email: payload.email,
-    role: payload.role,
+    sub: current.id,
+    username: current.username,
+    displayName: current.display_name,
+    email: current.email ?? undefined,
+    role: current.role,
+    isSuperAdmin: current.is_super_admin,
+    sessionVersion: current.session_version,
   };
 }
 
@@ -152,5 +172,6 @@ export function localClaims(user: LocalSessionUser): Record<string, unknown> {
     name: user.displayName,
     email: user.email,
     role: user.role,
+    is_super_admin: user.isSuperAdmin,
   };
 }

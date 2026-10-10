@@ -1,6 +1,39 @@
 export type Role = 'Admin' | 'Standard';
 export type ArticleVisibility = 'Public' | 'Internal' | 'Admin';
 
+export interface LocalUserRecord {
+  id: string;
+  username: string;
+  displayName: string;
+  email?: string;
+  role: Role;
+  isActive: boolean;
+  isSuperAdmin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationSettings {
+  applicationName: string;
+  applicationSubtitle: string;
+  defaultVisibility: ArticleVisibility;
+  allowPublicBrowsing: boolean;
+  version: number;
+}
+
+export interface AdminStats {
+  totalArticles: number;
+  publicArticles: number;
+  internalArticles: number;
+  adminArticles: number;
+  pinnedArticles: number;
+  protectedArticles: number;
+  verifiedArticles: number;
+  articleRevisions: number;
+  canonicalTags: number;
+  orphanedTagReferences: number;
+}
+
 export interface Actor {
   sub: string;
   displayName: string;

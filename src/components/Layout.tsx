@@ -1,21 +1,16 @@
-import { BookOpen, LogIn, LogOut, Plus, ShieldCheck, Tag } from 'lucide-react';
+import { BookOpen, LogIn, LogOut, Plus, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { ManageTagsModal } from './ManageTagsModal';
+import { useAppSettings } from '../settings/AppSettingsContext';
 import { applyStoredAccessibilitySettings, SettingsIcon, SettingsModal } from './SettingsModal';
 
 export function Layout() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, authMode } = useAuth();
+  const { settings } = useAppSettings();
   const [logoFailed, setLogoFailed] = useState(false);
-  const [tagsOpen, setTagsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const tagsButton = useRef<HTMLButtonElement>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
-  const closeTags = useCallback(() => {
-    setTagsOpen(false);
-    requestAnimationFrame(() => tagsButton.current?.focus());
-  }, []);
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
     requestAnimationFrame(() => settingsButton.current?.focus());
@@ -30,7 +25,7 @@ export function Layout() {
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="site-header">
         <div className="header-inner">
-          <Link to="/" className="brand" aria-label="AGT Knowledge Base home">
+          <Link to="/" className="brand" aria-label={`${settings.applicationName} home`}>
             <span className="brand-mark" aria-hidden="true">
               {!logoFailed ? (
                 <img src="/assets/agt-icon.png" alt="" onError={() => setLogoFailed(true)} />
@@ -39,8 +34,8 @@ export function Layout() {
               )}
             </span>
             <span className="brand-copy">
-              <strong><span className="desktop-only">Alliance of Galactic Travellers</span><span className="mobile-only">AGT</span></strong>
-              <small><span className="desktop-only">Knowledge Base</span><span className="mobile-only">Archives</span></small>
+              <strong><span className="desktop-only">{settings.applicationName}</span><span className="mobile-only">AGT</span></strong>
+              <small><span className="desktop-only">{settings.applicationSubtitle}</span><span className="mobile-only">Archives</span></small>
             </span>
           </Link>
 
@@ -51,6 +46,11 @@ export function Layout() {
             {user && (
               <NavLink to="/articles/new" className="button button-primary compact">
                 <Plus aria-hidden="true" /> <span className="desktop-only">New article</span>
+              </NavLink>
+            )}
+            {authMode === 'local' && user?.role === 'Admin' && (
+              <NavLink to="/admin" className="icon-link">
+                <ShieldCheck aria-hidden="true" /> <span className="desktop-only">Admin</span>
               </NavLink>
             )}
             <span className={`identity-badge ${user?.role === 'Admin' ? 'admin' : ''}`}>
@@ -65,19 +65,6 @@ export function Layout() {
               <NavLink to="/login" className="icon-button" title="Sign in">
                 <LogIn aria-hidden="true" /><span className="sr-only">Sign in</span>
               </NavLink>
-            )}
-            {user?.role === 'Admin' && (
-              <button
-                ref={tagsButton}
-                className="icon-button"
-                type="button"
-                onClick={() => setTagsOpen(true)}
-                title="Manage Tags"
-                aria-haspopup="dialog"
-                aria-expanded={tagsOpen}
-              >
-                <Tag aria-hidden="true" /><span className="sr-only">Manage Tags</span>
-              </button>
             )}
             <button
               ref={settingsButton}
@@ -109,7 +96,6 @@ export function Layout() {
         </nav>
         <p>© {new Date().getUTCFullYear()} Alliance of Galactic Travellers</p>
       </footer>
-      {user?.role === 'Admin' && tagsOpen && <ManageTagsModal onClose={closeTags} />}
       {settingsOpen && <SettingsModal user={user} onClose={closeSettings} />}
     </div>
   );

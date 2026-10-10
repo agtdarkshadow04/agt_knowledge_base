@@ -5,10 +5,12 @@ import { useAuth } from '../auth/AuthContext';
 import { ArticleCard } from '../components/ArticleCard';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import { listArticles, listTags } from '../services/api';
+import { useAppSettings } from '../settings/AppSettingsContext';
 import type { ArticleListResponse, ArticleSort, CanonicalTag, SortDirection } from '../types';
 
 export function HomePage() {
   const { user, getToken } = useAuth();
+  const { settings } = useAppSettings();
   const viewerSub = user?.sub;
   const [searchParams, setSearchParams] = useSearchParams();
   const [result, setResult] = useState<ArticleListResponse | null>(null);
@@ -40,6 +42,11 @@ export function HomePage() {
   useEffect(() => {
     const controller = new AbortController();
     async function load() {
+      if (!viewerSub && !settings.allowPublicBrowsing) {
+        setResult(null);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError('');
       try {
@@ -54,15 +61,21 @@ export function HomePage() {
     }
     void load();
     return () => controller.abort();
-  }, [getToken, params, reloadKey, viewerSub]);
+  }, [getToken, params, reloadKey, settings.allowPublicBrowsing, viewerSub]);
 
   useEffect(() => {
     const controller = new AbortController();
     async function loadTagCatalog() {
+      if (!viewerSub && !settings.allowPublicBrowsing) {
+        setTags([]);
+        setTagsLoading(false);
+        return;
+      }
       setTagsLoading(true);
       setTagsError('');
       try {
-        setTags(await listTags('', controller.signal));
+        const token = viewerSub ? await getToken() : undefined;
+        setTags(await listTags('', controller.signal, token));
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === 'AbortError') return;
         setTagsError(cause instanceof Error ? cause.message : 'Tags could not be loaded.');
@@ -72,7 +85,7 @@ export function HomePage() {
     }
     void loadTagCatalog();
     return () => controller.abort();
-  }, [tagsReloadKey]);
+  }, [getToken, settings.allowPublicBrowsing, tagsReloadKey, viewerSub]);
 
   const updateParam = useCallback((key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -102,14 +115,20 @@ export function HomePage() {
         <p className="eyebrow">Galactic archive // public terminal</p>
         <div className="hero-heading">
           <div>
-            <h1 id="home-title">AGT Knowledge Base</h1>
-            <p>Field-tested guides, community procedures, and traveller intelligence.</p>
+            <h1 id="home-title">{settings.applicationName}</h1>
+            <p>{settings.applicationSubtitle}</p>
           </div>
           {user && <Link className="button button-primary" to="/articles/new">Create article</Link>}
         </div>
       </section>
 
-      <section className="filter-panel" aria-labelledby="filter-title">
+      {!user && !settings.allowPublicBrowsing ? (
+        <section className="admin-panel public-browsing-disabled" aria-labelledby="public-access-title">
+          <h2 id="public-access-title">Sign in to browse the archive</h2>
+          <p>Public browsing is disabled for this installation.</p>
+          <Link className="button button-primary" to="/login">Sign in</Link>
+        </section>
+      ) : <><section className="filter-panel" aria-labelledby="filter-title">
         <div className="section-label"><SlidersHorizontal aria-hidden="true" /><h2 id="filter-title">Search archive</h2></div>
         <form className="filter-form" onSubmit={handleSearch}>
           <label className="field search-field">
@@ -205,6 +224,7 @@ export function HomePage() {
           </>
         )}
       </section>
+      </>}
     </div>
   );
 }

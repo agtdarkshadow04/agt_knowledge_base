@@ -7,7 +7,7 @@ import {
 } from 'aws-amplify/auth';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { appConfig } from '../config';
-import { createLocalSession, getLocalSession } from '../services/api';
+import { createInitialAdmin, createLocalSession, getLocalSession, getSetupStatus } from '../services/api';
 import type { SessionUser, UserRole } from '../types';
 
 export type SignInResult = 'SIGNED_IN' | 'NEW_PASSWORD_REQUIRED';
@@ -17,9 +17,17 @@ interface AuthContextValue {
   loading: boolean;
   configured: boolean;
   authMode: 'cognito' | 'local';
+  setupRequired: boolean;
   signIn(username: string, password: string): Promise<SignInResult>;
   completeNewPassword(newPassword: string): Promise<void>;
   signOut(): Promise<void>;
+  completeSetup(input: {
+    username: string;
+    displayName: string;
+    email?: string;
+    password: string;
+    passwordConfirmation: string;
+  }): Promise<void>;
   getToken(): Promise<string>;
   refresh(): Promise<void>;
 }
@@ -34,6 +42,7 @@ export function roleFromGroups(groups: unknown): UserRole {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(appConfig.authConfigured);
+  const [setupRequired, setSetupRequired] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!appConfig.authConfigured) {
@@ -44,6 +53,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     try {
       if (appConfig.authMode === 'local') {
+        const setup = await getSetupStatus();
+        setSetupRequired(setup.required);
+        if (setup.required) {
+          localStorage.removeItem(localTokenKey);
+          setUser(null);
+          return;
+        }
         const token = localStorage.getItem(localTokenKey);
         if (!token) {
           setUser(null);
@@ -109,6 +125,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const completeSetup = useCallback(async (input: {
+    username: string;
+    displayName: string;
+    email?: string;
+    password: string;
+    passwordConfirmation: string;
+  }) => {
+    if (appConfig.authMode !== 'local') throw new Error('In-app setup is only available for local authentication.');
+    const session = await createInitialAdmin(input);
+    localStorage.setItem(localTokenKey, session.token);
+    setSetupRequired(false);
+    setUser(session.user);
+  }, []);
+
   const getToken = useCallback(async () => {
     if (appConfig.authMode === 'local') {
       const token = localStorage.getItem(localTokenKey);
@@ -127,13 +157,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       configured: appConfig.authConfigured,
       authMode: appConfig.authMode,
+      setupRequired,
       signIn,
       completeNewPassword,
       signOut,
+      completeSetup,
       getToken,
       refresh,
     }),
-    [completeNewPassword, getToken, loading, refresh, signIn, signOut, user],
+    [completeNewPassword, completeSetup, getToken, loading, refresh, setupRequired, signIn, signOut, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -29,3 +29,11 @@ export function requireActor(event: APIGatewayProxyEventV2WithJWTAuthorizer): Ac
     email: typeof claims.email === 'string' ? claims.email.slice(0, 254) : undefined,
   };
 }
+
+export function requireAdmin(event: APIGatewayProxyEventV2WithJWTAuthorizer): Actor {
+  const actor = requireActor(event);
+  if (actor.role !== 'Admin') {
+    throw new AppError('Administrator access is required.', 403, 'FORBIDDEN');
+  }
+  return actor;
+}

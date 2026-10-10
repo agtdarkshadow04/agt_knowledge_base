@@ -6,6 +6,7 @@ import { MarkdownContent } from '../components/MarkdownContent';
 import { ErrorState, LoadingState } from '../components/States';
 import { TagPicker } from '../components/TagPicker';
 import { ApiError, createArticle, getArticle, listTags, updateArticle } from '../services/api';
+import { useAppSettings } from '../settings/AppSettingsContext';
 import type { ArticleVisibility, CanonicalTag } from '../types';
 
 type EditorMode = 'plain' | 'rich';
@@ -42,6 +43,7 @@ export function EditorPage() {
   const isNew = !id;
   const navigate = useNavigate();
   const { user, getToken } = useAuth();
+  const { settings } = useAppSettings();
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [baseline, setBaseline] = useState(serializeDraft(emptyDraft));
   const [version, setVersion] = useState<number | undefined>();
@@ -74,7 +76,7 @@ export function EditorPage() {
     setTagsReady(false);
     setTagsError('');
     try {
-      const nextTags = await listTags('', signal);
+      const nextTags = await listTags('', signal, await getToken());
       if (signal?.aborted) return null;
       setCatalogTags(nextTags);
       rememberTags(nextTags);
@@ -87,7 +89,19 @@ export function EditorPage() {
     } finally {
       if (!signal?.aborted) setTagsLoading(false);
     }
-  }, [rememberTags]);
+  }, [getToken, rememberTags]);
+
+  useEffect(() => {
+    if (!isNew || draft.title || draft.content || draft.tagIds.length || baseline !== serializeDraft(emptyDraft)) return;
+    const next = {
+      ...emptyDraft,
+      visibility: settings.defaultVisibility === 'Admin' && user?.role !== 'Admin'
+        ? 'Internal'
+        : settings.defaultVisibility,
+    };
+    setDraft(next);
+    setBaseline(serializeDraft(next));
+  }, [baseline, draft.content, draft.tagIds.length, draft.title, isNew, settings.defaultVisibility, user?.role]);
 
   useEffect(() => {
     const controller = new AbortController();

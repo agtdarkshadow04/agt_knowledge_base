@@ -94,21 +94,25 @@ The Compose stack runs the web frontend, API, schema migrations, PostgreSQL, and
 
    The one-shot `migrate` service waits for PostgreSQL, applies pending non-destructive migrations, and must finish successfully before the API starts.
 
-4. Create the first local Administrator. The password is passed through a temporary environment variable and stored only as a scrypt hash:
+4. Open `http://localhost:8080` (or the configured host and port). A fresh installation redirects to `/setup`, where the first visitor creates the single protected super administrator. Setup is transactionally locked and is permanently disabled as soon as any local user exists. After setup, use **Admin → Users** to create, update, deactivate, reset passwords for, or remove eligible local users.
 
-   ```bash
-   read -rsp "Admin password: " LOCAL_USER_PASSWORD && echo
-   export LOCAL_USER_PASSWORD
-   docker compose run --rm --no-deps -e LOCAL_USER_PASSWORD api \
-     node server/scripts/manage-local-user.js \
-     --username admin \
-     --display-name "Administrator" \
-     --role Admin \
-     --confirm
-   unset LOCAL_USER_PASSWORD
-   ```
+The super administrator cannot be deleted, deactivated, or demoted. Other administrators cannot change that account's credentials or identity. The super administrator can update their own profile and password from the Users section. **Admin → Data** contains archive statistics, article inventory, and canonical/orphan tag management. **Admin → Application settings** controls branding, default article visibility, and public browsing. Personal accessibility, download, and search-view preferences remain browser-local in the Settings dialog.
 
-   Open `http://localhost:8080` (or the configured host and port) and sign in with that account. Run the same command with a different username and `--role Standard` to create an author. Re-running it for an existing username updates the account and resets its password. Add `--email user@example.com` when an email-based sign-in alias is wanted.
+The command-line user tool is retained for recovery only. For example, an upgraded installation with local users but no active Admin deliberately fails migration `009_admin`; use the recovery command below to activate or create an Admin against the pre-migration schema, then rerun `docker compose up -d --build`:
+
+```bash
+read -rsp "Recovery password: " LOCAL_USER_PASSWORD && echo
+export LOCAL_USER_PASSWORD
+docker compose run --rm --no-deps -e LOCAL_USER_PASSWORD api \
+  node server/scripts/manage-local-user.js \
+  --username recovery-admin \
+  --display-name "Recovery Administrator" \
+  --role Admin \
+  --confirm
+unset LOCAL_USER_PASSWORD
+```
+
+Do not use the CLI as the normal first-run flow. After migration `009_admin` succeeds, perform routine account management in the application.
 
 Configuration is read from `.env`:
 

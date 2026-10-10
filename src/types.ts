@@ -7,6 +7,48 @@ export interface SessionUser {
   displayName: string;
   email?: string;
   role: UserRole;
+  isSuperAdmin?: boolean;
+}
+
+export interface LocalUser {
+  id: string;
+  username: string;
+  displayName: string;
+  email?: string;
+  role: UserRole;
+  isActive: boolean;
+  isSuperAdmin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LocalUserListResponse {
+  items: LocalUser[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface ApplicationSettings {
+  applicationName: string;
+  applicationSubtitle: string;
+  defaultVisibility: ArticleVisibility;
+  allowPublicBrowsing: boolean;
+  version: number;
+}
+
+export interface AdminStats {
+  totalArticles: number;
+  publicArticles: number;
+  internalArticles: number;
+  adminArticles: number;
+  pinnedArticles: number;
+  protectedArticles: number;
+  verifiedArticles: number;
+  articleRevisions: number;
+  canonicalTags: number;
+  orphanedTagReferences: number;
 }
 
 export interface CanonicalTag {

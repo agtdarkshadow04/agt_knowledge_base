@@ -22,7 +22,7 @@ interface TagForm {
 
 const emptyForm: TagForm = { name: '', color: '#FFB451' };
 
-export function ManageTagsModal({ onClose }: { onClose(): void }) {
+export function ManageTagsModal({ onClose, embedded = false }: { onClose(): void; embedded?: boolean }) {
   const { user, getToken } = useAuth();
   const titleId = useId();
   const dialog = useRef<HTMLElement>(null);
@@ -41,7 +41,7 @@ export function ManageTagsModal({ onClose }: { onClose(): void }) {
     try {
       const token = await getToken();
       const [nextTags, nextOrphans] = await Promise.all([
-        listTags('', signal),
+        listTags('', signal, token),
         listOrphanTagReferences(token, signal),
       ]);
       if (signal?.aborted) return;
@@ -62,6 +62,7 @@ export function ManageTagsModal({ onClose }: { onClose(): void }) {
   }, [load]);
 
   useEffect(() => {
+    if (embedded) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -86,7 +87,7 @@ export function ManageTagsModal({ onClose }: { onClose(): void }) {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose]);
+  }, [embedded, onClose]);
 
   function resetForm() {
     setForm(emptyForm);
@@ -179,16 +180,18 @@ export function ManageTagsModal({ onClose }: { onClose(): void }) {
   if (user?.role !== 'Admin') return null;
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section ref={dialog} className="settings-dialog tag-management-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <div className={embedded ? 'tag-management-page' : 'modal-backdrop'} onMouseDown={(event) => !embedded && event.target === event.currentTarget && onClose()}>
+      <section ref={dialog} className={`settings-dialog tag-management-dialog${embedded ? ' embedded' : ''}`} role={embedded ? 'region' : 'dialog'} aria-modal={embedded ? undefined : true} aria-labelledby={titleId}>
         <header className="settings-header">
           <div>
             <p className="eyebrow">Administrator tools</p>
             <h2 id={titleId}>Manage Tags</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Close tag management" autoFocus>
-            <X aria-hidden="true" />
-          </button>
+          {!embedded && (
+            <button className="icon-button" type="button" onClick={onClose} aria-label="Close tag management" autoFocus>
+              <X aria-hidden="true" />
+            </button>
+          )}
         </header>
 
         {error && <div className="inline-alert tag-management-alert" role="alert">{error}</div>}
@@ -264,4 +267,8 @@ export function ManageTagsModal({ onClose }: { onClose(): void }) {
       </section>
     </div>
   );
+}
+
+export function ManageTagsPanel() {
+  return <ManageTagsModal embedded onClose={() => undefined} />;
 }

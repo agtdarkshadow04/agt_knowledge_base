@@ -1,24 +1,31 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { ZodError } from 'zod';
 import { ArticleService } from './article-service.js';
-import { requireActor } from './auth.js';
+import { AdminService } from './admin-service.js';
+import { requireActor, requireAdmin } from './auth.js';
 import { AppError } from './domain.js';
 import { PostgresArticleRepository } from './postgres-article-repository.js';
 import { TagService } from './tag-service.js';
 import {
   parseArticleWrite,
+  parseAdminPasswordWrite,
+  parseAdminUserCreate,
+  parseAdminUserUpdate,
+  parseApplicationSettingsWrite,
   parseListQuery,
   parsePinWrite,
   parseProtectionWrite,
   parseRestoreWrite,
   parseTagListQuery,
   parseTagWrite,
+  parseUserListQuery,
   parseVerificationWrite,
 } from './validation.js';
 
 const repository = new PostgresArticleRepository();
 const service = new ArticleService(repository);
 const tagService = new TagService(repository);
+const adminService = new AdminService();
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function json(statusCode: number, body: unknown, publiclyCacheable = false): APIGatewayProxyResultV2 {
@@ -55,6 +62,12 @@ function tagId(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
   return id;
 }
 
+function userId(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
+  const id = event.pathParameters?.userId;
+  if (!id || !uuidPattern.test(id)) throw new AppError('A valid user id is required.', 400, 'INVALID_USER_ID');
+  return id;
+}
+
 function revisionVersion(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
   const version = Number(event.pathParameters?.version);
   if (!Number.isSafeInteger(version) || version < 1) {
@@ -66,11 +79,29 @@ function revisionVersion(event: APIGatewayProxyEventV2WithJWTAuthorizer) {
 export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<APIGatewayProxyResultV2> {
   try {
     switch (event.routeKey) {
-      case 'GET /articles':
+      case 'GET /settings':
+        return json(200, await adminService.getSettings(), true);
+      case 'GET /articles': {
+        if (!(await adminService.getSettings()).allowPublicBrowsing) {
+          throw new AppError('Public browsing is disabled.', 403, 'PUBLIC_BROWSING_DISABLED');
+        }
         return json(200, await service.list(parseListQuery(event.queryStringParameters ?? {}), null), true);
-      case 'GET /articles/{id}':
+      }
+      case 'GET /articles/{id}': {
+        if (!(await adminService.getSettings()).allowPublicBrowsing) {
+          throw new AppError('Public browsing is disabled.', 403, 'PUBLIC_BROWSING_DISABLED');
+        }
         return json(200, await service.get(articleId(event), null), true);
+      }
       case 'GET /tags': {
+        if (!(await adminService.getSettings()).allowPublicBrowsing) {
+          throw new AppError('Public browsing is disabled.', 403, 'PUBLIC_BROWSING_DISABLED');
+        }
+        const input = parseTagListQuery(event.queryStringParameters ?? {});
+        return json(200, await tagService.list(input.search));
+      }
+      case 'GET /member/tags': {
+        requireActor(event);
         const input = parseTagListQuery(event.queryStringParameters ?? {});
         return json(200, await tagService.list(input.search));
       }
@@ -93,6 +124,41 @@ export async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): P
         return { statusCode: 204, headers: { 'cache-control': 'no-store' } };
       case 'GET /tags/orphans':
         return json(200, await tagService.listOrphans(requireActor(event)));
+      case 'GET /admin/users':
+        requireAdmin(event);
+        return json(200, await adminService.listUsers(parseUserListQuery(event.queryStringParameters ?? {})));
+      case 'POST /admin/users':
+        return json(201, await adminService.createUser(
+          parseAdminUserCreate(parseBody(event)),
+          requireAdmin(event),
+        ));
+      case 'PUT /admin/users/{userId}':
+        return json(200, await adminService.updateUser(
+          userId(event),
+          parseAdminUserUpdate(parseBody(event)),
+          requireAdmin(event),
+        ));
+      case 'PUT /admin/users/{userId}/password':
+        await adminService.setPassword(
+          userId(event),
+          parseAdminPasswordWrite(parseBody(event)).password,
+          requireAdmin(event),
+        );
+        return { statusCode: 204, headers: { 'cache-control': 'no-store' } };
+      case 'DELETE /admin/users/{userId}':
+        await adminService.deleteUser(userId(event), requireAdmin(event));
+        return { statusCode: 204, headers: { 'cache-control': 'no-store' } };
+      case 'GET /admin/stats':
+        requireAdmin(event);
+        return json(200, await adminService.getStats());
+      case 'GET /admin/articles':
+        return json(200, await service.list(
+          parseListQuery(event.queryStringParameters ?? {}),
+          requireAdmin(event),
+        ));
+      case 'PUT /admin/settings':
+        requireAdmin(event);
+        return json(200, await adminService.updateSettings(parseApplicationSettingsWrite(parseBody(event))));
       case 'PUT /articles/{id}':
         return json(200, await service.update(articleId(event), parseArticleWrite(parseBody(event)), requireActor(event)));
       case 'PATCH /articles/{id}/protection': {

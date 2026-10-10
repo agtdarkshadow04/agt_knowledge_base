@@ -145,4 +145,20 @@ describe('article request validation', () => {
     if (typeof response === 'string') throw new Error('Expected a structured API response.');
     expect(response).toMatchObject({ statusCode: 403 });
   });
+
+  it('rejects Standard users from admin routes before accessing persistence', async () => {
+    const event = {
+      routeKey: 'GET /admin/stats',
+      requestContext: {
+        requestId: 'request-9',
+        authorizer: { jwt: { claims: { sub: 'standard-sub', role: 'Standard' } } },
+      },
+    } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
+
+    const response = await handler(event);
+
+    if (typeof response === 'string') throw new Error('Expected a structured API response.');
+    expect(response).toMatchObject({ statusCode: 403 });
+    expect(JSON.parse(response.body ?? '')).toMatchObject({ code: 'FORBIDDEN' });
+  });
 });

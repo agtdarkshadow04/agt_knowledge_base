@@ -20,6 +20,7 @@ import { migrations } from './migrations.js';
 const expansion = migrations.find((migration) => migration.id === '006_canonical_tags_expand')!;
 const contract = migrations.find((migration) => migration.id === '007_canonical_tags_contract')!;
 const localAuth = migrations.find((migration) => migration.id === '008_local_auth')!;
+const admin = migrations.find((migration) => migration.id === '009_admin')!;
 
 describe('targeted migrations', () => {
   beforeEach(() => {
@@ -51,13 +52,14 @@ describe('targeted migrations', () => {
 
   it('does not apply an explicit-only contract migration by default', async () => {
     await expect(runMigrations()).resolves.toEqual({
-      applied: ['006_canonical_tags_expand', '008_local_auth'],
+      applied: ['006_canonical_tags_expand', '008_local_auth', '009_admin'],
     });
 
     const executedSql = database.client.query.mock.calls.map(([sql]) => sql);
     expect(executedSql).toContain(expansion.sql);
     expect(executedSql).not.toContain(contract.sql);
     expect(executedSql).toContain(localAuth.sql);
+    expect(executedSql).toContain(admin.sql);
   });
 
   it('does not advance past an already-applied target', async () => {
@@ -81,7 +83,7 @@ describe('targeted migrations', () => {
     database.applied.add('006_canonical_tags_expand');
     database.applied.add('007_canonical_tags_contract');
 
-    await expect(runMigrations()).resolves.toEqual({ applied: ['008_local_auth'] });
+    await expect(runMigrations()).resolves.toEqual({ applied: ['008_local_auth', '009_admin'] });
     expect(database.client.query).toHaveBeenCalledWith(
       'SELECT 1 FROM schema_migrations WHERE id = $1',
       ['007_canonical_tags_contract'],
@@ -97,6 +99,16 @@ describe('targeted migrations', () => {
     const executedSql = database.client.query.mock.calls.map(([sql]) => sql);
     expect(executedSql).not.toContain(contract.sql);
     expect(executedSql).toContain(localAuth.sql);
+  });
+
+  it('can target the admin migration without applying the explicit-only contract', async () => {
+    database.applied.add('006_canonical_tags_expand');
+    database.applied.add('008_local_auth');
+
+    await expect(runMigrations({ targetId: '009_admin' })).resolves.toEqual({ applied: ['009_admin'] });
+    const executedSql = database.client.query.mock.calls.map(([sql]) => sql);
+    expect(executedSql).not.toContain(contract.sql);
+    expect(executedSql).toContain(admin.sql);
   });
 
   it('rejects unknown targets before opening a database connection', async () => {

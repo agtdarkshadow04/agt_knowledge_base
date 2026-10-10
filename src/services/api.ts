@@ -5,8 +5,12 @@ import type {
   ArticleListParams,
   ArticleListResponse,
   ArticleRevision,
+  AdminStats,
+  ApplicationSettings,
   CanonicalTag,
   OrphanTagReference,
+  LocalUser,
+  LocalUserListResponse,
   SessionUser,
   TagInput,
 } from '../types';
@@ -49,6 +53,27 @@ export function createLocalSession(username: string, password: string) {
   });
 }
 
+export function getSetupStatus() {
+  return request<{ required: boolean }>('/setup/status');
+}
+
+export function createInitialAdmin(input: {
+  username: string;
+  displayName: string;
+  email?: string;
+  password: string;
+  passwordConfirmation: string;
+}) {
+  return request<{ token: string; user: SessionUser }>('/setup', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function getApplicationSettings(signal?: AbortSignal) {
+  return request<ApplicationSettings>('/settings', { signal });
+}
+
 export function getLocalSession(token: string) {
   return request<SessionUser>('/auth/session', {}, token);
 }
@@ -67,11 +92,79 @@ export function getArticle(id: string, signal?: AbortSignal, token?: string) {
   return request<Article>(`${prefix}/articles/${encodeURIComponent(id)}`, { signal }, token);
 }
 
-export function listTags(search = '', signal?: AbortSignal) {
+export function listTags(search = '', signal?: AbortSignal, token?: string) {
   const query = new URLSearchParams();
   if (search.trim()) query.set('search', search.trim());
   const suffix = query.size ? `?${query.toString()}` : '';
-  return request<CanonicalTag[]>(`/tags${suffix}`, { signal });
+  const prefix = token && appConfig.authMode === 'local' ? '/member' : '';
+  return request<CanonicalTag[]>(`${prefix}/tags${suffix}`, { signal }, token);
+}
+
+export function listLocalUsers(params: {
+  search?: string;
+  role?: 'all' | 'Admin' | 'Standard';
+  active?: 'all' | 'active' | 'inactive';
+  page?: number;
+  pageSize?: number;
+}, token: string, signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '' && value !== 'all') query.set(key, String(value));
+  });
+  return request<LocalUserListResponse>(`/admin/users?${query.toString()}`, { signal }, token);
+}
+
+export function createLocalUser(input: {
+  username: string;
+  displayName: string;
+  email?: string;
+  role: 'Admin' | 'Standard';
+  password: string;
+}, token: string) {
+  return request<LocalUser>('/admin/users', { method: 'POST', body: JSON.stringify(input) }, token);
+}
+
+export function updateLocalUser(id: string, input: {
+  username: string;
+  displayName: string;
+  email?: string;
+  role: 'Admin' | 'Standard';
+  isActive: boolean;
+}, token: string) {
+  return request<LocalUser>(`/admin/users/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  }, token);
+}
+
+export function setLocalUserPassword(id: string, password: string, token: string) {
+  return request<void>(`/admin/users/${encodeURIComponent(id)}/password`, {
+    method: 'PUT',
+    body: JSON.stringify({ password }),
+  }, token);
+}
+
+export function deleteLocalUser(id: string, token: string) {
+  return request<void>(`/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }, token);
+}
+
+export function getAdminStats(token: string, signal?: AbortSignal) {
+  return request<AdminStats>('/admin/stats', { signal }, token);
+}
+
+export function listAdminArticles(params: ArticleListParams, token: string, signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '' && value !== 'all') query.set(key, String(value));
+  });
+  return request<ArticleListResponse>(`/admin/articles?${query.toString()}`, { signal }, token);
+}
+
+export function updateApplicationSettings(input: ApplicationSettings, token: string) {
+  return request<ApplicationSettings>('/admin/settings', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  }, token);
 }
 
 export function createTag(input: TagInput, token: string) {
