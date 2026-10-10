@@ -14,6 +14,7 @@ function parseGroups(value: unknown): string[] {
 }
 
 export function roleFromClaims(claims: Record<string, unknown>): Role {
+  if (claims.role === 'Admin') return 'Admin';
   return parseGroups(claims['cognito:groups']).includes('Admin') ? 'Admin' : 'Standard';
 }
 

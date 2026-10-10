@@ -7,6 +7,7 @@ import {
 } from 'aws-amplify/auth';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { appConfig } from '../config';
+import { createLocalSession, getLocalSession } from '../services/api';
 import type { SessionUser, UserRole } from '../types';
 
 export type SignInResult = 'SIGNED_IN' | 'NEW_PASSWORD_REQUIRED';
@@ -15,6 +16,7 @@ interface AuthContextValue {
   user: SessionUser | null;
   loading: boolean;
   configured: boolean;
+  authMode: 'cognito' | 'local';
   signIn(username: string, password: string): Promise<SignInResult>;
   completeNewPassword(newPassword: string): Promise<void>;
   signOut(): Promise<void>;
@@ -23,6 +25,7 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const localTokenKey = 'agt-local-auth-token';
 
 export function roleFromGroups(groups: unknown): UserRole {
   return Array.isArray(groups) && groups.includes('Admin') ? 'Admin' : 'Standard';
@@ -40,6 +43,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
+      if (appConfig.authMode === 'local') {
+        const token = localStorage.getItem(localTokenKey);
+        if (!token) {
+          setUser(null);
+          return;
+        }
+        setUser(await getLocalSession(token));
+        return;
+      }
       const [current, session] = await Promise.all([getCurrentUser(), fetchAuthSession()]);
       const payload = session.tokens?.idToken?.payload;
       setUser({
@@ -50,6 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role: roleFromGroups(payload?.['cognito:groups']),
       });
     } catch {
+      if (appConfig.authMode === 'local') localStorage.removeItem(localTokenKey);
       setUser(null);
     } finally {
       setLoading(false);
@@ -61,6 +74,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const signIn = useCallback(async (username: string, password: string) => {
+    if (appConfig.authMode === 'local') {
+      const session = await createLocalSession(username, password);
+      localStorage.setItem(localTokenKey, session.token);
+      setUser(session.user);
+      return 'SIGNED_IN';
+    }
     const result = await amplifySignIn({ username, password });
     if (result.isSignedIn) {
       await refresh();
@@ -76,6 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const completeNewPassword = useCallback(async (newPassword: string) => {
+    if (appConfig.authMode === 'local') throw new Error('Password changes are managed by an administrator.');
     const result = await amplifyConfirmSignIn({ challengeResponse: newPassword });
     if (!result.isSignedIn) {
       throw new Error('The password was accepted, but another unsupported sign-in step is required. Contact an administrator.');
@@ -84,11 +104,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const signOut = useCallback(async () => {
-    await amplifySignOut();
+    if (appConfig.authMode === 'local') localStorage.removeItem(localTokenKey);
+    else await amplifySignOut();
     setUser(null);
   }, []);
 
   const getToken = useCallback(async () => {
+    if (appConfig.authMode === 'local') {
+      const token = localStorage.getItem(localTokenKey);
+      if (!token) throw new Error('Your session has expired. Sign in again.');
+      return token;
+    }
     const session = await fetchAuthSession();
     const token = session.tokens?.idToken?.toString();
     if (!token) throw new Error('Your session has expired. Sign in again.');
@@ -96,7 +122,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, configured: appConfig.authConfigured, signIn, completeNewPassword, signOut, getToken, refresh }),
+    () => ({
+      user,
+      loading,
+      configured: appConfig.authConfigured,
+      authMode: appConfig.authMode,
+      signIn,
+      completeNewPassword,
+      signOut,
+      getToken,
+      refresh,
+    }),
     [completeNewPassword, getToken, loading, refresh, signIn, signOut, user],
   );
 

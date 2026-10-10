@@ -7,6 +7,7 @@ import type {
   ArticleRevision,
   CanonicalTag,
   OrphanTagReference,
+  SessionUser,
   TagInput,
 } from '../types';
 
@@ -39,6 +40,17 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   }
 
   return payload as T;
+}
+
+export function createLocalSession(username: string, password: string) {
+  return request<{ token: string; user: SessionUser }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function getLocalSession(token: string) {
+  return request<SessionUser>('/auth/session', {}, token);
 }
 
 export function listArticles(params: ArticleListParams, signal?: AbortSignal, token?: string) {

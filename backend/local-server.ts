@@ -1,18 +1,31 @@
 import { createServer } from 'node:http';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
+import { roleFromClaims } from './auth.js';
 import { handler } from './handler.js';
+import {
+  assertLocalAuthConfigured,
+  authenticateLocalUser,
+  issueLocalToken,
+  localClaims,
+  verifyLocalToken,
+} from './local-auth.js';
 
 const port = Number(process.env.API_PORT ?? 3001);
 const host = process.env.API_HOST ?? '127.0.0.1';
 const origin = process.env.LOCAL_FRONTEND_ORIGIN ?? 'http://localhost:5173';
+const authMode = process.env.AUTH_MODE ?? 'cognito';
 const userPoolId = process.env.VITE_COGNITO_USER_POOL_ID;
 const clientId = process.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
-const verifier = userPoolId && clientId
+if (authMode !== 'cognito' && authMode !== 'local') throw new Error('AUTH_MODE must be cognito or local.');
+if (authMode === 'local') assertLocalAuthConfigured();
+const verifier = authMode === 'cognito' && userPoolId && clientId
   ? CognitoJwtVerifier.create({ userPoolId, clientId, tokenUse: 'id' })
   : null;
 
 function routeKey(method: string, pathname: string) {
+  if (method === 'POST' && pathname === '/auth/login') return 'POST /auth/login';
+  if (method === 'GET' && pathname === '/auth/session') return 'GET /auth/session';
   if (method === 'GET' && pathname === '/articles') return 'GET /articles';
   if (method === 'GET' && pathname === '/tags') return 'GET /tags';
   if (method === 'POST' && pathname === '/tags') return 'POST /tags';
@@ -36,6 +49,22 @@ function routeKey(method: string, pathname: string) {
   return `${method} ${pathname}`;
 }
 
+function sendJson(response: import('node:http').ServerResponse, statusCode: number, body: unknown) {
+  response.setHeader('content-type', 'application/json; charset=utf-8');
+  response.setHeader('cache-control', 'no-store');
+  response.writeHead(statusCode).end(JSON.stringify(body));
+}
+
+function sessionUser(claims: Record<string, unknown>) {
+  return {
+    sub: String(claims.sub),
+    username: String(claims.username ?? claims['cognito:username'] ?? claims.sub),
+    displayName: String(claims.name ?? claims.username ?? claims['cognito:username'] ?? 'AGT Traveller'),
+    email: typeof claims.email === 'string' ? claims.email : undefined,
+    role: roleFromClaims(claims),
+  };
+}
+
 createServer(async (request, response) => {
   response.setHeader('access-control-allow-origin', origin);
   response.setHeader('access-control-allow-headers', 'authorization,content-type');
@@ -45,21 +74,63 @@ createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   const method = request.method ?? 'GET';
   const matchedRoute = routeKey(method, url.pathname);
-  const authenticatedRequest = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+  const chunks: Buffer[] = [];
+  let bodySize = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.from(chunk);
+    bodySize += buffer.length;
+    if (bodySize > 1_000_000) { sendJson(response, 413, { message: 'Request body is too large.' }); return; }
+    chunks.push(buffer);
+  }
+  const body = chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined;
+
+  if (matchedRoute === 'POST /auth/login') {
+    if (authMode !== 'local') { sendJson(response, 404, { message: 'Route not found.' }); return; }
+    let input: unknown;
+    try { input = JSON.parse(body ?? ''); }
+    catch { sendJson(response, 400, { message: 'The request body must contain valid JSON.' }); return; }
+    if (!input || typeof input !== 'object'
+      || typeof (input as { username?: unknown }).username !== 'string'
+      || typeof (input as { password?: unknown }).password !== 'string') {
+      sendJson(response, 400, { message: 'Username and password are required.' });
+      return;
+    }
+    try {
+      const user = await authenticateLocalUser(
+        (input as { username: string }).username,
+        (input as { password: string }).password,
+      );
+      if (!user) { sendJson(response, 401, { message: 'Invalid username or password.' }); return; }
+      sendJson(response, 200, { token: issueLocalToken(user), user });
+    } catch (error) {
+      console.error('Local sign-in failed', { error });
+      sendJson(response, 500, { message: 'Sign-in is temporarily unavailable.' });
+    }
+    return;
+  }
+
+  const authenticatedRequest = (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
     || matchedRoute === 'GET /articles/{id}/revisions'
     || matchedRoute === 'GET /tags/orphans'
-    || matchedRoute.startsWith('GET /member/');
+    || matchedRoute.startsWith('GET /member/')
+    || matchedRoute === 'GET /auth/session');
   let claims: Record<string, unknown> = {};
 
   if (authenticatedRequest) {
     const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
-    if (!token || !verifier) { response.writeHead(401).end(JSON.stringify({ message: 'Authentication is not configured.' })); return; }
-    try { claims = await verifier.verify(token); }
-    catch { response.writeHead(401).end(JSON.stringify({ message: 'Invalid authentication token.' })); return; }
+    if (!token || (authMode === 'cognito' && !verifier)) {
+      sendJson(response, 401, { message: 'Authentication is not configured.' });
+      return;
+    }
+    try {
+      claims = authMode === 'local'
+        ? localClaims(verifyLocalToken(token))
+        : await verifier!.verify(token);
+    } catch { sendJson(response, 401, { message: 'Invalid or expired authentication token.' }); return; }
   }
 
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  if (matchedRoute === 'GET /auth/session') { sendJson(response, 200, sessionUser(claims)); return; }
+
   const articleMatch = url.pathname.match(/^\/(?:member\/)?articles\/([^/]+)/);
   const revisionMatch = url.pathname.match(/^\/articles\/[^/]+\/revisions\/([^/]+)/);
   const orphanTagMatch = url.pathname.match(/^\/articles\/[^/]+\/orphan-tags\/([^/]+)/);
@@ -82,7 +153,7 @@ createServer(async (request, response) => {
       authorizer: { jwt: { claims, scopes: [] } },
       http: { method, path: url.pathname, protocol: 'HTTP/1.1', sourceIp: request.socket.remoteAddress ?? '', userAgent: request.headers['user-agent'] ?? '' },
     },
-    body: chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined,
+    body,
     isBase64Encoded: false,
   } as unknown as APIGatewayProxyEventV2WithJWTAuthorizer;
 

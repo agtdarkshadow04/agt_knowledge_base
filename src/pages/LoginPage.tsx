@@ -4,7 +4,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
 export function LoginPage() {
-  const { user, configured, signIn, completeNewPassword } = useAuth();
+  const { user, configured, authMode, signIn, completeNewPassword } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [error, setError] = useState('');
@@ -60,7 +60,9 @@ export function LoginPage() {
         <h1 id="login-title">{newPasswordRequired ? 'Choose a permanent password' : 'Sign in'}</h1>
         <p>{newPasswordRequired
           ? 'Your temporary password was accepted. Set a permanent password to finish signing in.'
-          : 'Use your AGT Cognito account to create and maintain archive entries.'}</p>
+          : authMode === 'local'
+            ? 'Use your locally managed AGT account to create and maintain archive entries.'
+            : 'Use your AGT Cognito account to create and maintain archive entries.'}</p>
         {!configured && <div className="inline-alert" role="alert">Authentication is not configured in this environment.</div>}
         {error && <div className="inline-alert" role="alert">{error}</div>}
         {newPasswordRequired ? (

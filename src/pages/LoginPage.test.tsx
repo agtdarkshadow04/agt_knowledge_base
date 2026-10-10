@@ -7,12 +7,14 @@ import { LoginPage } from './LoginPage';
 const mocks = vi.hoisted(() => ({
   signIn: vi.fn(),
   completeNewPassword: vi.fn(),
+  authMode: 'cognito' as 'cognito' | 'local',
 }));
 
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
     user: null,
     configured: true,
+    authMode: mocks.authMode,
     signIn: mocks.signIn,
     completeNewPassword: mocks.completeNewPassword,
   }),
@@ -30,6 +32,7 @@ describe('LoginPage', () => {
   beforeEach(() => {
     mocks.signIn.mockReset();
     mocks.completeNewPassword.mockReset();
+    mocks.authMode = 'cognito';
     mocks.signIn.mockResolvedValue('SIGNED_IN');
     mocks.completeNewPassword.mockResolvedValue(undefined);
   });
@@ -72,5 +75,12 @@ describe('LoginPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The new passwords do not match.');
     expect(mocks.completeNewPassword).not.toHaveBeenCalled();
+  });
+
+  it('describes local credentials when local authentication is active', () => {
+    mocks.authMode = 'local';
+    renderLogin();
+
+    expect(screen.getByText(/locally managed AGT account/i)).toBeInTheDocument();
   });
 });

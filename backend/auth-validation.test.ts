@@ -8,6 +8,7 @@ const tagId = '10000000-0000-4000-8000-000000000001';
 describe('authentication and validation', () => {
   it('recognizes Admin group claims and defaults authenticated users to Standard', () => {
     expect(roleFromClaims({ 'cognito:groups': ['Standard', 'Admin'] })).toBe('Admin');
+    expect(roleFromClaims({ role: 'Admin' })).toBe('Admin');
     expect(roleFromClaims({ 'cognito:groups': '["Standard"]' })).toBe('Standard');
     expect(roleFromClaims({})).toBe('Standard');
   });

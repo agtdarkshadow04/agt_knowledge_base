@@ -21,7 +21,7 @@ export async function runMigrations(event: MigrationEvent = {}) {
     )`);
     for (const migration of migrations) {
       const exists = await client.query('SELECT 1 FROM schema_migrations WHERE id = $1', [migration.id]);
-      if (migration.requiresExplicitTarget && targetId === undefined && !exists.rowCount) break;
+      if (migration.requiresExplicitTarget && targetId !== migration.id && !exists.rowCount) continue;
       if (!exists.rowCount) {
         await client.query('BEGIN');
         try {

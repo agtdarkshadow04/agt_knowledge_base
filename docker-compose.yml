@@ -45,8 +45,9 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: 3001
       LOCAL_FRONTEND_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
-      VITE_COGNITO_USER_POOL_ID: ${VITE_COGNITO_USER_POOL_ID:-}
-      VITE_COGNITO_USER_POOL_CLIENT_ID: ${VITE_COGNITO_USER_POOL_CLIENT_ID:-}
+      AUTH_MODE: local
+      LOCAL_AUTH_SECRET: ${LOCAL_AUTH_SECRET:?Set LOCAL_AUTH_SECRET in .env}
+      LOCAL_AUTH_SESSION_HOURS: ${LOCAL_AUTH_SESSION_HOURS:-12}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -56,10 +57,6 @@ services:
     build:
       context: .
       target: web
-      args:
-        VITE_COGNITO_USER_POOL_ID: ${VITE_COGNITO_USER_POOL_ID:-}
-        VITE_COGNITO_USER_POOL_CLIENT_ID: ${VITE_COGNITO_USER_POOL_CLIENT_ID:-}
-        VITE_AWS_REGION: ${VITE_AWS_REGION:-us-east-1}
     restart: unless-stopped
     ports:
       - '${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8080}:80'

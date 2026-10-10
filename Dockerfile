@@ -4,13 +4,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM dependencies AS frontend-build
-ARG VITE_COGNITO_USER_POOL_ID
-ARG VITE_COGNITO_USER_POOL_CLIENT_ID
-ARG VITE_AWS_REGION=us-east-1
 ENV VITE_API_URL=/api \
-    VITE_COGNITO_USER_POOL_ID=$VITE_COGNITO_USER_POOL_ID \
-    VITE_COGNITO_USER_POOL_CLIENT_ID=$VITE_COGNITO_USER_POOL_CLIENT_ID \
-    VITE_AWS_REGION=$VITE_AWS_REGION
+    VITE_AUTH_MODE=local
 COPY . .
 RUN npm run build
 
@@ -20,6 +15,7 @@ RUN npx esbuild \
     backend/local-server.ts \
     scripts/migrate.ts \
     scripts/bootstrap-admin.ts \
+    scripts/manage-local-user.ts \
     --bundle \
     --packages=external \
     --platform=node \
