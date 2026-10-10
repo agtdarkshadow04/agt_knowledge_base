@@ -23,6 +23,8 @@ AWS Lambda (private VPC subnets)
 
 The browser never connects to PostgreSQL and contains no database credential. API Gateway validates Cognito tokens on every authenticated route; the Lambda service repeats role, visibility, and resource checks before reading or changing data. `created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, and version fields are server-owned.
 
+The Docker deployment keeps the same trust boundaries: Nginx serves the built frontend and proxies `/api` to the Node.js API, while PostgreSQL is reachable only through the private Compose network (and an optional loopback-only development port). Amazon Cognito remains the identity provider for authenticated operations.
+
 ## Roles and editing rules
 
 | User | Visible articles | View/compare history | Create | Set visibility | Edit unprotected | Edit protected | Pin | Protect | Restore | Delete |
@@ -52,7 +54,7 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
 2. Start PostgreSQL and apply migrations:
 
    ```bash
-   docker compose up -d postgres
+   POSTGRES_PASSWORD=postgres docker compose up -d postgres
    DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agt_knowledge_base npm run db:migrate
    ```
 
@@ -64,6 +66,58 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
    ```
 
 The local API verifies real Cognito ID tokens. It does not provide an insecure authentication bypass. Public browsing works without a token. If you only need frontend development, set `VITE_API_URL` to a deployed API.
+
+## Docker self-hosting
+
+The Compose stack runs the web frontend, API, schema migrations, and PostgreSQL. It requires an existing Amazon Cognito user pool and web client; Docker replaces the AWS hosting, API, Lambda, and RDS layers, but not authentication.
+
+1. Install Docker Engine with the Compose plugin, clone this repository, and check out the `docker` branch.
+2. Create the deployment configuration:
+
+   ```bash
+   cp docker.env.example .env
+   ```
+
+   Replace `POSTGRES_PASSWORD`, then set the Cognito user pool ID, web client ID, and AWS region. If the site will be reached anywhere other than `http://localhost:8080`, also set `APP_ORIGIN` to its externally visible origin. Cognito values are public identifiers; the PostgreSQL password is a secret and must not be committed.
+
+3. Build and start the stack:
+
+   ```bash
+   docker compose up -d --build
+   docker compose ps
+   ```
+
+   The one-shot `migrate` service waits for PostgreSQL, applies pending non-destructive migrations, and must finish successfully before the API starts. Open `http://localhost:8080` (or the configured host and port) after all services are healthy or running.
+
+Configuration is read from `.env`:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `APP_BIND_ADDRESS` | `0.0.0.0` | Host interface exposed by the web container |
+| `APP_PORT` | `8080` | Host HTTP port |
+| `APP_ORIGIN` | `http://localhost:8080` | Browser origin allowed by the API |
+| `POSTGRES_DB` | `agt_knowledge_base` | PostgreSQL database name |
+| `POSTGRES_USER` | `postgres` | PostgreSQL user |
+| `POSTGRES_PASSWORD` | none | Required PostgreSQL password |
+| `POSTGRES_BIND_ADDRESS` | `127.0.0.1` | Interface for optional host database access |
+| `POSTGRES_PORT` | `5432` | Host PostgreSQL port |
+| `VITE_COGNITO_USER_POOL_ID` | none | Cognito user pool used by the frontend and API |
+| `VITE_COGNITO_USER_POOL_CLIENT_ID` | none | Cognito web client used by the frontend and API |
+| `VITE_AWS_REGION` | `us-east-1` | Cognito user pool region |
+
+The `VITE_*` values are compiled into the frontend image. Rebuild the web image after changing them. For an internet-facing deployment, place a TLS-terminating reverse proxy in front of `APP_PORT`; do not expose the PostgreSQL port beyond loopback.
+
+Useful operations:
+
+```bash
+docker compose logs -f web api migrate postgres
+docker compose up -d --build       # rebuild after pulling an update
+docker compose down                # stop containers without deleting data
+```
+
+The `agt-postgres` volume contains the database. Back it up before upgrades, and do not run `docker compose down --volumes` unless you intend to permanently delete the data.
+
+References: [Install Docker Engine](https://docs.docker.com/engine/install/), [install Docker Compose](https://docs.docker.com/compose/install/), and [Amazon Cognito user pools](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools.html).
 
 ## Checks
 

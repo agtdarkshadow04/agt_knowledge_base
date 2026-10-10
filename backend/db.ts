@@ -23,8 +23,25 @@ async function createPool() {
     });
   }
 
+  if (process.env.DB_USER || process.env.DB_PASSWORD) {
+    if (!process.env.DB_USER || !process.env.DB_PASSWORD) {
+      throw new Error('DB_USER and DB_PASSWORD must be configured together.');
+    }
+    return new Pool({
+      host: process.env.DB_HOST ?? 'localhost',
+      port: Number(process.env.DB_PORT ?? 5432),
+      database: process.env.DB_NAME ?? 'agt_knowledge_base',
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: true } : false,
+      max: 5,
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+    });
+  }
+
   const secretArn = process.env.DB_SECRET_ARN;
-  if (!secretArn) throw new Error('DB_SECRET_ARN or DATABASE_URL must be configured.');
+  if (!secretArn) throw new Error('DB_SECRET_ARN, DATABASE_URL, or DB_USER/DB_PASSWORD must be configured.');
   const response = await new SecretsManagerClient({}).send(new GetSecretValueCommand({ SecretId: secretArn }));
   if (!response.SecretString) throw new Error('The database secret does not contain a SecretString.');
   const secret = JSON.parse(response.SecretString) as DatabaseSecret;

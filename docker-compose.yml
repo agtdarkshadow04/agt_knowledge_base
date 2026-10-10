@@ -1,19 +1,70 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: agt_knowledge_base
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-agt_knowledge_base}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - '5432:5432'
+      - '${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432'
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d agt_knowledge_base']
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 3s
       timeout: 3s
       retries: 20
     volumes:
       - agt-postgres:/var/lib/postgresql/data
+
+  migrate:
+    image: agt-knowledge-base-api
+    build:
+      context: .
+      target: api
+    command: ['node', 'server/scripts/migrate.js']
+    environment: &database-environment
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-agt_knowledge_base}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      DATABASE_SSL: 'false'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    image: agt-knowledge-base-api
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      API_HOST: 0.0.0.0
+      API_PORT: 3001
+      LOCAL_FRONTEND_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      VITE_COGNITO_USER_POOL_ID: ${VITE_COGNITO_USER_POOL_ID:-}
+      VITE_COGNITO_USER_POOL_CLIENT_ID: ${VITE_COGNITO_USER_POOL_CLIENT_ID:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    image: agt-knowledge-base-web
+    build:
+      context: .
+      target: web
+      args:
+        VITE_COGNITO_USER_POOL_ID: ${VITE_COGNITO_USER_POOL_ID:-}
+        VITE_COGNITO_USER_POOL_CLIENT_ID: ${VITE_COGNITO_USER_POOL_CLIENT_ID:-}
+        VITE_AWS_REGION: ${VITE_AWS_REGION:-us-east-1}
+    restart: unless-stopped
+    ports:
+      - '${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8080}:80'
+    depends_on:
+      - api
 
 volumes:
   agt-postgres:

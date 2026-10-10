@@ -4,6 +4,7 @@ import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
 import { handler } from './handler.js';
 
 const port = Number(process.env.API_PORT ?? 3001);
+const host = process.env.API_HOST ?? '127.0.0.1';
 const origin = process.env.LOCAL_FRONTEND_ORIGIN ?? 'http://localhost:5173';
 const userPoolId = process.env.VITE_COGNITO_USER_POOL_ID;
 const clientId = process.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
@@ -90,6 +91,6 @@ createServer(async (request, response) => {
   const statusCode = result.statusCode ?? 200;
   for (const [key, value] of Object.entries(result.headers ?? {})) response.setHeader(key, String(value));
   response.writeHead(statusCode).end(result.body ?? '');
-}).listen(port, '127.0.0.1', () => {
-  console.log(`AGT API listening on http://127.0.0.1:${port}`);
+}).listen(port, host, () => {
+  console.log(`AGT API listening on http://${host}:${port}`);
 });
