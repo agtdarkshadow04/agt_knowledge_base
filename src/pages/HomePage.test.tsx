@@ -58,6 +58,21 @@ describe('HomePage', () => {
     ));
   });
 
+  it('loads an AGT-standard numeric visibility filter', async () => {
+    const router = createMemoryRouter(
+      [{ path: '/', element: <HomePage /> }],
+      { initialEntries: ['/?visibility=0'] },
+    );
+    render(<RouterProvider router={router} />);
+
+    expect(screen.getByRole('combobox', { name: 'Visibility' })).toHaveValue('0');
+    await waitFor(() => expect(mocks.listArticles).toHaveBeenCalledWith(
+      expect.objectContaining({ visibility: '0' }),
+      expect.any(AbortSignal),
+      undefined,
+    ));
+  });
+
   it('filters by a canonical tag ID instead of free text', async () => {
     const user = userEvent.setup();
     const router = createMemoryRouter([{ path: '/', element: <HomePage /> }]);

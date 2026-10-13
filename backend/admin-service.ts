@@ -321,9 +321,9 @@ export class AdminService {
     const result = await pool.query<Record<keyof AdminStats, string>>(`
       SELECT
         (SELECT count(*) FROM articles)::text AS "totalArticles",
-        (SELECT count(*) FROM articles WHERE visibility = 'Public')::text AS "publicArticles",
-        (SELECT count(*) FROM articles WHERE visibility = 'Internal')::text AS "internalArticles",
-        (SELECT count(*) FROM articles WHERE visibility = 'Admin')::text AS "adminArticles",
+        (SELECT count(*) FROM articles WHERE visibility IN ('"Public"'::jsonb, '0'::jsonb))::text AS "publicArticles",
+        (SELECT count(*) FROM articles WHERE visibility IN ('"Internal"'::jsonb, '1'::jsonb))::text AS "internalArticles",
+        (SELECT count(*) FROM articles WHERE visibility IN ('"Admin"'::jsonb, '2'::jsonb, '3'::jsonb, '4'::jsonb, '5'::jsonb))::text AS "adminArticles",
         (SELECT count(*) FROM articles WHERE is_pinned)::text AS "pinnedArticles",
         (SELECT count(*) FROM articles WHERE is_protected)::text AS "protectedArticles",
         (SELECT count(*) FROM articles WHERE is_verified)::text AS "verifiedArticles",
@@ -355,7 +355,7 @@ export class AdminService {
       `UPDATE application_settings
        SET application_name = $1,
            application_subtitle = $2,
-           default_visibility = $3,
+           default_visibility = $3::jsonb,
            allow_public_browsing = $4,
            version = version + 1,
            updated_at = now()
@@ -364,7 +364,7 @@ export class AdminService {
       [
         input.applicationName,
         input.applicationSubtitle,
-        input.defaultVisibility,
+        JSON.stringify(input.defaultVisibility),
         input.allowPublicBrowsing,
         input.version,
       ],

@@ -1,4 +1,5 @@
 import {
+  canAssignArticleVisibility,
   ConflictError,
   ForbiddenError,
   NotOrphanedTagError,
@@ -30,8 +31,8 @@ export class ArticleService {
 
   create(input: ArticleWrite, actor: Actor) {
     const visibility = input.visibility ?? 'Internal';
-    if (actor.role !== 'Admin' && visibility === 'Admin') {
-      throw new ForbiddenError('Standard users cannot assign Admin visibility.');
+    if (!canAssignArticleVisibility(actor.role, visibility)) {
+      throw new ForbiddenError('Standard users cannot assign this visibility level.');
     }
     return this.repository.create({ ...input, visibility }, actor);
   }
@@ -44,8 +45,8 @@ export class ArticleService {
       throw new ForbiddenError('This protected article can only be edited by an Administrator.');
     }
     const visibility = input.visibility ?? existing.visibility;
-    if (actor.role !== 'Admin' && visibility === 'Admin') {
-      throw new ForbiddenError('Standard users cannot assign Admin visibility.');
+    if (!canAssignArticleVisibility(actor.role, visibility)) {
+      throw new ForbiddenError('Standard users cannot assign this visibility level.');
     }
     if (existing.version !== input.version) throw new ConflictError();
     const unchanged = existing.title === input.title

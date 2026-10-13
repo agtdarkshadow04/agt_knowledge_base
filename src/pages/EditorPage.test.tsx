@@ -61,6 +61,14 @@ describe('EditorPage', () => {
     mocks.updateArticle.mockResolvedValue({ id: 'article-1', title: 'Updated Portal Guide', tags: [portalTag], content: '# Portal Guide\n\nUpdated instructions.', visibility: 'Internal', version: 2 });
   });
 
+  it('offers Standard users the permitted AGT-standard visibility levels', () => {
+    renderEditor();
+
+    expect(screen.getByRole('option', { name: 'Private' })).toHaveValue('1');
+    expect(screen.queryByRole('option', { name: 'Restricted' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Top Secret' })).not.toBeInTheDocument();
+  });
+
   it('switches editing modes without losing unsaved Markdown', async () => {
     const user = userEvent.setup();
     renderEditor();

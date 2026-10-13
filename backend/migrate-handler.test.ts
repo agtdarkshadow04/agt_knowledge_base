@@ -21,6 +21,7 @@ const expansion = migrations.find((migration) => migration.id === '006_canonical
 const contract = migrations.find((migration) => migration.id === '007_canonical_tags_contract')!;
 const localAuth = migrations.find((migration) => migration.id === '008_local_auth')!;
 const admin = migrations.find((migration) => migration.id === '009_admin')!;
+const agtVisibility = migrations.find((migration) => migration.id === '010_agt_visibility')!;
 
 describe('targeted migrations', () => {
   beforeEach(() => {
@@ -52,7 +53,7 @@ describe('targeted migrations', () => {
 
   it('does not apply an explicit-only contract migration by default', async () => {
     await expect(runMigrations()).resolves.toEqual({
-      applied: ['006_canonical_tags_expand', '008_local_auth', '009_admin'],
+      applied: ['006_canonical_tags_expand', '008_local_auth', '009_admin', '010_agt_visibility'],
     });
 
     const executedSql = database.client.query.mock.calls.map(([sql]) => sql);
@@ -60,6 +61,7 @@ describe('targeted migrations', () => {
     expect(executedSql).not.toContain(contract.sql);
     expect(executedSql).toContain(localAuth.sql);
     expect(executedSql).toContain(admin.sql);
+    expect(executedSql).toContain(agtVisibility.sql);
   });
 
   it('does not advance past an already-applied target', async () => {
@@ -83,7 +85,7 @@ describe('targeted migrations', () => {
     database.applied.add('006_canonical_tags_expand');
     database.applied.add('007_canonical_tags_contract');
 
-    await expect(runMigrations()).resolves.toEqual({ applied: ['008_local_auth', '009_admin'] });
+    await expect(runMigrations()).resolves.toEqual({ applied: ['008_local_auth', '009_admin', '010_agt_visibility'] });
     expect(database.client.query).toHaveBeenCalledWith(
       'SELECT 1 FROM schema_migrations WHERE id = $1',
       ['007_canonical_tags_contract'],
@@ -109,6 +111,18 @@ describe('targeted migrations', () => {
     const executedSql = database.client.query.mock.calls.map(([sql]) => sql);
     expect(executedSql).not.toContain(contract.sql);
     expect(executedSql).toContain(admin.sql);
+    expect(executedSql).not.toContain(agtVisibility.sql);
+  });
+
+  it('migrates legacy visibility text to JSON strings before accepting numeric levels', async () => {
+    database.applied.add('006_canonical_tags_expand');
+    database.applied.add('008_local_auth');
+    database.applied.add('009_admin');
+
+    await expect(runMigrations({ targetId: '010_agt_visibility' })).resolves.toEqual({ applied: ['010_agt_visibility'] });
+    expect(agtVisibility.sql).toContain('TYPE jsonb USING to_jsonb(visibility)');
+    expect(agtVisibility.sql).toContain(`visibility IN ('"Public"'::jsonb, '"Internal"'::jsonb, '"Admin"'::jsonb)`);
+    expect(agtVisibility.sql).toContain(`visibility IN ('0'::jsonb, '1'::jsonb, '2'::jsonb, '3'::jsonb, '4'::jsonb, '5'::jsonb)`);
   });
 
   it('rejects unknown targets before opening a database connection', async () => {

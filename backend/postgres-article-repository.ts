@@ -13,7 +13,11 @@ import type {
   TagOrphan,
   TagWrite,
 } from './domain.js';
-import { InvalidTagIdsError as InvalidTagIds, TagNameConflictError as TagNameConflict } from './domain.js';
+import {
+  articleVisibilityFromFilter,
+  InvalidTagIdsError as InvalidTagIds,
+  TagNameConflictError as TagNameConflict,
+} from './domain.js';
 import { getPool } from './db.js';
 import type { ArticleRepository, TagRepository } from './repository.js';
 
@@ -182,20 +186,31 @@ function isUniqueViolation(error: unknown) {
 export class PostgresArticleRepository implements ArticleRepository, TagRepository {
   async list(query: ListArticlesQuery, viewerRole: Role | null): Promise<ArticleListResult> {
     const pool = await getPool();
+    const visibilityFilter = articleVisibilityFromFilter(query.visibility);
     const conditions = [
       `($1 = '' OR a.search_vector @@ websearch_to_tsquery('simple', $1))`,
       `($2 = '' OR NULLIF($2, '')::uuid = ANY(a.tag_ids))`,
       `($3 = 'all' OR a.is_pinned)`,
       `($4 = 'all' OR ($4 = 'protected' AND a.is_protected) OR ($4 = 'unprotected' AND NOT a.is_protected))`,
-      `($5 = 'all' OR lower(a.visibility) = $5)`,
+      `($5::jsonb IS NULL OR a.visibility = $5::jsonb)`,
       `($6 = 'all' OR ($6 = 'verified' AND a.is_verified) OR ($6 = 'unverified' AND NOT a.is_verified))`,
-      `($7::text = 'Admin' OR a.visibility = 'Public' OR ($7::text = 'Standard' AND a.visibility = 'Internal'))`,
+      `($7::text = 'Admin'
+        OR a.visibility IN ('"Public"'::jsonb, '0'::jsonb)
+        OR ($7::text = 'Standard' AND a.visibility IN ('"Internal"'::jsonb, '1'::jsonb)))`,
     ];
     const where = conditions.join(' AND ');
     const sortColumns = { createdAt: 'a.created_at', modifiedAt: 'a.modified_at', title: 'lower(a.title)' } as const;
     const direction = query.direction === 'asc' ? 'ASC' : 'DESC';
     const offset = (query.page - 1) * query.pageSize;
-    const params = [query.search, query.tagId, query.pinned, query.protection, query.visibility, query.verification, viewerRole];
+    const params = [
+      query.search,
+      query.tagId,
+      query.pinned,
+      query.protection,
+      visibilityFilter === null ? null : JSON.stringify(visibilityFilter),
+      query.verification,
+      viewerRole,
+    ];
 
     const [countResult, dataResult] = await Promise.all([
       pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM articles a WHERE ${where}`, params),
@@ -253,7 +268,9 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
        JOIN app_users creator ON creator.cognito_sub = a.created_by
        JOIN app_users editor ON editor.cognito_sub = a.modified_by
        WHERE a.id = $1
-         AND ($2::text = 'Admin' OR a.visibility = 'Public' OR ($2::text = 'Standard' AND a.visibility = 'Internal'))`,
+         AND ($2::text = 'Admin'
+           OR a.visibility IN ('"Public"'::jsonb, '0'::jsonb)
+           OR ($2::text = 'Standard' AND a.visibility IN ('"Internal"'::jsonb, '1'::jsonb)))`,
       [id, viewerRole],
     );
     return result.rows[0] ? toArticle(result.rows[0]) : null;
@@ -294,9 +311,9 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       await lockTagIds(client, input.tagIds);
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO articles (title, content, tag_ids, visibility, created_by, modified_by)
-         VALUES ($1, $2, $3::uuid[], $4, $5, $5)
+         VALUES ($1, $2, $3::uuid[], $4::jsonb, $5, $5)
          RETURNING id`,
-        [input.title, input.content, input.tagIds, input.visibility ?? 'Internal', actor.sub],
+        [input.title, input.content, input.tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub],
       );
       await recordRevision(client, inserted.rows[0].id);
       await client.query('COMMIT');
@@ -319,16 +336,16 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
          SET title = $1,
              content = $2,
              tag_ids = merge_preserved_orphan_tag_ids(articles.tag_ids, $3::uuid[]),
-             visibility = $4,
+             visibility = $4::jsonb,
              modified_by = $5,
              modified_at = now(),
              version = version + 1
          WHERE id = $6
            AND version = $7
            AND (NOT is_protected OR $8::boolean)
-           AND ($8::boolean OR $4 <> 'Admin')
+           AND ($8::boolean OR $4::jsonb IN ('"Public"'::jsonb, '"Internal"'::jsonb, '0'::jsonb, '1'::jsonb))
          RETURNING id`,
-        [input.title, input.content, input.tagIds, input.visibility ?? 'Internal', actor.sub, id, input.version, actor.role === 'Admin'],
+        [input.title, input.content, input.tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub, id, input.version, actor.role === 'Admin'],
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');

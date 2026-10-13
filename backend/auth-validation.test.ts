@@ -15,6 +15,9 @@ describe('authentication and validation', () => {
 
   it('rejects executable MDX and raw HTML while accepting Markdown', () => {
     expect(parseArticleWrite({ title: 'Safe guide', tagIds: [tagId], content: '# Safe\n\nPlain **Markdown** content.', visibility: 'Public' })).toMatchObject({ visibility: 'Public' });
+    expect(parseArticleWrite({ title: 'Private guide', tagIds: [], content: '# Safe\n\nPrivate standard content.', visibility: 1 })).toMatchObject({ visibility: 1 });
+    expect(() => parseArticleWrite({ title: 'Private guide', tagIds: [], content: '# Safe\n\nPrivate standard content.', visibility: '1' })).toThrow();
+    expect(() => parseArticleWrite({ title: 'Unknown guide', tagIds: [], content: '# Safe\n\nUnknown standard content.', visibility: 6 })).toThrow();
     expect(() => parseArticleWrite({ title: 'Safe guide', tagIds: [], content: '# Safe\n\nPlain **Markdown** content.', visibility: 'private' })).toThrow();
     expect(() => parseArticleWrite({ title: 'Unsafe', tagIds: [], content: 'import Thing from "package"\n\nMore unsafe content.' })).toThrow();
     expect(() => parseArticleWrite({ title: 'Unsafe', tagIds: [], content: '<script>alert(1)</script> with enough content.' })).toThrow();
@@ -35,6 +38,8 @@ describe('authentication and validation', () => {
   it('bounds pagination and only accepts allowlisted sort fields', () => {
     expect(parseListQuery({ visibility: 'internal', pinned: 'pinned', verification: 'verified', sort: 'title', direction: 'asc', page: '2' })).toMatchObject({ visibility: 'internal', pinned: 'pinned', verification: 'verified', sort: 'title', direction: 'asc', page: 2 });
     expect(() => parseListQuery({ visibility: 'private' })).toThrow();
+    expect(parseListQuery({ visibility: '5' })).toMatchObject({ visibility: '5' });
+    expect(() => parseListQuery({ visibility: '6' })).toThrow();
     expect(() => parseListQuery({ pinned: 'true' })).toThrow();
     expect(() => parseListQuery({ verification: 'true' })).toThrow();
     expect(() => parseListQuery({ sort: 'created_at; DROP TABLE articles' })).toThrow();

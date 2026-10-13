@@ -1,5 +1,8 @@
 export type UserRole = 'Admin' | 'Standard';
-export type ArticleVisibility = 'Public' | 'Internal' | 'Admin';
+export type LegacyArticleVisibility = 'Public' | 'Internal' | 'Admin';
+export type AgtArticleVisibility = 0 | 1 | 2 | 3 | 4 | 5;
+export type ArticleVisibility = LegacyArticleVisibility | AgtArticleVisibility;
+export type ArticleVisibilityFilter = 'all' | 'public' | 'internal' | 'admin' | `${AgtArticleVisibility}`;
 
 export interface SessionUser {
   sub: string;
@@ -120,7 +123,7 @@ export interface ArticleListResponse {
 export interface ArticleListParams {
   search?: string;
   tagId?: string;
-  visibility?: 'all' | 'public' | 'internal' | 'admin';
+  visibility?: ArticleVisibilityFilter;
   pinned?: 'all' | 'pinned';
   protection?: 'all' | 'protected' | 'unprotected';
   verification?: 'all' | 'verified' | 'unverified';

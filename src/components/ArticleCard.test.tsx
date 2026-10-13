@@ -44,4 +44,10 @@ describe('ArticleCard', () => {
     expect(status?.nextElementSibling).toBe(excerpt);
     expect(excerpt?.nextElementSibling).toBe(tags);
   });
+
+  it('labels AGT-standard numeric visibility values', () => {
+    render(<MemoryRouter><ArticleCard article={{ ...article, visibility: 3 }} /></MemoryRouter>);
+
+    expect(screen.getByText('Top Secret')).toHaveClass('visibility-top-secret');
+  });
 });

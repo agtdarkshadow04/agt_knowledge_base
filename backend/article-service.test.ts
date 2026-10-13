@@ -2,6 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { ArticleService } from './article-service.js';
 import {
+  articleVisibilityFromFilter,
+  canViewArticleVisibility,
   ConflictError,
   ForbiddenError,
   type Actor,
@@ -61,13 +63,12 @@ class MemoryRepository implements ArticleRepository {
     const search = query.search.toLowerCase();
     if (search) items = items.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(search));
     if (query.tagId) items = items.filter((item) => item.tags.some((tag) => tag.id === query.tagId));
-    if (query.visibility !== 'all') items = items.filter((item) => item.visibility.toLowerCase() === query.visibility);
+    const visibilityFilter = articleVisibilityFromFilter(query.visibility);
+    if (visibilityFilter !== null) items = items.filter((item) => item.visibility === visibilityFilter);
     if (query.pinned === 'pinned') items = items.filter((item) => item.isPinned);
     if (query.protection !== 'all') items = items.filter((item) => item.isProtected === (query.protection === 'protected'));
     if (query.verification !== 'all') items = items.filter((item) => item.isVerified === (query.verification === 'verified'));
-    items = items.filter((item) => viewerRole === 'Admin'
-      || item.visibility === 'Public'
-      || (viewerRole === 'Standard' && item.visibility === 'Internal'));
+    items = items.filter((item) => canViewArticleVisibility(viewerRole, item.visibility));
     items.sort((left, right) => {
       if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1;
       const leftValue = query.sort === 'title' ? left.title.toLowerCase() : left[query.sort];
@@ -86,8 +87,7 @@ class MemoryRepository implements ArticleRepository {
   async get(id: string, viewerRole: Role | null) {
     const article = this.records.get(id);
     if (!article) return null;
-    if (viewerRole === 'Admin' || article.visibility === 'Public') return article;
-    return viewerRole === 'Standard' && article.visibility === 'Internal' ? article : null;
+    return canViewArticleVisibility(viewerRole, article.visibility) ? article : null;
   }
   async listRevisions(id: string) { return this.revisions.get(id) ?? []; }
   async getRevision(id: string, version: number) {
@@ -311,20 +311,36 @@ describe('ArticleService authorization and persistence', () => {
     const internal = await service.create(articleInput('Internal Guide'), standard);
     const published = await service.create(articleInput('Public Guide', [], 'Public'), standard);
     const adminOnly = await service.create(articleInput('Admin Guide', [], 'Admin'), admin);
+    const agtPublic = await service.create(articleInput('AGT Public Guide', [], 0), standard);
+    const privateArticle = await service.create(articleInput('Private Guide', [], 1), standard);
+    const restricted = await service.create(articleInput('Restricted Guide', [], 2), admin);
 
     expect(internal.visibility).toBe('Internal');
     expect(() => service.create(articleInput('Forbidden Admin Guide', [], 'Admin'), standard)).toThrow(ForbiddenError);
+    expect(() => service.create(articleInput('Forbidden Restricted Guide', [], 2), standard)).toThrow(ForbiddenError);
     await expect(service.update(internal.id, { ...articleInput('Hidden Guide', [], 'Admin'), version: internal.version }, standard)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(service.get(internal.id, null)).rejects.toMatchObject({ statusCode: 404 });
 
     await expect(service.list(query, null)).resolves.toMatchObject({
-      items: [expect.objectContaining({ id: published.id })],
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: published.id }),
+        expect.objectContaining({ id: agtPublic.id }),
+      ]),
     });
     await expect(service.list(query, standard)).resolves.toMatchObject({
-      items: expect.not.arrayContaining([expect.objectContaining({ id: adminOnly.id })]),
+      items: expect.arrayContaining([expect.objectContaining({ id: privateArticle.id })]),
+    });
+    await expect(service.list(query, standard)).resolves.toMatchObject({
+      items: expect.not.arrayContaining([
+        expect.objectContaining({ id: adminOnly.id }),
+        expect.objectContaining({ id: restricted.id }),
+      ]),
     });
     await expect(service.list({ ...query, visibility: 'admin' }, admin)).resolves.toMatchObject({
       items: [expect.objectContaining({ id: adminOnly.id })],
+    });
+    await expect(service.list({ ...query, visibility: '2' }, admin)).resolves.toMatchObject({
+      items: [expect.objectContaining({ id: restricted.id })],
     });
   });
 

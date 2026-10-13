@@ -1,4 +1,5 @@
 import type { ArticleVisibility } from '../types';
+import { visibilityClassName, visibilityLabel } from '../visibility';
 
 function VisibilityEyeIcon() {
   return (
@@ -11,8 +12,8 @@ function VisibilityEyeIcon() {
 
 export function VisibilityChip({ visibility }: { visibility: ArticleVisibility }) {
   return (
-    <span className={`status-chip visibility-${visibility.toLowerCase()}`}>
-      <VisibilityEyeIcon />{visibility}
+    <span className={`status-chip visibility-${visibilityClassName(visibility)}`}>
+      <VisibilityEyeIcon />{visibilityLabel(visibility)}
     </span>
   );
 }

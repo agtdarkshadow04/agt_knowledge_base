@@ -89,14 +89,14 @@ describe('article request validation', () => {
     expect(response).toMatchObject({ statusCode: 403 });
   });
 
-  it('rejects Admin visibility assignments by Standard users before accessing persistence', async () => {
+  it('rejects restricted AGT visibility assignments by Standard users before accessing persistence', async () => {
     const event = {
       routeKey: 'POST /articles',
       body: JSON.stringify({
         title: 'Restricted Guide',
         content: 'Restricted guidance with enough content for validation.',
         tagIds: [],
-        visibility: 'Admin',
+        visibility: 2,
       }),
       requestContext: {
         requestId: 'request-6',

@@ -32,9 +32,11 @@ The Docker deployment is independent of AWS: Nginx serves the built frontend and
 
 | User | Visible articles | View/compare history | Create | Set visibility | Edit unprotected | Edit protected | Pin | Protect | Restore | Delete |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Public | Public | No | No | No | No | No | No | No | No | No |
-| Standard | Public, Internal | Yes | Yes | Public or Internal on unprotected articles | Yes | No | No | No | No | No |
+| Public | Public (legacy or AGT level 0) | No | No | No | No | No | No | No | No | No |
+| Standard | Public, Internal, Private | Yes | Yes | Public, Internal, or AGT levels 0–1 on unprotected articles | Yes | No | No | No | No | No |
 | Admin | All | Yes | Yes | Any level | Yes | Yes | Yes | Yes | Yes | Yes |
+
+AGT-standard visibility is stored as numeric levels: `0` Public (`#2aff00`), `1` Private (`#00f4ff`), `2` Restricted (`#f198e2`), `3` Top Secret (`#fd0303`), `4` SLT Restricted (`#ff9300`), and `5` SCC Restricted (`#3287f0`). Public and Standard users can read level 0, Standard users can also read level 1, and levels 2–5 are Admin-only. The legacy text values Public, Internal, and Admin remain supported with their existing access rules and colors.
 
 Updates, restores, and deletes carry the article version. PostgreSQL applies the mutation only when that version still matches, returning HTTP `409` instead of silently overwriting a concurrent edit. Restoration creates a new latest revision rather than rewriting history.
 

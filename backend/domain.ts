@@ -1,5 +1,27 @@
 export type Role = 'Admin' | 'Standard';
-export type ArticleVisibility = 'Public' | 'Internal' | 'Admin';
+export type LegacyArticleVisibility = 'Public' | 'Internal' | 'Admin';
+export type AgtArticleVisibility = 0 | 1 | 2 | 3 | 4 | 5;
+export type ArticleVisibility = LegacyArticleVisibility | AgtArticleVisibility;
+export type ArticleVisibilityFilter = 'all' | 'public' | 'internal' | 'admin' | `${AgtArticleVisibility}`;
+
+export function canViewArticleVisibility(role: Role | null, visibility: ArticleVisibility) {
+  return role === 'Admin'
+    || visibility === 'Public'
+    || visibility === 0
+    || (role === 'Standard' && (visibility === 'Internal' || visibility === 1));
+}
+
+export function canAssignArticleVisibility(role: Role, visibility: ArticleVisibility) {
+  return canViewArticleVisibility(role, visibility);
+}
+
+export function articleVisibilityFromFilter(filter: ArticleVisibilityFilter): ArticleVisibility | null {
+  if (filter === 'all') return null;
+  if (filter === 'public') return 'Public';
+  if (filter === 'internal') return 'Internal';
+  if (filter === 'admin') return 'Admin';
+  return Number(filter) as AgtArticleVisibility;
+}
 
 export interface LocalUserRecord {
   id: string;
@@ -99,7 +121,7 @@ export interface ArticleRevisionRecord {
 export interface ListArticlesQuery {
   search: string;
   tagId: string;
-  visibility: 'all' | 'public' | 'internal' | 'admin';
+  visibility: ArticleVisibilityFilter;
   pinned: 'all' | 'pinned';
   protection: 'all' | 'protected' | 'unprotected';
   verification: 'all' | 'verified' | 'unverified';

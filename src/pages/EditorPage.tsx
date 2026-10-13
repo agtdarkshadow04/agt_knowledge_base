@@ -8,6 +8,13 @@ import { TagPicker } from '../components/TagPicker';
 import { ApiError, createArticle, getArticle, listTags, updateArticle } from '../services/api';
 import { useAppSettings } from '../settings/AppSettingsContext';
 import type { ArticleVisibility, CanonicalTag } from '../types';
+import {
+  agtVisibilityOptions,
+  isAdminOnlyVisibility,
+  legacyVisibilityOptions,
+  parseArticleVisibility,
+  visibilityLabel,
+} from '../visibility';
 
 type EditorMode = 'plain' | 'rich';
 
@@ -95,7 +102,7 @@ export function EditorPage() {
     if (!isNew || draft.title || draft.content || draft.tagIds.length || baseline !== serializeDraft(emptyDraft)) return;
     const next = {
       ...emptyDraft,
-      visibility: settings.defaultVisibility === 'Admin' && user?.role !== 'Admin'
+      visibility: isAdminOnlyVisibility(settings.defaultVisibility) && user?.role !== 'Admin'
         ? 'Internal'
         : settings.defaultVisibility,
     };
@@ -256,10 +263,17 @@ export function EditorPage() {
             onRefresh={() => void refreshTagCatalog()}
           />
           <label className="field"><span>Visibility</span>
-            <select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: event.target.value as ArticleVisibility })}>
-              <option value="Public">Public</option>
-              <option value="Internal">Internal</option>
-              {user?.role === 'Admin' && <option value="Admin">Admin</option>}
+            <select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: parseArticleVisibility(event.target.value) })}>
+              <optgroup label="AGT standard">
+                {agtVisibilityOptions.filter((option) => user?.role === 'Admin' || !option.adminOnly).map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Legacy">
+                {legacyVisibilityOptions.filter((option) => user?.role === 'Admin' || !option.adminOnly).map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </optgroup>
             </select>
           </label>
         </div>
@@ -307,7 +321,7 @@ export function EditorPage() {
             <dl className="revision-comparison-metadata save-diff-metadata">
               <div className={currentRevision.title === proposedRevision.title ? '' : 'changed'}><dt>Title</dt><dd>{currentRevision.title || 'Not set'}</dd><dd>{proposedRevision.title || 'Not set'}</dd></div>
               <div className={sameTagIds(currentRevision.tagIds, proposedRevision.tagIds) ? '' : 'changed'}><dt>Tags</dt><dd>{tagNames(currentRevision.tagIds) || 'None'}</dd><dd>{tagNames(proposedRevision.tagIds) || 'None'}</dd></div>
-              <div className={currentRevision.visibility === proposedRevision.visibility ? '' : 'changed'}><dt>Visibility</dt><dd>{currentRevision.visibility}</dd><dd>{proposedRevision.visibility}</dd></div>
+              <div className={currentRevision.visibility === proposedRevision.visibility ? '' : 'changed'}><dt>Visibility</dt><dd>{visibilityLabel(currentRevision.visibility)}</dd><dd>{visibilityLabel(proposedRevision.visibility)}</dd></div>
             </dl>
             <div className={`revision-content-grid save-diff-content ${currentRevision.content === proposedRevision.content ? '' : 'changed'}`}>
               <section aria-labelledby="current-content-title"><h3 id="current-content-title">Current revision content</h3><pre>{currentRevision.content || 'No content'}</pre></section>

@@ -11,13 +11,18 @@ const tagIdsSchema = z.array(uuidSchema).max(12).superRefine((tagIds, context) =
   }
 });
 
+const visibilitySchema = z.union([
+  z.enum(['Public', 'Internal', 'Admin']),
+  z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+]);
+
 const articleSchema = z.object({
   title: z.string().trim().min(3).max(180),
   content: z.string().min(20).max(250_000).refine((content) => !unsafeMdx.test(content), {
     message: 'Executable MDX and raw HTML are not allowed.',
   }),
   tagIds: tagIdsSchema,
-  visibility: z.enum(['Public', 'Internal', 'Admin']).optional(),
+  visibility: visibilitySchema.optional(),
   version: z.number().int().positive().optional(),
 }).strict();
 
@@ -104,7 +109,7 @@ const userListSchema = z.object({
 const applicationSettingsSchema = z.object({
   applicationName: z.string().trim().min(1).max(80),
   applicationSubtitle: z.string().trim().min(1).max(240),
-  defaultVisibility: z.enum(['Public', 'Internal', 'Admin']),
+  defaultVisibility: visibilitySchema,
   allowPublicBrowsing: z.boolean(),
   version: z.number().int().positive(),
 }).strict();
@@ -175,7 +180,7 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
   return z.object({
     search: z.string().trim().max(200).default(''),
     tagId: z.union([z.literal(''), uuidSchema]).default(''),
-    visibility: z.enum(['all', 'public', 'internal', 'admin']).default('all'),
+    visibility: z.enum(['all', 'public', 'internal', 'admin', '0', '1', '2', '3', '4', '5']).default('all'),
     pinned: z.enum(['all', 'pinned']).default('all'),
     protection: z.enum(['all', 'protected', 'unprotected']).default('all'),
     verification: z.enum(['all', 'verified', 'unverified']).default('all'),

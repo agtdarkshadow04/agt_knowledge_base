@@ -19,10 +19,12 @@ import type {
   AdminStats,
   ApplicationSettings,
   ArticleListResponse,
+  ArticleVisibilityFilter,
   LocalUser,
   LocalUserListResponse,
   UserRole,
 } from '../types';
+import { agtVisibilityOptions, legacyVisibilityOptions, parseArticleVisibility, visibilityFilterValue, visibilityLabel } from '../visibility';
 
 type Section = 'users' | 'data' | 'settings';
 
@@ -117,7 +119,7 @@ export function AdminPage() {
   const [userActive, setUserActive] = useState<'all' | 'active' | 'inactive'>('all');
   const [userPage, setUserPage] = useState(1);
   const [articleSearch, setArticleSearch] = useState('');
-  const [articleVisibility, setArticleVisibility] = useState<'all' | 'public' | 'internal' | 'admin'>('all');
+  const [articleVisibility, setArticleVisibility] = useState<ArticleVisibilityFilter>('all');
   const [articleProtection, setArticleProtection] = useState<'all' | 'protected' | 'unprotected'>('all');
   const [articleVerification, setArticleVerification] = useState<'all' | 'verified' | 'unverified'>('all');
   const [articlePage, setArticlePage] = useState(1);
@@ -275,12 +277,12 @@ export function AdminPage() {
           <section className="admin-panel" aria-labelledby="inventory-title">
             <div className="admin-panel-heading"><h2 id="inventory-title">Article inventory</h2><input aria-label="Search article inventory" placeholder="Search articles" value={articleSearch} onChange={(event) => { setArticleSearch(event.target.value); setArticlePage(1); }} /></div>
             <div className="admin-filters">
-              <label className="field"><span>Visibility</span><select value={articleVisibility} onChange={(event) => { setArticleVisibility(event.target.value as typeof articleVisibility); setArticlePage(1); }}><option value="all">All</option><option value="public">Public</option><option value="internal">Internal</option><option value="admin">Admin</option></select></label>
+              <label className="field"><span>Visibility</span><select value={articleVisibility} onChange={(event) => { setArticleVisibility(event.target.value as ArticleVisibilityFilter); setArticlePage(1); }}><option value="all">All</option><optgroup label="AGT standard">{agtVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}</optgroup><optgroup label="Legacy">{legacyVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}</optgroup></select></label>
               <label className="field"><span>Protection</span><select value={articleProtection} onChange={(event) => { setArticleProtection(event.target.value as typeof articleProtection); setArticlePage(1); }}><option value="all">All</option><option value="protected">Protected</option><option value="unprotected">Unprotected</option></select></label>
               <label className="field"><span>Verification</span><select value={articleVerification} onChange={(event) => { setArticleVerification(event.target.value as typeof articleVerification); setArticlePage(1); }}><option value="all">All</option><option value="verified">Verified</option><option value="unverified">Unverified</option></select></label>
             </div>
             <div className="table-scroll"><table className="admin-table"><thead><tr><th>Title</th><th>Visibility</th><th>Version</th><th>Actions</th></tr></thead><tbody>
-              {articles?.items.map((article) => <tr key={article.id}><td>{article.title}</td><td>{article.visibility}</td><td>{article.version}</td><td><Link to={`/articles/${article.id}`}>View</Link> · <Link to={`/articles/${article.id}/edit`}>Edit</Link></td></tr>)}
+              {articles?.items.map((article) => <tr key={article.id}><td>{article.title}</td><td>{visibilityLabel(article.visibility)}</td><td>{article.version}</td><td><Link to={`/articles/${article.id}`}>View</Link> · <Link to={`/articles/${article.id}/edit`}>Edit</Link></td></tr>)}
             </tbody></table></div>
             {articles && articles.totalPages > 1 && <nav className="pagination" aria-label="Article inventory pages"><button className="button button-secondary" disabled={articles.page <= 1} onClick={() => setArticlePage((page) => page - 1)}>Previous</button><span>Page {articles.page} of {articles.totalPages}</span><button className="button button-secondary" disabled={articles.page >= articles.totalPages} onClick={() => setArticlePage((page) => page + 1)}>Next</button></nav>}
           </section>
@@ -294,7 +296,7 @@ export function AdminPage() {
           <form className="stack-form" onSubmit={(event) => void saveSettings(event)}>
             <label className="field"><span>Application name</span><input value={settingsDraft.applicationName} maxLength={80} onChange={(event) => setSettingsDraft({ ...settingsDraft, applicationName: event.target.value })} required /></label>
             <label className="field"><span>Subtitle or description</span><textarea value={settingsDraft.applicationSubtitle} maxLength={240} onChange={(event) => setSettingsDraft({ ...settingsDraft, applicationSubtitle: event.target.value })} required /></label>
-            <label className="field"><span>Default article visibility</span><select value={settingsDraft.defaultVisibility} onChange={(event) => setSettingsDraft({ ...settingsDraft, defaultVisibility: event.target.value as ApplicationSettings['defaultVisibility'] })}><option value="Public">Public</option><option value="Internal">Internal</option><option value="Admin">Admin</option></select></label>
+            <label className="field"><span>Default article visibility</span><select value={settingsDraft.defaultVisibility} onChange={(event) => setSettingsDraft({ ...settingsDraft, defaultVisibility: parseArticleVisibility(event.target.value) })}><optgroup label="AGT standard">{agtVisibilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup><optgroup label="Legacy">{legacyVisibilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup></select></label>
             <label className="check-field"><input type="checkbox" checked={settingsDraft.allowPublicBrowsing} onChange={(event) => setSettingsDraft({ ...settingsDraft, allowPublicBrowsing: event.target.checked })} /> Allow unauthenticated visitors to browse public articles</label>
             <div className="dialog-actions"><button className="button button-primary" disabled={busy} type="submit">Save settings</button><button className="button button-secondary" disabled={busy} type="button" onClick={() => setSettingsDraft(settings)}>Cancel</button></div>
           </form>

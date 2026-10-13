@@ -6,7 +6,8 @@ import { ArticleCard } from '../components/ArticleCard';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import { listArticles, listTags } from '../services/api';
 import { useAppSettings } from '../settings/AppSettingsContext';
-import type { ArticleListResponse, ArticleSort, CanonicalTag, SortDirection } from '../types';
+import type { ArticleListResponse, ArticleSort, ArticleVisibilityFilter, CanonicalTag, SortDirection } from '../types';
+import { agtVisibilityOptions, legacyVisibilityOptions, visibilityFilterValue } from '../visibility';
 
 export function HomePage() {
   const { user, getToken } = useAuth();
@@ -28,7 +29,7 @@ export function HomePage() {
     return {
       search: current.get('search') ?? '',
       tagId: current.get('tagId') ?? '',
-      visibility: (current.get('visibility') ?? 'all') as 'all' | 'public' | 'internal' | 'admin',
+      visibility: (current.get('visibility') ?? 'all') as ArticleVisibilityFilter,
       pinned: (current.get('pinned') ?? 'all') as 'all' | 'pinned',
       protection: (current.get('protection') ?? 'all') as 'all' | 'protected' | 'unprotected',
       verification: (current.get('verification') ?? 'all') as 'all' | 'verified' | 'unverified',
@@ -160,9 +161,12 @@ export function HomePage() {
           <label>Visibility
             <select value={params.visibility} onChange={(event) => updateParam('visibility', event.target.value)}>
               <option value="all">All visible</option>
-              <option value="public">Public</option>
-              <option value="internal">Internal</option>
-              <option value="admin">Admin</option>
+              <optgroup label="AGT standard">
+                {agtVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}
+              </optgroup>
+              <optgroup label="Legacy">
+                {legacyVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}
+              </optgroup>
             </select>
           </label>
           <label>Pin status
