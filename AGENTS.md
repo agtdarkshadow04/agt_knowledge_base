@@ -6,7 +6,7 @@ Guidance for AI coding agents working in this repository. Human-facing setup and
 
 AGT Knowledge Base is a TypeScript knowledge base for the Alliance of Galactic Travellers: a React 19 + Vite frontend, a Node.js API, and PostgreSQL. It is self-hosted with Docker: Nginx → Node.js API (`backend/local-server.ts`) → PostgreSQL, with local username/password auth.
 
-The AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) is being removed; the CDK stack is gone and the backend and frontend no longer use AWS. Until that work finishes, `package.json` still lists AWS packages and the database still names the user key `cognito_sub`. Do not add new AWS dependencies.
+The AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) is being removed; the CDK stack is gone and the backend and frontend no longer use AWS. No AWS packages remain. Until that work finishes, the database still names the user key `cognito_sub`. Do not add AWS dependencies.
 
 ## Branches
 
