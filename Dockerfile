@@ -4,8 +4,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM dependencies AS frontend-build
-ENV VITE_API_URL=/api \
-    VITE_AUTH_MODE=local
+ENV VITE_API_URL=/api
 COPY . .
 RUN npm run build
 

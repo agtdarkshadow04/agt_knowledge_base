@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../auth/AuthContext', () => ({
-  useAuth: () => ({ user: mocks.user, signOut: mocks.signOut, authMode: 'local' }),
+  useAuth: () => ({ user: mocks.user, signOut: mocks.signOut }),
 }));
 
 describe('Layout settings', () => {

@@ -6,7 +6,7 @@ import { useAppSettings } from '../settings/AppSettingsContext';
 import { applyStoredAccessibilitySettings, SettingsIcon, SettingsModal } from './SettingsModal';
 
 export function Layout() {
-  const { user, signOut, authMode } = useAuth();
+  const { user, signOut } = useAuth();
   const { settings } = useAppSettings();
   const [logoFailed, setLogoFailed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -48,7 +48,7 @@ export function Layout() {
                 <Plus aria-hidden="true" /> <span className="desktop-only">New article</span>
               </NavLink>
             )}
-            {authMode === 'local' && user?.role === 'Admin' && (
+            {user?.role === 'Admin' && (
               <NavLink to="/admin" className="icon-link">
                 <ShieldCheck aria-hidden="true" /> <span className="desktop-only">Admin</span>
               </NavLink>
