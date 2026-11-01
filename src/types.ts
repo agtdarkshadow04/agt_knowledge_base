@@ -140,3 +140,15 @@ export interface ArticleInput {
   visibility?: ArticleVisibility;
   version?: number;
 }
+
+export type BackupTable =
+  | 'app_users'
+  | 'local_users'
+  | 'tags'
+  | 'articles'
+  | 'article_revisions'
+  | 'application_settings';
+
+export interface BackupRestoreResult {
+  restored: Record<BackupTable, number>;
+}

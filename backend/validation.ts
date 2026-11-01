@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import {
+  backupFormat,
+  backupFormatVersion,
+  backupTables,
+  type BackupTable,
+  type DatabaseBackup,
+} from './backup-service.js';
 import type { ArticleWrite, ListArticlesQuery, TagWrite } from './domain.js';
 
 const unsafeMdx = /(^|\n)\s*(import|export)\s|<\/?[A-Za-z][^>]*>/m;
@@ -200,4 +207,20 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
     page: first(query.page),
     pageSize: first(query.pageSize),
   });
+}
+
+const backupRowsSchema = z.array(z.record(z.string(), z.unknown()));
+
+const backupSchema = z.object({
+  format: z.literal(backupFormat),
+  formatVersion: z.literal(backupFormatVersion),
+  createdAt: z.string(),
+  migrations: z.array(z.string().max(200)).min(1).max(1000),
+  tables: z.object(
+    Object.fromEntries(backupTables.map((table) => [table, backupRowsSchema])) as Record<BackupTable, typeof backupRowsSchema>,
+  ).strict(),
+}).strict();
+
+export function parseBackup(input: unknown): DatabaseBackup {
+  return backupSchema.parse(input);
 }

@@ -1,13 +1,15 @@
 import { ZodError } from 'zod';
 import { ArticleService } from './article-service.js';
 import { AdminService } from './admin-service.js';
-import { requireActor, requireAdmin } from './auth.js';
+import { requireActor, requireAdmin, requireSuperAdmin } from './auth.js';
+import { BackupService } from './backup-service.js';
 import { AppError } from './domain.js';
 import { PostgresArticleRepository } from './postgres-article-repository.js';
 import type { ApiRequest, ApiResponse } from './routes.js';
 import { TagService } from './tag-service.js';
 import {
   parseArticleWrite,
+  parseBackup,
   parseAdminPasswordWrite,
   parseAdminUserCreate,
   parseAdminUserUpdate,
@@ -26,6 +28,7 @@ const repository = new PostgresArticleRepository();
 const service = new ArticleService(repository);
 const tagService = new TagService(repository);
 const adminService = new AdminService();
+const backupService = new BackupService();
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function json(statusCode: number, body: unknown, publiclyCacheable = false): ApiResponse {
@@ -158,6 +161,17 @@ export async function handleRequest(request: ApiRequest): Promise<ApiResponse> {
       case 'PUT /admin/settings':
         requireAdmin(request);
         return json(200, await adminService.updateSettings(parseApplicationSettingsWrite(parseBody(request))));
+      case 'GET /admin/backup': {
+        const backup = await backupService.export(requireSuperAdmin(request));
+        const stamp = backup.createdAt.replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-');
+        const response = json(200, backup);
+        response.headers['content-disposition'] = `attachment; filename="agt-backup-${stamp}.json"`;
+        return response;
+      }
+      case 'POST /admin/backup/restore': {
+        const actor = requireSuperAdmin(request);
+        return json(200, { restored: await backupService.restore(parseBackup(parseBody(request)), actor) });
+      }
       case 'PUT /articles/{id}':
         return json(200, await service.update(articleId(request), parseArticleWrite(parseBody(request)), requireActor(request)));
       case 'PATCH /articles/{id}/protection': {

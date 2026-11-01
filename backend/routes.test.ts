@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { matchRoute, routeKeys } from './routes.js';
+import { backupMaxBodyBytes, defaultMaxBodyBytes, matchRoute, maxBodyBytes, routeKeys } from './routes.js';
 
 // Routes answered by the HTTP server itself rather than by handleRequest.
 const serverRoutes = ['POST /auth/login', 'GET /auth/session', 'GET /setup/status', 'POST /setup'];
@@ -59,8 +59,19 @@ describe('route table', () => {
       ['GET', '/admin/users'],
       ['GET', '/admin/stats'],
       ['PUT', '/admin/settings'],
+      ['GET', '/admin/backup'],
+      ['POST', '/admin/backup/restore'],
     ];
     for (const [method, path] of protectedRoutes) expect(matchRoute(method, path)?.authenticated).toBe(true);
+  });
+
+  it('accepts large bodies only on the backup restore route', () => {
+    expect(maxBodyBytes('POST /admin/backup/restore')).toBe(backupMaxBodyBytes);
+    expect(backupMaxBodyBytes).toBeGreaterThan(defaultMaxBodyBytes);
+    for (const key of routeKeys.filter((routeKey) => routeKey !== 'POST /admin/backup/restore')) {
+      expect(maxBodyBytes(key)).toBe(defaultMaxBodyBytes);
+    }
+    expect(maxBodyBytes('GET /unknown')).toBe(defaultMaxBodyBytes);
   });
 
   it('returns null for unknown paths, unsupported methods, and extra segments', () => {
