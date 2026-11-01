@@ -19,7 +19,8 @@ The former AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) h
 src/              React UI: pages/, components/, auth/, settings/, services/api.ts (API client)
 backend/          API: routes.ts (route table + ApiRequest/ApiResponse types),
                   local-server.ts (Node HTTP server: matching, authentication, setup/login),
-                  auth.ts (token-to-user step, requireActor/requireAdmin),
+                  auth.ts (token-to-user step, requireActor/requireAdmin/requireSuperAdmin),
+                  local-auth.ts (password hashing, signed session tokens), db.ts (pg pool),
                   handler.ts (route dispatch to services),
                   *-service.ts (domain logic; backup-service.ts exports/restores
                   every table), domain.ts (types, roles, visibility, AppError classes),
@@ -43,7 +44,15 @@ npm run build       # typecheck + Vite production build
 
 CI (`.github/workflows/ci.yml`) runs lint, typecheck, test, and build, and builds both Docker images, on pull requests and pushes to `main`.
 
-Run a single test file with `npx vitest run path/to/file.test.ts`. Before finishing, run lint, typecheck, and the relevant tests; run the full suite and build for changes that cross the frontend/backend boundary. Do not run migrations against a real database unless explicitly asked.
+Use the narrowest check that covers your change while iterating, then widen before finishing:
+
+```bash
+npx vitest run backend                    # backend tests only (~4s; full suite ~27s, mostly jsdom)
+npx vitest run path/to/file.test.ts       # one file; add -t "name" for one test
+npx eslint path/to/file.ts                # lint only the files you touched
+```
+
+Before finishing, run lint, typecheck, and the relevant tests; run the full suite and build for changes that cross the frontend/backend boundary. Do not run migrations against a real database unless explicitly asked. No check needs a database, Docker, or network access beyond `npm ci`.
 
 ## Code conventions
 
@@ -56,7 +65,7 @@ Run a single test file with `npx vitest run path/to/file.test.ts`. Before finish
 ## Tests
 
 - Tests are colocated as `*.test.ts` / `*.test.tsx` next to the code they cover.
-- Frontend tests run in jsdom with Testing Library (`src/test/setup.ts`). Backend test files begin with `// @vitest-environment node` and use in-memory fakes of the repository interfaces rather than a real database.
+- Frontend tests run in jsdom with Testing Library (`src/test/setup.ts`). Backend test files begin with `// @vitest-environment node` and use in-memory fakes of the repository interfaces rather than a real database. Extend the existing fakes (`MemoryRepository` in `backend/article-service.test.ts`, `MemoryTagRepository` in `backend/tag-service.test.ts`) when a repository interface changes, rather than writing new ones.
 - Vitest runs with a single worker and no file parallelism; do not change that to speed up runs.
 - Per `SECURITY.md`, changes to role handling, protected-article rules, visibility, Markdown rendering, SQL construction, or optimistic concurrency must include regression tests.
 
@@ -65,7 +74,7 @@ Run a single test file with `npx vitest run path/to/file.test.ts`. Before finish
 **Adding or changing an API route:**
 
 1. `backend/routes.ts` — add the route to the table, with `authenticated: true` unless it is a public read.
-2. `backend/handler.ts` — add the `case` to the `switch (request.routeKey)` dispatch, enforcing roles with `requireActor`/`requireAdmin`. `backend/routes.test.ts` fails if the table and the switch disagree.
+2. `backend/handler.ts` — add the `case` to the `switch (request.routeKey)` dispatch, enforcing roles with `requireActor`/`requireAdmin`/`requireSuperAdmin`. `backend/routes.test.ts` fails if the table and the switch disagree. The exceptions are the login, session, and setup routes, which `local-server.ts` serves itself; they are listed in `serverRoutes` in `backend/routes.test.ts`, so a new server-served route must be added there too.
 3. `src/services/api.ts` — the frontend client, plus types in `src/types.ts`.
 4. `backend/handler.test.ts` for authorization behavior, and `backend/routes.test.ts` if the route is public.
 
