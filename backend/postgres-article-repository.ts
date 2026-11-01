@@ -136,9 +136,9 @@ function excerpt(markdown: string) {
 
 async function upsertActor(client: pg.PoolClient, actor: Actor) {
   await client.query(
-    `INSERT INTO app_users (cognito_sub, display_name, email, last_seen_at)
+    `INSERT INTO app_users (user_id, display_name, email, last_seen_at)
      VALUES ($1, $2, $3, now())
-     ON CONFLICT (cognito_sub) DO UPDATE
+     ON CONFLICT (user_id) DO UPDATE
        SET display_name = EXCLUDED.display_name,
            email = EXCLUDED.email,
            last_seen_at = now()`,
@@ -223,8 +223,8 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
            a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
            a.version
          FROM articles a
-         JOIN app_users creator ON creator.cognito_sub = a.created_by
-         JOIN app_users editor ON editor.cognito_sub = a.modified_by
+         JOIN app_users creator ON creator.user_id = a.created_by
+         JOIN app_users editor ON editor.user_id = a.modified_by
          WHERE ${where}
          ORDER BY a.is_pinned DESC, ${sortColumns[query.sort]} ${direction}, a.id ${direction}
          LIMIT $8 OFFSET $9`,
@@ -265,8 +265,8 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
     const result = await pool.query<ArticleRow>(
       `SELECT ${baseSelect}
        FROM articles a
-       JOIN app_users creator ON creator.cognito_sub = a.created_by
-       JOIN app_users editor ON editor.cognito_sub = a.modified_by
+       JOIN app_users creator ON creator.user_id = a.created_by
+       JOIN app_users editor ON editor.user_id = a.modified_by
        WHERE a.id = $1
          AND ($2::text = 'Admin'
            OR a.visibility IN ('"Public"'::jsonb, '0'::jsonb)
@@ -281,7 +281,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
     const result = await pool.query<ArticleRevisionRow>(
       `SELECT ${revisionSelect}
        FROM article_revisions r
-       JOIN app_users editor ON editor.cognito_sub = r.revised_by
+       JOIN app_users editor ON editor.user_id = r.revised_by
        WHERE r.article_id = $1
        ORDER BY r.version DESC
        LIMIT 5`,
@@ -295,7 +295,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
     const result = await pool.query<ArticleRevisionRow>(
       `SELECT ${revisionSelect}
        FROM article_revisions r
-       JOIN app_users editor ON editor.cognito_sub = r.revised_by
+       JOIN app_users editor ON editor.user_id = r.revised_by
        WHERE r.article_id = $1 AND r.version = $2`,
       [id, version],
     );

@@ -553,4 +553,12 @@ export const migrations: Migration[] = [
     id: '010_agt_visibility',
     sql: agtVisibilitySql,
   },
+  {
+    // Renames the user key, which held Cognito subjects, to a provider-neutral
+    // name. Foreign keys from articles and article_revisions follow the column.
+    id: '011_rename_user_key',
+    sql: `
+      ALTER TABLE app_users RENAME COLUMN cognito_sub TO user_id;
+    `,
+  },
 ];

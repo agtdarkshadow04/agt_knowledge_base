@@ -22,6 +22,7 @@ const contract = migrations.find((migration) => migration.id === '007_canonical_
 const localAuth = migrations.find((migration) => migration.id === '008_local_auth')!;
 const admin = migrations.find((migration) => migration.id === '009_admin')!;
 const agtVisibility = migrations.find((migration) => migration.id === '010_agt_visibility')!;
+const renameUserKey = migrations.find((migration) => migration.id === '011_rename_user_key')!;
 
 describe('targeted migrations', () => {
   beforeEach(() => {
@@ -53,7 +54,7 @@ describe('targeted migrations', () => {
 
   it('does not apply an explicit-only contract migration by default', async () => {
     await expect(runMigrations()).resolves.toEqual({
-      applied: ['006_canonical_tags_expand', '008_local_auth', '009_admin', '010_agt_visibility'],
+      applied: ['006_canonical_tags_expand', '008_local_auth', '009_admin', '010_agt_visibility', '011_rename_user_key'],
     });
 
     const executedSql = database.client.query.mock.calls.map(([sql]) => sql);
@@ -85,7 +86,7 @@ describe('targeted migrations', () => {
     database.applied.add('006_canonical_tags_expand');
     database.applied.add('007_canonical_tags_contract');
 
-    await expect(runMigrations()).resolves.toEqual({ applied: ['008_local_auth', '009_admin', '010_agt_visibility'] });
+    await expect(runMigrations()).resolves.toEqual({ applied: ['008_local_auth', '009_admin', '010_agt_visibility', '011_rename_user_key'] });
     expect(database.client.query).toHaveBeenCalledWith(
       'SELECT 1 FROM schema_migrations WHERE id = $1',
       ['007_canonical_tags_contract'],
@@ -123,6 +124,15 @@ describe('targeted migrations', () => {
     expect(agtVisibility.sql).toContain('TYPE jsonb USING to_jsonb(visibility)');
     expect(agtVisibility.sql).toContain(`visibility IN ('"Public"'::jsonb, '"Internal"'::jsonb, '"Admin"'::jsonb)`);
     expect(agtVisibility.sql).toContain(`visibility IN ('0'::jsonb, '1'::jsonb, '2'::jsonb, '3'::jsonb, '4'::jsonb, '5'::jsonb)`);
+  });
+
+  it('renames the user key by default without applying the explicit-only contract', async () => {
+    for (const id of ['006_canonical_tags_expand', '008_local_auth', '009_admin', '010_agt_visibility']) database.applied.add(id);
+
+    await expect(runMigrations()).resolves.toEqual({ applied: ['011_rename_user_key'] });
+    expect(renameUserKey.requiresExplicitTarget).toBeFalsy();
+    expect(renameUserKey.sql).toContain('ALTER TABLE app_users RENAME COLUMN cognito_sub TO user_id');
+    expect(database.client.query.mock.calls.map(([sql]) => sql)).not.toContain(contract.sql);
   });
 
   it('rejects unknown targets before opening a database connection', async () => {
