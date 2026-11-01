@@ -14,7 +14,7 @@ vi.mock('./db.js', () => ({
   getPool: vi.fn(async () => ({ connect: database.connect })),
 }));
 
-import { runMigrations } from './migrate-handler.js';
+import { runMigrations } from './migrations-runner.js';
 import { migrations } from './migrations.js';
 
 const expansion = migrations.find((migration) => migration.id === '006_canonical_tags_expand')!;

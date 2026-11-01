@@ -4,9 +4,9 @@ Guidance for AI coding agents working in this repository. Human-facing setup and
 
 ## Project overview
 
-AGT Knowledge Base is a TypeScript knowledge base for the Alliance of Galactic Travellers: a React 19 + Vite frontend, a Node.js API, and PostgreSQL. It is self-hosted with Docker: Nginx → Node.js API (`backend/local-server.ts`) → PostgreSQL, with local username/password auth (`AUTH_MODE=local`, `VITE_AUTH_MODE=local`).
+AGT Knowledge Base is a TypeScript knowledge base for the Alliance of Galactic Travellers: a React 19 + Vite frontend, a Node.js API, and PostgreSQL. It is self-hosted with Docker: Nginx → Node.js API (`backend/local-server.ts`) → PostgreSQL, with local username/password auth.
 
-The AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) is being removed; its CDK stack is already gone. Until that work finishes, the backend and frontend still contain Cognito code paths and Lambda types. Do not add new AWS dependencies.
+The AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) is being removed; the CDK stack is gone and the backend is AWS-free. Until that work finishes, the frontend still contains a Cognito sign-in path (selected unless `VITE_AUTH_MODE=local`) and `package.json` still lists AWS packages. Do not add new AWS dependencies.
 
 ## Branches
 
@@ -17,11 +17,13 @@ The AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) is being
 
 ```text
 src/              React UI: pages/, components/, auth/, settings/, services/api.ts (API client)
-backend/          API: handler.ts (route dispatch; Lambda entry point, also called by local-server.ts),
-                  local-server.ts (Node HTTP server for Docker/dev: routing, auth, setup/login),
+backend/          API: routes.ts (route table + ApiRequest/ApiResponse types),
+                  local-server.ts (Node HTTP server: matching, authentication, setup/login),
+                  auth.ts (token-to-user step, requireActor/requireAdmin),
+                  handler.ts (route dispatch to services),
                   *-service.ts (domain logic), domain.ts (types, roles, visibility, AppError classes),
                   validation.ts (Zod request parsing), repository.ts (interfaces),
-                  postgres-article-repository.ts (SQL), migrations.ts + migrate-handler.ts
+                  postgres-article-repository.ts (SQL), migrations.ts + migrations-runner.ts
 migrations/       Reviewable SQL copies of each migration
 scripts/          migrate, local-user recovery CLI
 ```
@@ -56,23 +58,23 @@ Run a single test file with `npx vitest run path/to/file.test.ts`. Before finish
 
 ## Cross-cutting change checklists
 
-**Adding or changing an API route** — update every place routes are declared:
+**Adding or changing an API route:**
 
-1. `backend/handler.ts` — the `switch (event.routeKey)` dispatch.
-2. `backend/local-server.ts` — `routeKey()` path matching, and the authenticated-route list if the route requires a token.
+1. `backend/routes.ts` — add the route to the table, with `authenticated: true` unless it is a public read.
+2. `backend/handler.ts` — add the `case` to the `switch (request.routeKey)` dispatch, enforcing roles with `requireActor`/`requireAdmin`. `backend/routes.test.ts` fails if the table and the switch disagree.
 3. `src/services/api.ts` — the frontend client, plus types in `src/types.ts`.
-4. `backend/handler.test.ts` for routing/authorization behavior.
+4. `backend/handler.test.ts` for authorization behavior, and `backend/routes.test.ts` if the route is public.
 
 **Adding a database migration:**
 
 1. Append a new entry to the `migrations` array in `backend/migrations.ts` using the next number (`NNN_snake_case`). This inline SQL is what actually runs.
 2. Add the matching reviewable `migrations/NNN_snake_case.sql`, wrapped in `BEGIN;` / `COMMIT;`.
-3. Update `backend/migrate-handler.test.ts`.
+3. Update `backend/migrations-runner.test.ts`.
 4. Never edit a migration that has already shipped; add a new one. Destructive (contract-phase) migrations must set `requiresExplicitTarget: true` so they are not applied by default.
 
 **Article visibility:** legacy text levels (`Public`, `Internal`, `Admin`) and AGT numeric levels (`0`–`5`) are both supported. Access rules live in `backend/domain.ts`; display options and colors in `src/visibility.ts`. Keep both in sync and preserve legacy behavior.
 
-**Auth modes:** behavior differs between Cognito and local auth (for example, `POST /auth/login`, `/setup`, and the `/admin/users` routes exist only in local mode). Make sure a change works, or is deliberately disabled, in both.
+**Authentication:** the API supports local accounts only; setting `AUTH_MODE` to anything other than `local` stops the server from starting. `backend/auth.ts` `authenticate()` is the single place a bearer token becomes a user, so a future provider (such as OIDC) belongs there. Handlers receive the resulting `Actor` on `request.actor` and must not inspect tokens themselves.
 
 ## Security rules
 

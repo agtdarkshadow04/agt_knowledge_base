@@ -1,37 +1,42 @@
-import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
-import { AppError, type Actor, type Role } from './domain.js';
+import { AppError, type Actor } from './domain.js';
+import { verifyLocalToken, type LocalSessionUser } from './local-auth.js';
+import type { ApiRequest } from './routes.js';
 
-function parseGroups(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String);
-  if (typeof value !== 'string') return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (Array.isArray(parsed)) return parsed.map(String);
-  } catch {
-    // Cognito may serialize groups as a comma-delimited claim.
-  }
-  return value.split(',').map((group) => group.trim().replace(/^[\s["']+|[\s\]"']+$/g, '')).filter(Boolean);
-}
+export type AuthenticatedUser = Omit<LocalSessionUser, 'sessionVersion'>;
 
-export function roleFromClaims(claims: Record<string, unknown>): Role {
-  if (claims.role === 'Admin') return 'Admin';
-  return parseGroups(claims['cognito:groups']).includes('Admin') ? 'Admin' : 'Standard';
-}
-
-export function requireActor(event: APIGatewayProxyEventV2WithJWTAuthorizer): Actor {
-  const claims = event.requestContext.authorizer?.jwt?.claims as Record<string, unknown> | undefined;
-  const sub = claims?.sub;
-  if (typeof sub !== 'string' || !sub) throw new AppError('Authentication is required.', 401, 'UNAUTHENTICATED');
+/**
+ * Resolves a bearer token to the signed-in user, or throws if it is invalid.
+ * This is the only place the API turns credentials into an identity, so an
+ * additional provider (such as OIDC) belongs here.
+ */
+export async function authenticate(token: string): Promise<AuthenticatedUser> {
+  const user = await verifyLocalToken(token);
   return {
-    sub,
-    role: roleFromClaims(claims),
-    displayName: String(claims.name ?? claims['cognito:username'] ?? claims.username ?? 'AGT Traveller').slice(0, 120),
-    email: typeof claims.email === 'string' ? claims.email.slice(0, 254) : undefined,
+    sub: user.sub,
+    username: user.username,
+    displayName: user.displayName,
+    email: user.email,
+    role: user.role,
+    isSuperAdmin: user.isSuperAdmin,
   };
 }
 
-export function requireAdmin(event: APIGatewayProxyEventV2WithJWTAuthorizer): Actor {
-  const actor = requireActor(event);
+export function toActor(user: AuthenticatedUser): Actor {
+  return {
+    sub: user.sub,
+    role: user.role,
+    displayName: user.displayName.slice(0, 120),
+    email: user.email?.slice(0, 254),
+  };
+}
+
+export function requireActor(request: Pick<ApiRequest, 'actor'>): Actor {
+  if (!request.actor) throw new AppError('Authentication is required.', 401, 'UNAUTHENTICATED');
+  return request.actor;
+}
+
+export function requireAdmin(request: Pick<ApiRequest, 'actor'>): Actor {
+  const actor = requireActor(request);
   if (actor.role !== 'Admin') {
     throw new AppError('Administrator access is required.', 403, 'FORBIDDEN');
   }

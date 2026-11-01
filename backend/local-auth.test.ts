@@ -56,7 +56,11 @@ describe('local authentication', () => {
     const token = issueLocalToken(user);
 
     await expect(verifyLocalToken(token)).resolves.toEqual(user);
-    await expect(verifyLocalToken(`${token.slice(0, -1)}x`)).rejects.toThrow('Invalid session token.');
+    // Change the signature's first character: it carries six full bits, unlike the final
+    // character, whose low bits are ignored when decoding and can leave the bytes unchanged.
+    const signatureStart = token.lastIndexOf('.') + 1;
+    const tampered = `${token.slice(0, signatureStart)}${token[signatureStart] === 'A' ? 'B' : 'A'}${token.slice(signatureStart + 1)}`;
+    await expect(verifyLocalToken(tampered)).rejects.toThrow('Invalid session token.');
     expect(database.query).toHaveBeenCalledWith(expect.stringContaining('session_version = $2'), [user.sub, 3]);
   });
 

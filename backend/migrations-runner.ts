@@ -1,14 +1,14 @@
-import type { Handler } from 'aws-lambda';
 import { getPool } from './db.js';
 import { migrations } from './migrations.js';
 
-interface MigrationEvent {
-  targetId?: unknown;
+export interface MigrationOptions {
+  /** Apply migrations up to and including this id, including explicit-target ones. */
+  targetId?: string;
 }
 
-export async function runMigrations(event: MigrationEvent = {}) {
-  const targetId = event.targetId;
-  if (targetId !== undefined && (typeof targetId !== 'string' || !migrations.some((migration) => migration.id === targetId))) {
+export async function runMigrations(options: MigrationOptions = {}) {
+  const { targetId } = options;
+  if (targetId !== undefined && !migrations.some((migration) => migration.id === targetId)) {
     throw new Error('targetId must name a known migration.');
   }
   const pool = await getPool();
@@ -39,5 +39,3 @@ export async function runMigrations(event: MigrationEvent = {}) {
     return { applied };
   } finally { client.release(); }
 }
-
-export const handler: Handler<MigrationEvent> = async (event) => runMigrations(event);

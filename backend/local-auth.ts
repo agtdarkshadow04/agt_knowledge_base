@@ -165,13 +165,3 @@ export async function verifyLocalToken(token: string): Promise<LocalSessionUser>
   };
 }
 
-export function localClaims(user: LocalSessionUser): Record<string, unknown> {
-  return {
-    sub: user.sub,
-    username: user.username,
-    name: user.displayName,
-    email: user.email,
-    role: user.role,
-    is_super_admin: user.isSuperAdmin,
-  };
-}

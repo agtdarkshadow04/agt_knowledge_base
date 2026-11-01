@@ -1,16 +1,56 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
-import { roleFromClaims } from './auth.js';
+import { describe, expect, it, vi } from 'vitest';
+
+const localAuth = vi.hoisted(() => ({ verifyLocalToken: vi.fn() }));
+vi.mock('./local-auth.js', () => localAuth);
+
+import { authenticate, requireActor, requireAdmin, toActor } from './auth.js';
+import type { Actor } from './domain.js';
 import { parseArticleWrite, parseListQuery, parseTagWrite, parseVerificationWrite } from './validation.js';
 
 const tagId = '10000000-0000-4000-8000-000000000001';
 
 describe('authentication and validation', () => {
-  it('recognizes Admin group claims and defaults authenticated users to Standard', () => {
-    expect(roleFromClaims({ 'cognito:groups': ['Standard', 'Admin'] })).toBe('Admin');
-    expect(roleFromClaims({ role: 'Admin' })).toBe('Admin');
-    expect(roleFromClaims({ 'cognito:groups': '["Standard"]' })).toBe('Standard');
-    expect(roleFromClaims({})).toBe('Standard');
+  it('resolves a bearer token to the current user without exposing the session version', async () => {
+    localAuth.verifyLocalToken.mockResolvedValueOnce({
+      sub: '00000000-0000-4000-8000-000000000001',
+      username: 'traveller',
+      displayName: 'Traveller',
+      role: 'Admin',
+      isSuperAdmin: false,
+      sessionVersion: 3,
+    });
+    const user = await authenticate('token');
+    expect(localAuth.verifyLocalToken).toHaveBeenCalledWith('token');
+    expect(user).toEqual({
+      sub: '00000000-0000-4000-8000-000000000001',
+      username: 'traveller',
+      displayName: 'Traveller',
+      email: undefined,
+      role: 'Admin',
+      isSuperAdmin: false,
+    });
+    expect(toActor(user)).toEqual({
+      sub: '00000000-0000-4000-8000-000000000001',
+      role: 'Admin',
+      displayName: 'Traveller',
+      email: undefined,
+    });
+  });
+
+  it('rejects tokens the local session verifier rejects', async () => {
+    localAuth.verifyLocalToken.mockRejectedValueOnce(new Error('Invalid session token.'));
+    await expect(authenticate('forged')).rejects.toThrow('Invalid session token.');
+  });
+
+  it('requires a signed-in actor and an Admin role where requested', () => {
+    const standard: Actor = { sub: 'standard-sub', role: 'Standard', displayName: 'Standard' };
+    const admin: Actor = { sub: 'admin-sub', role: 'Admin', displayName: 'Admin' };
+    expect(() => requireActor({ actor: null })).toThrow(expect.objectContaining({ statusCode: 401 }));
+    expect(requireActor({ actor: standard })).toBe(standard);
+    expect(() => requireAdmin({ actor: null })).toThrow(expect.objectContaining({ statusCode: 401 }));
+    expect(() => requireAdmin({ actor: standard })).toThrow(expect.objectContaining({ statusCode: 403 }));
+    expect(requireAdmin({ actor: admin })).toBe(admin);
   });
 
   it('rejects executable MDX and raw HTML while accepting Markdown', () => {
