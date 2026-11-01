@@ -14,7 +14,6 @@ COPY . .
 RUN npx esbuild \
     backend/local-server.ts \
     scripts/migrate.ts \
-    scripts/bootstrap-admin.ts \
     scripts/manage-local-user.ts \
     --bundle \
     --packages=external \

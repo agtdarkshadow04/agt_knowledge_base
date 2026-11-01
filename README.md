@@ -26,7 +26,7 @@ AWS Lambda (private VPC subnets)
 
 The browser never connects to PostgreSQL and contains no database credential. API Gateway validates Cognito tokens on every authenticated route; the Lambda service repeats role, visibility, and resource checks before reading or changing data. `created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, and version fields are server-owned.
 
-The Docker deployment is independent of AWS: Nginx serves the built frontend and proxies `/api` to the Node.js API, local users and password hashes are stored in PostgreSQL, and signed sessions are verified by the API. PostgreSQL is reachable only through the private Compose network and an optional loopback-only development port. The AWS deployment remains available as a separate Cognito-backed option.
+The Docker deployment is independent of AWS: Nginx serves the built frontend and proxies `/api` to the Node.js API, local users and password hashes are stored in PostgreSQL, and signed sessions are verified by the API. PostgreSQL is reachable only through the private Compose network and an optional loopback-only development port. The AWS deployment is being retired: its infrastructure code now lives only on the frozen `staging` branch, which the existing AWS test deployment builds from.
 
 ## Roles and editing rules
 
@@ -44,8 +44,6 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
 
 - Node.js 22 or newer and npm
 - For local data: Docker Compose or PostgreSQL 16
-- For AWS: AWS CLI v2, AWS CDK v2, and credentials authorized to create the resources in `infrastructure/`
-- A bootstrapped CDK account/region (`npx cdk bootstrap aws://ACCOUNT/REGION`)
 
 ## Local development
 
@@ -152,93 +150,13 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run cdk:synth -- -c stage=dev
 ```
 
-## AWS infrastructure deployment
+## Database migrations
 
-The CDK stack creates:
+Migrations are recorded in `schema_migrations` and are idempotent. `npm run db:migrate` (and the Compose `migrate` service) applies every pending non-destructive migration.
 
-- a Cognito user pool, web client, and `Admin` / `Standard` groups;
-- an HTTP API with public read routes and JWT-authorized mutation routes;
-- ARM64 Node.js Lambdas for the API and schema migrations;
-- a two-AZ VPC with isolated subnets and no public database route;
-- encrypted RDS PostgreSQL, private security groups, backups, and a Secrets Manager-generated credential;
-- a Secrets Manager VPC endpoint so private Lambdas do not require NAT.
-
-Deploy an environment:
-
-```bash
-export AWS_REGION=us-east-1
-export CDK_DEFAULT_ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
-export CDK_DEFAULT_REGION="$AWS_REGION"
-npm run cdk:deploy -- -c stage=dev
-```
-
-For `stage=prod`, the stack enables Multi-AZ RDS, database and Cognito deletion protection, longer backups, and retained Cognito data. Record the output values `ApiUrl`, `UserPoolId`, `UserPoolClientId`, and `MigrationFunctionName`.
-
-Apply migrations after the database is available:
-
-```bash
-aws lambda invoke \
-  --function-name <MigrationFunctionName> \
-  --cli-binary-format raw-in-base64-out \
-  migration-result.json
-cat migration-result.json
-```
-
-The migration function is not attached to an HTTP route. Only principals allowed to invoke that Lambda can run it. Migrations are recorded in `schema_migrations` and are idempotent.
-
-Migrations marked as requiring an explicit target are destructive contract phases and are not applied by the default invocation. For the canonical-tag rollout, apply the additive phase before deploying the new API, verify it, deploy the API, and only then apply the contract phase:
-
-```bash
-aws lambda invoke \
-  --function-name <MigrationFunctionName> \
-  --cli-binary-format raw-in-base64-out \
-  --payload '{"targetId":"006_canonical_tags_expand"}' \
-  migration-expand-result.json
-
-# Deploy and verify the canonical-tag API before continuing.
-
-aws lambda invoke \
-  --function-name <MigrationFunctionName> \
-  --cli-binary-format raw-in-base64-out \
-  --payload '{"targetId":"007_canonical_tags_contract"}' \
-  migration-contract-result.json
-```
-
-For local migration runs, set `MIGRATION_TARGET_ID` to apply through a specific migration. Do not target a contract migration until its corresponding application version is active.
-
-## Establish the first AWS Admin safely
-
-Self-registration is disabled. The bootstrap script requires active AWS credentials, explicit identifiers, and `--confirm`; it never accepts or stores a password. Cognito sends a temporary credential to a newly created user.
-
-```bash
-npm run admin:bootstrap -- \
-  --user-pool-id <UserPoolId> \
-  --username <username> \
-  --email <email-address> \
-  --confirm
-```
-
-Run this from a controlled administrator workstation. Afterwards, use least-privilege Cognito administration to create additional users and place ordinary authors in the `Standard` group. Do not create application-password columns in PostgreSQL; Cognito remains the credential store.
-
-## Amplify frontend deployment
-
-1. Create an Amplify Hosting application connected to `Folfchie/agt_knowledge_base` and select the intended branch (`staging` for pre-production).
-2. Amplify detects `amplify.yml`. Configure these environment variables using CDK outputs:
-
-   ```text
-   VITE_API_URL=<ApiUrl>
-   VITE_COGNITO_USER_POOL_ID=<UserPoolId>
-   VITE_COGNITO_USER_POOL_CLIENT_ID=<UserPoolClientId>
-   VITE_AWS_REGION=<stack-region>
-   ```
-
-3. Add an Amplify rewrite from `/<*>` to `/index.html` with HTTP status `200` so article URLs work on refresh.
-4. Deploy the branch and test public reads, both roles, protection changes, conflicts, and sign-out in that environment.
-
-These Vite values are public resource identifiers, not secrets. Never put the RDS secret, database URL, AWS access key, or Cognito user password in Amplify variables or frontend code.
+Migrations marked as requiring an explicit target are destructive contract phases and are not applied by default. Set `MIGRATION_TARGET_ID` to apply through a specific migration, for example `MIGRATION_TARGET_ID=007_canonical_tags_contract npm run db:migrate`. Do not target a contract migration until the application version that depends on it is running.
 
 ## Data and content security
 
@@ -256,6 +174,5 @@ These Vite values are public resource identifiers, not secrets. Never put the RD
 src/              React UI, authentication session, safe Markdown, editors
 backend/          Lambda handler, domain service, authorization, PostgreSQL adapter
 migrations/       Reviewable SQL schema
-infrastructure/   AWS CDK stack
-scripts/          migration and first-Admin operations
+scripts/          migration and local-user recovery
 ```

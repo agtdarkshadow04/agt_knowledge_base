@@ -15,10 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "api:dev": "node --import tsx --watch backend/local-server.ts",
-    "admin:bootstrap": "node --import tsx scripts/bootstrap-admin.ts",
-    "db:migrate": "node --import tsx scripts/migrate.ts",
-    "cdk:synth": "cdk synth --app 'node --import tsx infrastructure/app.ts'",
-    "cdk:deploy": "cdk deploy --app 'node --import tsx infrastructure/app.ts'"
+    "db:migrate": "node --import tsx scripts/migrate.ts"
   },
   "dependencies": {
     "@aws-amplify/auth": "^6.15.0",
@@ -48,9 +45,6 @@
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
-    "aws-cdk": "^2.1143.0",
-    "aws-cdk-lib": "^2.215.0",
-    "constructs": "^10.4.2",
     "esbuild": "^0.25.9",
     "eslint": "^9.35.0",
     "eslint-plugin-react-hooks": "^5.2.0",

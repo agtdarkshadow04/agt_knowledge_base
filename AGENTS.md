@@ -4,15 +4,14 @@ Guidance for AI coding agents working in this repository. Human-facing setup and
 
 ## Project overview
 
-AGT Knowledge Base is a TypeScript knowledge base for the Alliance of Galactic Travellers: a React 19 + Vite frontend, a Node.js API, and PostgreSQL. It ships in two independent deployment shapes that share the same backend code:
+AGT Knowledge Base is a TypeScript knowledge base for the Alliance of Galactic Travellers: a React 19 + Vite frontend, a Node.js API, and PostgreSQL. It is self-hosted with Docker: Nginx → Node.js API (`backend/local-server.ts`) → PostgreSQL, with local username/password auth (`AUTH_MODE=local`, `VITE_AUTH_MODE=local`).
 
-- **Docker (self-hosted):** Nginx → Node.js API (`backend/local-server.ts`) → PostgreSQL, with local username/password auth (`AUTH_MODE=local`, `VITE_AUTH_MODE=local`).
-- **AWS:** Amplify Hosting → API Gateway → Lambda (`backend/handler.ts`) → RDS PostgreSQL, with Cognito auth. Defined in `infrastructure/` (CDK).
+The AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) is being removed; its CDK stack is already gone. Until that work finishes, the backend and frontend still contain Cognito code paths and Lambda types. Do not add new AWS dependencies.
 
 ## Branches
 
-- `docker` is the current working branch. Base work on it unless told otherwise.
-- `staging` is the Amplify pre-production branch; `main` is the default branch.
+- `main` is the default branch. Base work on it unless told otherwise.
+- `staging` is frozen: AWS Amplify builds the existing AWS test deployment from it. Never push to, merge into, rebase, or delete `staging`.
 
 ## Repository layout
 
@@ -24,8 +23,7 @@ backend/          API: handler.ts (route dispatch; Lambda entry point, also call
                   validation.ts (Zod request parsing), repository.ts (interfaces),
                   postgres-article-repository.ts (SQL), migrations.ts + migrate-handler.ts
 migrations/       Reviewable SQL copies of each migration
-infrastructure/   AWS CDK stack (API Gateway routes, Lambda, RDS, Cognito)
-scripts/          migrate, AWS first-admin bootstrap, local-user recovery CLI
+scripts/          migrate, local-user recovery CLI
 ```
 
 ## Commands
@@ -37,15 +35,14 @@ npm run lint        # ESLint, zero warnings allowed
 npm run typecheck   # tsc -b over app and node projects
 npm test            # Vitest, single run
 npm run build       # typecheck + Vite production build
-npm run cdk:synth -- -c stage=dev   # only when infrastructure/ changes
 ```
 
-Run a single test file with `npx vitest run path/to/file.test.ts`. Before finishing, run lint, typecheck, and the relevant tests; run the full suite and build for changes that cross the frontend/backend boundary. Do not run `npm run cdk:deploy`, `npm run admin:bootstrap`, or migrations against a real database unless explicitly asked.
+Run a single test file with `npx vitest run path/to/file.test.ts`. Before finishing, run lint, typecheck, and the relevant tests; run the full suite and build for changes that cross the frontend/backend boundary. Do not run migrations against a real database unless explicitly asked.
 
 ## Code conventions
 
 - TypeScript `strict`, ES modules. No Prettier is configured: match the surrounding style (2-space indent, single quotes, semicolons, trailing commas).
-- Backend, scripts, and infrastructure use `NodeNext` resolution, so relative imports **must** end in `.js` (e.g. `import { AppError } from './domain.js';`). Frontend imports under `src/` are extensionless.
+- Backend and scripts use `NodeNext` resolution, so relative imports **must** end in `.js` (e.g. `import { AppError } from './domain.js';`). Frontend imports under `src/` are extensionless.
 - Validate request input in `backend/validation.ts` with Zod; signal domain failures with the `AppError` subclasses in `backend/domain.ts` rather than ad-hoc errors.
 - Keep SQL in `postgres-article-repository.ts` (or `admin-service.ts` for local users) and always parameterize values; map user-supplied sort fields through the existing allowlist.
 - Keep changes minimal and consistent with existing patterns; do not add dependencies without a clear need.
@@ -63,9 +60,8 @@ Run a single test file with `npx vitest run path/to/file.test.ts`. Before finish
 
 1. `backend/handler.ts` — the `switch (event.routeKey)` dispatch.
 2. `backend/local-server.ts` — `routeKey()` path matching, and the authenticated-route list if the route requires a token.
-3. `infrastructure/stack.ts` — `api.addRoutes(...)`, with `authorizer` for authenticated routes.
-4. `src/services/api.ts` — the frontend client, plus types in `src/types.ts`.
-5. `backend/handler.test.ts` for routing/authorization behavior.
+3. `src/services/api.ts` — the frontend client, plus types in `src/types.ts`.
+4. `backend/handler.test.ts` for routing/authorization behavior.
 
 **Adding a database migration:**
 
