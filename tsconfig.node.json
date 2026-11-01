@@ -12,5 +12,5 @@
     "noEmit": true,
     "types": ["node", "aws-lambda", "vitest/globals"]
   },
-  "include": ["vite.config.ts", "eslint.config.js", "backend", "infrastructure", "scripts", "vitest.config.ts"]
+  "include": ["vite.config.ts", "eslint.config.js", "backend", "scripts", "vitest.config.ts"]
 }
