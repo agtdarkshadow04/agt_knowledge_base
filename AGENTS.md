@@ -26,6 +26,7 @@ backend/          API: routes.ts (route table + ApiRequest/ApiResponse types),
                   postgres-article-repository.ts (SQL), migrations.ts + migrations-runner.ts
 migrations/       Reviewable SQL copies of each migration
 scripts/          migrate, local-user recovery CLI
+.github/          CI workflow
 ```
 
 ## Commands
@@ -38,6 +39,8 @@ npm run typecheck   # tsc -b over app and node projects
 npm test            # Vitest, single run
 npm run build       # typecheck + Vite production build
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, test, and build, and builds both Docker images, on pull requests and pushes to `main`.
 
 Run a single test file with `npx vitest run path/to/file.test.ts`. Before finishing, run lint, typecheck, and the relevant tests; run the full suite and build for changes that cross the frontend/backend boundary. Do not run migrations against a real database unless explicitly asked.
 

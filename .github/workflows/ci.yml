@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build --target api --tag agt-knowledge-base-api:ci .
+      - name: Build web image
+        run: docker build --target web --tag agt-knowledge-base-web:ci .
+      - name: Validate Compose file
+        env:
+          POSTGRES_PASSWORD: ci-only-placeholder
+          LOCAL_AUTH_SECRET: ci-only-placeholder-secret-with-32-chars
+        run: docker compose config --quiet

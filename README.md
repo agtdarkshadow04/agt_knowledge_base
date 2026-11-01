@@ -5,28 +5,17 @@ A production-oriented knowledge base for the Alliance of Galactic Travellers com
 ## Architecture
 
 ```text
-Browser -> Nginx -> Node.js API -> PostgreSQL
-              Docker Compose
-
-Browser / AWS Amplify Hosting
-        |
-        | HTTPS + Cognito ID token on writes
-        v
-Amazon API Gateway HTTP API
-        |
-        | public GET / Cognito-authorized mutations
-        v
-AWS Lambda (private VPC subnets)
-        |
-        | credentials loaded at runtime
-        +---- AWS Secrets Manager (VPC endpoint)
-        |
-        +---- Amazon RDS PostgreSQL (private, encrypted)
+                    Docker Compose
+Browser --HTTP(S)--> web: Nginx --+-- built React/Vite frontend
+                                  |
+                                  +-- /api/* --> api: Node.js API --> postgres: PostgreSQL 16
+                                                                       (volume agt-postgres)
+                    migrate: one-shot job that applies schema migrations before the API starts
 ```
 
-The browser never connects to PostgreSQL and contains no database credential. API Gateway validates Cognito tokens on every authenticated route; the Lambda service repeats role, visibility, and resource checks before reading or changing data. `created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, and version fields are server-owned.
+The browser never connects to PostgreSQL and contains no database credential. Nginx serves the frontend and proxies `/api` to the Node.js API. Users and scrypt password hashes are stored in PostgreSQL, and the API issues and verifies signed session tokens. The API is the authorization boundary: it checks the session, role, visibility, and protection before reading or changing data. `created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, and version fields are server-owned. PostgreSQL is reachable only through the private Compose network and an optional loopback-only port.
 
-The Docker deployment is independent of AWS: Nginx serves the built frontend and proxies `/api` to the Node.js API, local users and password hashes are stored in PostgreSQL, and signed sessions are verified by the API. PostgreSQL is reachable only through the private Compose network and an optional loopback-only development port. The AWS deployment is being retired: its infrastructure code now lives only on the frozen `staging` branch, which the existing AWS test deployment builds from.
+The project is fully self-hosted and needs no cloud account or external service.
 
 ## Roles and editing rules
 
@@ -74,9 +63,9 @@ Open the app and complete the first-run setup to create the initial Administrato
 
 ## Docker self-hosting
 
-The Compose stack runs the web frontend, API, schema migrations, PostgreSQL, and local authentication. It requires no AWS account, credentials, or services.
+The Compose stack runs the web frontend, API, schema migrations, PostgreSQL, and local authentication.
 
-1. Install Docker Engine with the Compose plugin, clone this repository, and check out the `docker` branch.
+1. Install Docker Engine with the Compose plugin and clone this repository (the `main` branch).
 2. Create the deployment configuration:
 
    ```bash
@@ -129,17 +118,74 @@ Configuration is read from `.env`:
 | `LOCAL_AUTH_SECRET` | none | Required secret used to sign local sessions; at least 32 characters |
 | `LOCAL_AUTH_SESSION_HOURS` | `12` | Session lifetime, from 1 to 168 hours |
 
-Changing `LOCAL_AUTH_SECRET` immediately invalidates every active session. For an internet-facing deployment, place a TLS-terminating reverse proxy in front of `APP_PORT`; passwords and bearer tokens must not be sent over plaintext HTTP. Do not expose the PostgreSQL port beyond loopback.
+Changing `LOCAL_AUTH_SECRET` immediately invalidates every active session. Do not expose the PostgreSQL port beyond loopback.
 
 Useful operations:
 
 ```bash
 docker compose logs -f web api migrate postgres
-docker compose up -d --build       # rebuild after pulling an update
+docker compose ps
 docker compose down                # stop containers without deleting data
 ```
 
-The `agt-postgres` volume contains the database. Back it up before upgrades, and do not run `docker compose down --volumes` unless you intend to permanently delete the data.
+The `agt-postgres` volume contains the database. Do not run `docker compose down --volumes` unless you intend to permanently delete the data.
+
+### HTTPS
+
+For anything other than local use, put a TLS-terminating reverse proxy in front of `APP_PORT`; passwords and session tokens must not travel over plaintext HTTP. Bind the web container to loopback so only the proxy can reach it, and set `APP_ORIGIN` to the public HTTPS origin:
+
+```text
+APP_BIND_ADDRESS=127.0.0.1
+APP_PORT=8080
+APP_ORIGIN=https://kb.example.org
+```
+
+With [Caddy](https://caddyserver.com/docs/), which obtains and renews certificates automatically, the whole proxy configuration is:
+
+```text
+kb.example.org {
+  reverse_proxy 127.0.0.1:8080
+}
+```
+
+Any other proxy (Traefik, Nginx, HAProxy) works the same way.
+
+Behind a reverse proxy, the bundled Nginx sees every request as coming from the proxy, so the sign-in rate limit (5 attempts per minute per client address) is shared by all users. To keep it per client, configure Nginx's [real IP module](https://nginx.org/en/docs/http/ngx_http_realip_module.html) in `nginx.conf` to trust the proxy's `X-Forwarded-For` header, or rate-limit sign-in at the proxy instead.
+
+### Backups
+
+Back up the database with `pg_dump` from the running `postgres` container:
+
+```bash
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
+  > "agt-backup-$(date +%Y%m%d-%H%M%S).dump"
+```
+
+Keep backups off the host and test restores periodically. To restore a backup into the stack, replacing the current data:
+
+```bash
+docker compose stop web api
+docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' \
+  < agt-backup-YYYYMMDD-HHMMSS.dump
+docker compose up -d
+```
+
+Restoring a backup from an older version is safe: on start, the `migrate` service applies any migrations the backup is missing.
+
+### Upgrades
+
+1. Back up the database (see above).
+2. Pull the new version: `git pull`.
+3. Rebuild and restart: `docker compose up -d --build`. The `migrate` service applies pending migrations before the new API starts.
+4. Check `docker compose ps` and `docker compose logs migrate api`.
+
+While the stack restarts, the previous API container keeps serving until it is replaced, and requests that depend on just-migrated tables can fail for a few seconds. To avoid that, run `docker compose stop web api` before step 3.
+
+### Migrating from the AWS deployment
+
+Earlier versions were deployed on AWS (Amplify Hosting, API Gateway, Lambda, RDS, and Cognito). That code is no longer part of this branch; it is preserved on the frozen `staging` branch, which an existing AWS test deployment still builds from. Do not change or delete `staging` while that deployment is in use.
+
+A documented procedure for moving data from an AWS deployment is planned. In outline: export the RDS database with `pg_dump`, restore it into the Compose PostgreSQL, and let the `migrate` service bring the schema up to date. Then create a local account for each Cognito user, reusing their Cognito user ID (`sub`) as the account ID so existing authorship and revision history stay attached. Cognito cannot export passwords, so each migrated user needs a new password set by an Administrator.
 
 References: [Install Docker Engine](https://docs.docker.com/engine/install/) and [install Docker Compose](https://docs.docker.com/compose/install/).
 
@@ -152,6 +198,8 @@ npm test
 npm run build
 ```
 
+GitHub Actions runs these checks and builds both Docker images for every pull request and every push to `main` (`.github/workflows/ci.yml`). See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+
 ## Database migrations
 
 Migrations are recorded in `schema_migrations` and are idempotent. `npm run db:migrate` (and the Compose `migrate` service) applies every pending non-destructive migration.
@@ -161,7 +209,7 @@ Migrations marked as requiring an explicit target are destructive contract phase
 ## Data and content security
 
 - SQL values are parameterized; requested sort fields are mapped through a fixed allowlist.
-- Docker-local passwords are hashed with scrypt and random salts; local sessions use expiring HMAC signatures and login attempts are rate-limited by Nginx.
+- Local passwords are hashed with scrypt and random salts; local sessions use expiring HMAC signatures and login attempts are rate-limited by Nginx.
 - Markdown is rendered by `react-markdown` with GFM and `rehype-sanitize`; raw HTML is not enabled.
 - The API rejects raw HTML, JSX tags, and MDX `import` / `export` statements. MDXEditor is used as a Markdown authoring surface only; content is never executed as MDX.
 - Article writes are validated with Zod and capped at 250,000 characters and 12 tags.
@@ -175,4 +223,5 @@ src/              React UI, authentication session, safe Markdown, editors
 backend/          HTTP server, route table, domain services, authorization, PostgreSQL adapter
 migrations/       Reviewable SQL schema
 scripts/          migration and local-user recovery
+.github/          CI workflow
 ```
