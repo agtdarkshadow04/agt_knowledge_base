@@ -146,6 +146,28 @@ describe('article request validation', () => {
     expect(JSON.parse(response.body ?? '')).toMatchObject({ code: 'FORBIDDEN' });
   });
 
+  it('rejects backup export and restore by Standard users and ordinary administrators', async () => {
+    const admin: Actor = { sub: 'admin-sub', role: 'Admin', displayName: 'Admin Traveller', isSuperAdmin: false };
+    for (const actor of [standardActor, admin]) {
+      for (const routeKey of ['GET /admin/backup', 'POST /admin/backup/restore']) {
+        const response = await handleRequest(apiRequest({ routeKey, actor, body: '{}' }));
+        expect(response).toMatchObject({ statusCode: 403 });
+        expect(JSON.parse(response.body ?? '')).toMatchObject({ code: 'FORBIDDEN' });
+      }
+    }
+  });
+
+  it('validates the backup format before accessing persistence', async () => {
+    const superAdmin: Actor = { sub: 'super-sub', role: 'Admin', displayName: 'Super Traveller', isSuperAdmin: true };
+    const response = await handleRequest(apiRequest({
+      routeKey: 'POST /admin/backup/restore',
+      actor: superAdmin,
+      body: JSON.stringify({ format: 'something-else', formatVersion: 1, createdAt: '', migrations: [], tables: {} }),
+    }));
+    expect(response).toMatchObject({ statusCode: 400 });
+    expect(JSON.parse(response.body ?? '')).toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
   it('returns 404 for route keys it does not handle', async () => {
     const response = await handleRequest(apiRequest({ routeKey: 'GET /unknown', actor: standardActor }));
     expect(response).toMatchObject({ statusCode: 404 });

@@ -27,6 +27,7 @@ export function toActor(user: AuthenticatedUser): Actor {
     role: user.role,
     displayName: user.displayName.slice(0, 120),
     email: user.email?.slice(0, 254),
+    isSuperAdmin: user.isSuperAdmin,
   };
 }
 
@@ -39,6 +40,14 @@ export function requireAdmin(request: Pick<ApiRequest, 'actor'>): Actor {
   const actor = requireActor(request);
   if (actor.role !== 'Admin') {
     throw new AppError('Administrator access is required.', 403, 'FORBIDDEN');
+  }
+  return actor;
+}
+
+export function requireSuperAdmin(request: Pick<ApiRequest, 'actor'>): Actor {
+  const actor = requireAdmin(request);
+  if (!actor.isSuperAdmin) {
+    throw new AppError('Super administrator access is required.', 403, 'FORBIDDEN');
   }
   return actor;
 }

@@ -5,7 +5,7 @@ import { authenticate, toActor, type AuthenticatedUser } from './auth.js';
 import { AppError } from './domain.js';
 import { handleRequest } from './handler.js';
 import { assertLocalAuthConfigured, authenticateLocalUser, issueLocalToken } from './local-auth.js';
-import { matchRoute } from './routes.js';
+import { matchRoute, maxBodyBytes } from './routes.js';
 import { parseSetupWrite } from './validation.js';
 
 const port = Number(process.env.API_PORT ?? 3001);
@@ -32,17 +32,28 @@ createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   const method = request.method ?? 'GET';
   const route = matchRoute(method, url.pathname);
+  if (!route) { sendJson(response, 404, { code: 'NOT_FOUND', message: 'Route not found.' }); return; }
+
+  // Authenticate before reading the body so anonymous clients cannot make the
+  // server buffer the larger bodies some routes (such as restore) accept.
+  let user: AuthenticatedUser | null = null;
+  if (route.authenticated) {
+    const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
+    if (!token) { sendJson(response, 401, { message: 'Authentication is required.' }); return; }
+    try { user = await authenticate(token); }
+    catch { sendJson(response, 401, { message: 'Invalid or expired authentication token.' }); return; }
+  }
+
+  const bodyLimit = maxBodyBytes(route.routeKey);
   const chunks: Buffer[] = [];
   let bodySize = 0;
   for await (const chunk of request) {
     const buffer = Buffer.from(chunk);
     bodySize += buffer.length;
-    if (bodySize > 1_000_000) { sendJson(response, 413, { message: 'Request body is too large.' }); return; }
+    if (bodySize > bodyLimit) { sendJson(response, 413, { message: 'Request body is too large.' }); return; }
     chunks.push(buffer);
   }
   const body = chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined;
-
-  if (!route) { sendJson(response, 404, { code: 'NOT_FOUND', message: 'Route not found.' }); return; }
 
   if (route.routeKey === 'POST /auth/login') {
     let input: unknown;
@@ -92,14 +103,6 @@ createServer(async (request, response) => {
       }
     }
     return;
-  }
-
-  let user: AuthenticatedUser | null = null;
-  if (route.authenticated) {
-    const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
-    if (!token) { sendJson(response, 401, { message: 'Authentication is required.' }); return; }
-    try { user = await authenticate(token); }
-    catch { sendJson(response, 401, { message: 'Invalid or expired authentication token.' }); return; }
   }
 
   if (route.routeKey === 'GET /auth/session') { sendJson(response, 200, user); return; }

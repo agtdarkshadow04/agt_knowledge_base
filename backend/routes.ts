@@ -21,7 +21,13 @@ interface RouteDefinition {
   path: string;
   /** Whether the server must verify a bearer token before dispatching. */
   authenticated: boolean;
+  /** Largest accepted request body in bytes; defaults to `defaultMaxBodyBytes`. */
+  maxBodyBytes?: number;
 }
+
+export const defaultMaxBodyBytes = 1_000_000;
+/** Keep in step with `client_max_body_size` for `/api/admin/backup` in nginx.conf. */
+export const backupMaxBodyBytes = 100 * 1024 * 1024;
 
 // The single list of API routes. Literal paths are listed before parameterized
 // paths that could otherwise match them.
@@ -62,6 +68,8 @@ const routes: RouteDefinition[] = [
   { method: 'GET', path: '/admin/stats', authenticated: true },
   { method: 'GET', path: '/admin/articles', authenticated: true },
   { method: 'PUT', path: '/admin/settings', authenticated: true },
+  { method: 'GET', path: '/admin/backup', authenticated: true },
+  { method: 'POST', path: '/admin/backup/restore', authenticated: true, maxBodyBytes: backupMaxBodyBytes },
 ];
 
 const compiled = routes.map((route) => {
@@ -75,6 +83,13 @@ const compiled = routes.map((route) => {
 
 /** Every declared route key, e.g. `GET /articles/{id}`. */
 export const routeKeys: readonly string[] = compiled.map((route) => route.routeKey);
+
+const bodyLimits = new Map(compiled.map((route) => [route.routeKey, route.maxBodyBytes ?? defaultMaxBodyBytes]));
+
+/** The largest request body accepted for a route key. */
+export function maxBodyBytes(routeKey: string) {
+  return bodyLimits.get(routeKey) ?? defaultMaxBodyBytes;
+}
 
 export interface RouteMatch {
   routeKey: string;

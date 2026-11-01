@@ -35,6 +35,7 @@ describe('authentication and validation', () => {
       role: 'Admin',
       displayName: 'Traveller',
       email: undefined,
+      isSuperAdmin: false,
     });
   });
 

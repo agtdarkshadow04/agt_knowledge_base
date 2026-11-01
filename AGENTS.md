@@ -21,7 +21,8 @@ backend/          API: routes.ts (route table + ApiRequest/ApiResponse types),
                   local-server.ts (Node HTTP server: matching, authentication, setup/login),
                   auth.ts (token-to-user step, requireActor/requireAdmin),
                   handler.ts (route dispatch to services),
-                  *-service.ts (domain logic), domain.ts (types, roles, visibility, AppError classes),
+                  *-service.ts (domain logic; backup-service.ts exports/restores
+                  every table), domain.ts (types, roles, visibility, AppError classes),
                   validation.ts (Zod request parsing), repository.ts (interfaces),
                   postgres-article-repository.ts (SQL), migrations.ts + migrations-runner.ts
 migrations/       Reviewable SQL copies of each migration
@@ -85,7 +86,8 @@ Run a single test file with `npx vitest run path/to/file.test.ts`. Before finish
 - Never commit `.env` files, secrets, database URLs, or credentials. `VITE_*` values are public identifiers only; never put secrets in frontend code or Vite variables.
 - Markdown is rendered with `react-markdown` + `rehype-sanitize` without raw HTML, and the API rejects HTML/JSX/MDX imports. Do not enable raw HTML or execute content as MDX.
 - Updates, restores, and deletes carry the article `version` and must return HTTP `409` on mismatch rather than overwrite concurrent edits.
-- Server-owned fields (`created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, version) must not be accepted from clients.
+- Server-owned fields (`created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, version) must not be accepted from clients. The only exception is the super-administrator database restore in `backend/backup-service.ts`, which restores rows verbatim.
+- A new application table must be added to `backupTables` in `backend/backup-service.ts` (in foreign-key order) so backups stay complete.
 
 ## Documentation and commits
 

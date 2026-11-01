@@ -7,6 +7,7 @@ import type {
   ArticleRevision,
   AdminStats,
   ApplicationSettings,
+  BackupRestoreResult,
   CanonicalTag,
   OrphanTagReference,
   LocalUser,
@@ -26,6 +27,12 @@ export class ApiError extends Error {
   }
 }
 
+function errorMessage(payload: unknown, status: number) {
+  return payload && typeof payload === 'object' && 'message' in payload
+    ? String(payload.message)
+    : `Request failed with status ${status}`;
+}
+
 async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
@@ -35,13 +42,7 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   const response = await fetch(`${appConfig.apiUrl}${path}`, { ...init, headers });
   const payload = response.status === 204 ? undefined : await response.json().catch(() => undefined);
 
-  if (!response.ok) {
-    const message =
-      payload && typeof payload === 'object' && 'message' in payload
-        ? String(payload.message)
-        : `Request failed with status ${response.status}`;
-    throw new ApiError(message, response.status, payload);
-  }
+  if (!response.ok) throw new ApiError(errorMessage(payload, response.status), response.status, payload);
 
   return payload as T;
 }
@@ -165,6 +166,25 @@ export function updateApplicationSettings(input: ApplicationSettings, token: str
     method: 'PUT',
     body: JSON.stringify(input),
   }, token);
+}
+
+/** Downloads a full database backup. Only the super administrator may call this. */
+export async function downloadDatabaseBackup(token: string) {
+  const response = await fetch(`${appConfig.apiUrl}/admin/backup`, {
+    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => undefined);
+    throw new ApiError(errorMessage(payload, response.status), response.status, payload);
+  }
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'agt-backup.json';
+  return { blob: await response.blob(), filename };
+}
+
+/** Replaces all application data with a backup file's contents and signs out every user. */
+export function restoreDatabaseBackup(contents: string, token: string) {
+  return request<BackupRestoreResult>('/admin/backup/restore', { method: 'POST', body: contents }, token);
 }
 
 export function createTag(input: TagInput, token: string) {

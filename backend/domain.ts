@@ -61,6 +61,7 @@ export interface Actor {
   displayName: string;
   email?: string;
   role: Role;
+  isSuperAdmin?: boolean;
 }
 
 export interface CanonicalTag {

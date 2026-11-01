@@ -1,7 +1,8 @@
-import { Database, Settings, ShieldCheck, Users } from 'lucide-react';
+import { Archive, Database, Settings, ShieldCheck, Users } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { BackupPanel } from '../components/BackupPanel';
 import { ManageTagsPanel } from '../components/ManageTagsModal';
 import { LoadingState } from '../components/States';
 import {
@@ -26,7 +27,7 @@ import type {
 } from '../types';
 import { agtVisibilityOptions, legacyVisibilityOptions, parseArticleVisibility, visibilityFilterValue, visibilityLabel } from '../visibility';
 
-type Section = 'users' | 'data' | 'settings';
+type Section = 'users' | 'data' | 'settings' | 'backup';
 
 function UserEditor({ account, currentUserId, busy, onChanged, onDelete, onError }: {
   account: LocalUser;
@@ -222,6 +223,7 @@ export function AdminPage() {
         <button className={section === 'users' ? 'active' : ''} onClick={() => setSection('users')}><Users aria-hidden="true" />Users</button>
         <button className={section === 'data' ? 'active' : ''} onClick={() => setSection('data')}><Database aria-hidden="true" />Data</button>
         <button className={section === 'settings' ? 'active' : ''} onClick={() => setSection('settings')}><Settings aria-hidden="true" />Application settings</button>
+        {user?.isSuperAdmin && <button className={section === 'backup' ? 'active' : ''} onClick={() => setSection('backup')}><Archive aria-hidden="true" />Backup &amp; restore</button>}
       </nav>
 
       {error && <div className="inline-alert" role="alert">{error}</div>}
@@ -302,6 +304,8 @@ export function AdminPage() {
           </form>
         </section>
       )}
+
+      {!loading && section === 'backup' && user?.isSuperAdmin && <BackupPanel />}
     </div>
   );
 }
