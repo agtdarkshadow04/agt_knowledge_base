@@ -1,0 +1,51 @@
+import { getPool } from '../backend/db.js';
+import { hashPassword } from '../backend/local-auth.js';
+import type { Role } from '../backend/domain.js';
+
+function arg(name: string) {
+  const index = process.argv.indexOf(`--${name}`);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+function fail(message: string): never {
+  console.error(message);
+  console.error('Usage: --username <name> --display-name <name> [--email <address>] --role <Admin|Standard> --confirm');
+  console.error('Provide the password through LOCAL_USER_PASSWORD.');
+  process.exit(2);
+}
+
+const username = arg('username')?.trim().toLowerCase();
+const displayName = arg('display-name')?.trim();
+const email = arg('email')?.trim().toLowerCase();
+const role = arg('role') as Role | undefined;
+const password = process.env.LOCAL_USER_PASSWORD;
+
+if (!process.argv.includes('--confirm')) fail('--confirm is required.');
+if (!username || !/^[a-z0-9_.-]{3,64}$/.test(username)) fail('Username must be 3-64 lowercase letters, numbers, dots, underscores, or hyphens.');
+if (!displayName || displayName.length > 120) fail('Display name must contain 1-120 characters.');
+if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) fail('Email address is invalid.');
+if (role !== 'Admin' && role !== 'Standard') fail('Role must be Admin or Standard.');
+if (!password || password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password)
+  || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+  fail('LOCAL_USER_PASSWORD must contain at least 12 characters, including uppercase, lowercase, a number, and a symbol.');
+}
+
+const passwordHash = await hashPassword(password);
+const pool = await getPool();
+try {
+  await pool.query(
+    `INSERT INTO local_users (username, password_hash, display_name, email, role)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (username) DO UPDATE
+       SET password_hash = EXCLUDED.password_hash,
+           display_name = EXCLUDED.display_name,
+           email = EXCLUDED.email,
+           role = EXCLUDED.role,
+           is_active = true,
+           updated_at = now()`,
+    [username, passwordHash, displayName, email ?? null, role],
+  );
+  console.log(`Local ${role} account ${username} is ready.`);
+} finally {
+  await pool.end();
+}
