@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { appConfig } from '../config';
 import { getApplicationSettings } from '../services/api';
 import type { ApplicationSettings } from '../types';
 
@@ -33,10 +32,6 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
-    if (appConfig.authMode !== 'local') {
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     setError('');
     try {

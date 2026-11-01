@@ -6,81 +6,61 @@ import { LoginPage } from './LoginPage';
 
 const mocks = vi.hoisted(() => ({
   signIn: vi.fn(),
-  completeNewPassword: vi.fn(),
-  authMode: 'cognito' as 'cognito' | 'local',
 }));
 
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
     user: null,
-    configured: true,
-    authMode: mocks.authMode,
     signIn: mocks.signIn,
-    completeNewPassword: mocks.completeNewPassword,
   }),
 }));
 
-function renderLogin() {
+function renderLogin(from?: string) {
   const router = createMemoryRouter([
     { path: '/login', element: <LoginPage /> },
     { path: '/', element: <div>Signed in home</div> },
-  ], { initialEntries: ['/login'] });
+    { path: '/articles/new', element: <div>New article page</div> },
+  ], { initialEntries: [{ pathname: '/login', state: from ? { from } : null }] });
   return render(<RouterProvider router={router} />);
+}
+
+async function submitCredentials(username: string, password: string) {
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText(/username or email/i), username);
+  await user.type(screen.getByLabelText(/^password$/i), password);
+  await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 }
 
 describe('LoginPage', () => {
   beforeEach(() => {
     mocks.signIn.mockReset();
-    mocks.completeNewPassword.mockReset();
-    mocks.authMode = 'cognito';
-    mocks.signIn.mockResolvedValue('SIGNED_IN');
-    mocks.completeNewPassword.mockResolvedValue(undefined);
+    mocks.signIn.mockResolvedValue(undefined);
   });
 
-  it('completes Cognito first-login password setup', async () => {
-    const user = userEvent.setup();
-    mocks.signIn.mockResolvedValue('NEW_PASSWORD_REQUIRED');
-    renderLogin();
-
-    await user.type(screen.getByLabelText(/username or email/i), 'darkshadow04');
-    await user.type(screen.getByLabelText(/^password$/i), 'Temporary1!');
-    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
-
-    expect(mocks.signIn).toHaveBeenCalledWith('darkshadow04', 'Temporary1!');
-    expect(await screen.findByRole('heading', { name: /choose a permanent password/i })).toBeInTheDocument();
-
-    const newPassword = screen.getByLabelText(/^new password$/i);
-    const confirmPassword = screen.getByLabelText(/confirm new password/i);
-    await user.type(newPassword, 'Permanent123!');
-    await user.type(confirmPassword, 'Permanent123!');
-    expect(newPassword).toHaveValue('Permanent123!');
-    expect(confirmPassword).toHaveValue('Permanent123!');
-    await user.click(screen.getByRole('button', { name: /set password and sign in/i }));
-
-    await waitFor(() => expect(mocks.completeNewPassword).toHaveBeenCalledWith('Permanent123!'));
-    expect(await screen.findByText('Signed in home')).toBeInTheDocument();
-  });
-
-  it('does not submit mismatched permanent passwords', async () => {
-    const user = userEvent.setup();
-    mocks.signIn.mockResolvedValue('NEW_PASSWORD_REQUIRED');
-    renderLogin();
-
-    await user.type(screen.getByLabelText(/username or email/i), 'darkshadow04');
-    await user.type(screen.getByLabelText(/^password$/i), 'Temporary1!');
-    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
-    await user.type(await screen.findByLabelText(/^new password$/i), 'Permanent123!');
-    await user.type(screen.getByLabelText(/confirm new password/i), 'Different123!');
-    await user.click(screen.getByRole('button', { name: /set password and sign in/i }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('The new passwords do not match.');
-    expect(mocks.completeNewPassword).not.toHaveBeenCalled();
-  });
-
-  it('describes local credentials when local authentication is active', () => {
-    mocks.authMode = 'local';
+  it('describes local credentials', () => {
     renderLogin();
 
     expect(screen.getByText(/locally managed AGT account/i)).toBeInTheDocument();
+    expect(screen.queryByText(/cognito/i)).not.toBeInTheDocument();
+  });
+
+  it('signs in and returns to the requested page', async () => {
+    renderLogin('/articles/new');
+
+    await submitCredentials('darkshadow04', 'Correct-Horse-9');
+
+    await waitFor(() => expect(mocks.signIn).toHaveBeenCalledWith('darkshadow04', 'Correct-Horse-9'));
+    expect(await screen.findByText('New article page')).toBeInTheDocument();
+  });
+
+  it('shows the sign-in error and stays on the page', async () => {
+    mocks.signIn.mockRejectedValue(new Error('Invalid username or password.'));
+    renderLogin();
+
+    await submitCredentials('darkshadow04', 'wrong-password');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid username or password.');
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeEnabled();
+    expect(screen.queryByText('Signed in home')).not.toBeInTheDocument();
   });
 });

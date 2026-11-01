@@ -96,7 +96,7 @@ export function listTags(search = '', signal?: AbortSignal, token?: string) {
   const query = new URLSearchParams();
   if (search.trim()) query.set('search', search.trim());
   const suffix = query.size ? `?${query.toString()}` : '';
-  const prefix = token && appConfig.authMode === 'local' ? '/member' : '';
+  const prefix = token ? '/member' : '';
   return request<CanonicalTag[]>(`${prefix}/tags${suffix}`, { signal }, token);
 }
 
