@@ -1,4 +1,4 @@
-import { runMigrations } from '../backend/migrate-handler.js';
+import { runMigrations } from '../backend/migrations-runner.js';
 
 const targetId = process.env.MIGRATION_TARGET_ID;
 const result = await runMigrations(targetId ? { targetId } : {});

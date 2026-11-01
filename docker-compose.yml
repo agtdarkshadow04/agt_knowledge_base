@@ -45,7 +45,6 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: 3001
       LOCAL_FRONTEND_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
-      AUTH_MODE: local
       LOCAL_AUTH_SECRET: ${LOCAL_AUTH_SECRET:?Set LOCAL_AUTH_SECRET in .env}
       LOCAL_AUTH_SESSION_HOURS: ${LOCAL_AUTH_SESSION_HOURS:-12}
     depends_on:
