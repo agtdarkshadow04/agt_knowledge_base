@@ -27,6 +27,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=server-build --chown=node:node /app/server ./server
+# The backups volume inherits this ownership on first use.
+RUN mkdir -p /app/data/backups && chown -R node:node /app/data
 USER node
 EXPOSE 3001
 CMD ["node", "server/backend/local-server.js"]

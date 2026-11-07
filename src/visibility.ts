@@ -4,22 +4,22 @@ interface VisibilityOption {
   value: ArticleVisibility;
   label: string;
   className: string;
-  adminOnly: boolean;
+  moderatorOnly: boolean;
 }
 
 export const agtVisibilityOptions = [
-  { value: 0, label: 'Public', className: 'agt-public', adminOnly: false },
-  { value: 1, label: 'Private', className: 'private', adminOnly: false },
-  { value: 2, label: 'Restricted', className: 'restricted', adminOnly: true },
-  { value: 3, label: 'Top Secret', className: 'top-secret', adminOnly: true },
-  { value: 4, label: 'SLT Restricted', className: 'slt-restricted', adminOnly: true },
-  { value: 5, label: 'SCC Restricted', className: 'scc-restricted', adminOnly: true },
+  { value: 0, label: 'Public', className: 'agt-public', moderatorOnly: false },
+  { value: 1, label: 'Private', className: 'private', moderatorOnly: false },
+  { value: 2, label: 'Restricted', className: 'restricted', moderatorOnly: true },
+  { value: 3, label: 'Top Secret', className: 'top-secret', moderatorOnly: true },
+  { value: 4, label: 'SLT Restricted', className: 'slt-restricted', moderatorOnly: true },
+  { value: 5, label: 'SCC Restricted', className: 'scc-restricted', moderatorOnly: true },
 ] as const satisfies readonly VisibilityOption[];
 
 export const legacyVisibilityOptions = [
-  { value: 'Public', label: 'Public', className: 'public', adminOnly: false },
-  { value: 'Internal', label: 'Internal', className: 'internal', adminOnly: false },
-  { value: 'Admin', label: 'Admin', className: 'admin', adminOnly: true },
+  { value: 'Public', label: 'Public', className: 'public', moderatorOnly: false },
+  { value: 'Internal', label: 'Internal', className: 'internal', moderatorOnly: false },
+  { value: 'Admin', label: 'Admin (legacy)', className: 'admin', moderatorOnly: true },
 ] as const satisfies readonly VisibilityOption[];
 
 const visibilityOptions: readonly VisibilityOption[] = [...agtVisibilityOptions, ...legacyVisibilityOptions];
@@ -44,6 +44,6 @@ export function visibilityFilterValue(visibility: ArticleVisibility): Exclude<Ar
     : visibility.toLowerCase() as 'public' | 'internal' | 'admin';
 }
 
-export function isAdminOnlyVisibility(visibility: ArticleVisibility) {
-  return visibilityOptions.find((option) => option.value === visibility)!.adminOnly;
+export function isModeratorOnlyVisibility(visibility: ArticleVisibility) {
+  return visibilityOptions.find((option) => option.value === visibility)!.moderatorOnly;
 }

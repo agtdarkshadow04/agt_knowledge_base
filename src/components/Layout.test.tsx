@@ -35,24 +35,36 @@ describe('Layout settings', () => {
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
   });
 
-  it('shows the Admin navigation only to local Administrators', () => {
-    mocks.user = { sub: 'admin', username: 'atlas', displayName: 'Atlas', role: 'Admin' };
+  function renderLayout() {
     const router = createMemoryRouter([
       { element: <Layout />, children: [{ index: true, element: <div>Home</div> }] },
     ]);
     render(<RouterProvider router={router} />);
+  }
 
-    expect(screen.getByRole('link', { name: /admin/i })).toHaveAttribute('href', '/admin');
-    expect(screen.queryByRole('button', { name: 'Manage Tags' })).not.toBeInTheDocument();
+  it('never links to the admin panel, whatever the role', () => {
+    for (const role of [null, 'Editor', 'Moderator'] as const) {
+      mocks.user = role ? { sub: role, username: role.toLowerCase(), displayName: role, role } : null;
+      const { unmount } = render(<RouterProvider router={createMemoryRouter([{ element: <Layout />, children: [{ index: true, element: <div>Home</div> }] }])} />);
+      expect(screen.queryByRole('link', { name: /admin/i })).not.toBeInTheDocument();
+      expect(document.querySelector('a[href^="/admin"]')).toBeNull();
+      unmount();
+    }
   });
 
-  it('hides tag management from non-Administrators', () => {
-    mocks.user = { sub: 'standard', username: 'apollo', displayName: 'Apollo', role: 'Standard' };
-    const router = createMemoryRouter([
-      { element: <Layout />, children: [{ index: true, element: <div>Home</div> }] },
-    ]);
-    render(<RouterProvider router={router} />);
+  it('shows the Tags link and Moderator badge only to Moderators', () => {
+    mocks.user = { sub: 'moderator', username: 'atlas', displayName: 'Atlas', role: 'Moderator' };
+    renderLayout();
 
-    expect(screen.queryByRole('link', { name: /admin/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /tags/i })).toHaveAttribute('href', '/tags');
+    expect(screen.getByText('Atlas · Moderator').closest('.identity-badge')).toHaveClass('moderator');
+  });
+
+  it('hides tag management from Editors', () => {
+    mocks.user = { sub: 'editor', username: 'apollo', displayName: 'Apollo', role: 'Editor' };
+    renderLayout();
+
+    expect(screen.queryByRole('link', { name: /tags/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Apollo · Editor').closest('.identity-badge')).not.toHaveClass('moderator');
   });
 });

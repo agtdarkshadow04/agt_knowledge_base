@@ -57,8 +57,8 @@ export function ArticlePage() {
     };
   }, []);
   const headings = useMemo(() => extractHeadings(article?.content ?? ''), [article?.content]);
-  const isAdmin = user?.role === 'Admin';
-  const canEdit = Boolean(user && article && (isAdmin || !article.isProtected));
+  const isModerator = user?.role === 'Moderator';
+  const canEdit = Boolean(user && article && (isModerator || !article.isProtected));
 
   function downloadMarkdown() {
     if (!article || !user) return;
@@ -114,7 +114,7 @@ export function ArticlePage() {
   }
 
   async function toggleProtection() {
-    if (!article || !isAdmin) return;
+    if (!article || !isModerator) return;
     setActionBusy(true);
     setError('');
     try {
@@ -125,7 +125,7 @@ export function ArticlePage() {
   }
 
   async function togglePinned() {
-    if (!article || !isAdmin) return;
+    if (!article || !isModerator) return;
     setActionBusy(true);
     setError('');
     try {
@@ -136,7 +136,7 @@ export function ArticlePage() {
   }
 
   async function toggleVerified() {
-    if (!article || !isAdmin) return;
+    if (!article || !isModerator) return;
     setActionBusy(true);
     setError('');
     try {
@@ -147,7 +147,7 @@ export function ArticlePage() {
   }
 
   async function removeArticle() {
-    if (!article || !isAdmin || !window.confirm(`Permanently delete “${article.title}”?`)) return;
+    if (!article || !isModerator || !window.confirm(`Permanently delete “${article.title}”?`)) return;
     setActionBusy(true);
     try {
       await deleteArticle(article.id, article.version, await getToken());
@@ -199,23 +199,23 @@ export function ArticlePage() {
             )}
             <Link className="button button-secondary" to={`/articles/${article.id}/history`}><History aria-hidden="true" />Revision history</Link>
             {canEdit && <Link className="button button-primary" to={`/articles/${article.id}/edit`}><Edit3 aria-hidden="true" />Edit article</Link>}
-            {isAdmin && (
+            {isModerator && (
               <button className="button button-secondary" disabled={actionBusy} onClick={() => void togglePinned()}>
                 <Pin aria-hidden="true" />{article.isPinned ? 'Unpin' : 'Pin'}
               </button>
             )}
-            {isAdmin && (
+            {isModerator && (
               <button className="button button-secondary" disabled={actionBusy} onClick={() => void toggleVerified()}>
                 <BadgeCheck aria-hidden="true" />{article.isVerified ? 'Unverify' : 'Verify'}
               </button>
             )}
-            {isAdmin && (
+            {isModerator && (
               <button className="button button-secondary" disabled={actionBusy} onClick={() => void toggleProtection()}>
                 {article.isProtected ? <UnlockKeyhole aria-hidden="true" /> : <ShieldCheck aria-hidden="true" />}
                 {article.isProtected ? 'Unprotect' : 'Protect'}
               </button>
             )}
-            {isAdmin && <button className="button button-danger" disabled={actionBusy} onClick={() => void removeArticle()}><Trash2 aria-hidden="true" />Delete</button>}
+            {isModerator && <button className="button button-danger" disabled={actionBusy} onClick={() => void removeArticle()}><Trash2 aria-hidden="true" />Delete</button>}
           </div>
         )}
       </header>

@@ -6,7 +6,9 @@ Guidance for AI coding agents working in this repository. Human-facing setup and
 
 AGT Knowledge Base is a TypeScript knowledge base for the Alliance of Galactic Travellers: a React 19 + Vite frontend, a Node.js API, and PostgreSQL. It is self-hosted with Docker: Nginx → Node.js API (`backend/local-server.ts`) → PostgreSQL, with local username/password auth.
 
-The former AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) has been removed from this branch: no code, packages, or schema names depend on AWS. Do not add AWS dependencies. Users are keyed by `app_users.user_id`; migration `011_rename_user_key` renamed it from `cognito_sub`, and existing Cognito subjects keep their values so migrated authorship stays intact.
+There are two kinds of account. **Members** (`local_users`, roles `Editor` and `Moderator`) sign in at `/login` with bearer tokens. The single installation **Admin** (the one-row `admin` table) signs in only at `/admin` with an HttpOnly cookie session (`admin_sessions`), manages members, settings, and backups, and is never a member `Actor`. Moderators hold every content-moderation power (protection, pinning, verification, restore, delete, tags, visibility levels 2–5 and legacy `Admin`).
+
+The former AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) has been removed from this branch: no code, packages, or schema names depend on AWS. Do not add AWS dependencies. Users are keyed by `app_users.user_id`; migration `011_rename_user_key` renamed it from `cognito_sub`, and existing Cognito subjects keep their values so migrated authorship stays intact. Migration `012_admin_account` moved the former super administrator into `admin` and renamed roles (`Admin` → `Moderator`, `Standard` → `Editor`).
 
 ## Branches
 
@@ -16,18 +18,27 @@ The former AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) h
 ## Repository layout
 
 ```text
-src/              React UI: pages/, components/, auth/, settings/, services/api.ts (API client)
+src/              Member React UI (index.html → src/main.tsx): pages/, components/, auth/,
+                  settings/, services/api.ts (member API client)
+src/admin/        Admin panel, a separate Vite entry (admin.html → src/admin/main.tsx):
+                  AdminApp (setup/login/dashboard), *Panel.tsx tabs, api.ts (admin client).
+                  The member bundle must never import from src/admin/.
 backend/          API: routes.ts (route table + ApiRequest/ApiResponse types),
-                  local-server.ts (Node HTTP server: matching, authentication, setup/login),
-                  auth.ts (token-to-user step, requireActor/requireAdmin/requireSuperAdmin),
-                  local-auth.ts (password hashing, signed session tokens), db.ts (pg pool),
-                  handler.ts (route dispatch to services),
-                  *-service.ts (domain logic; backup-service.ts exports/restores
-                  every table), domain.ts (types, roles, visibility, AppError classes),
+                  server.ts (HTTP pipeline: matching, rate limits, CSRF, member/Admin
+                  authentication, body limits, sign-in/setup routes), local-server.ts (startup),
+                  config.ts (config.yaml loading and Zod schema), rate-limit.ts,
+                  auth.ts (member token-to-user step, requireActor/requireAdminSession),
+                  admin-auth.ts (Admin setup, sign-in, cookie sessions),
+                  local-auth.ts (password hashing, signed member tokens), db.ts (pg pool),
+                  handler.ts (public/member route dispatch), admin-handler.ts (admin route dispatch),
+                  *-service.ts (domain logic; settings-service.ts resolves config-file-wins
+                  settings; backup-service.ts + backup-archive.ts export/preview/restore ZIP
+                  backups), domain.ts (types, roles, visibility, AppError classes),
                   validation.ts (Zod request parsing), repository.ts (interfaces),
                   postgres-article-repository.ts (SQL), migrations.ts + migrations-runner.ts
 migrations/       Reviewable SQL copies of each migration
-scripts/          migrate, local-user recovery CLI
+scripts/          migrate, member-account recovery CLI
+config.example.yaml  Every config.yaml key with its default
 .github/          CI workflow
 ```
 
@@ -73,10 +84,10 @@ Before finishing, run lint, typecheck, and the relevant tests; run the full suit
 
 **Adding or changing an API route:**
 
-1. `backend/routes.ts` — add the route to the table, with `authenticated: true` unless it is a public read.
-2. `backend/handler.ts` — add the `case` to the `switch (request.routeKey)` dispatch, enforcing roles with `requireActor`/`requireAdmin`/`requireSuperAdmin`. `backend/routes.test.ts` fails if the table and the switch disagree. The exceptions are the login, session, and setup routes, which `local-server.ts` serves itself; they are listed in `serverRoutes` in `backend/routes.test.ts`, so a new server-served route must be added there too.
-3. `src/services/api.ts` — the frontend client, plus types in `src/types.ts`.
-4. `backend/handler.test.ts` for authorization behavior, and `backend/routes.test.ts` if the route is public.
+1. `backend/routes.ts` — add the route to the table with `auth: 'member'` (bearer token), `auth: 'admin'` (Admin cookie session; path must start with `/admin/`), or `auth: 'none'` for public reads. Every non-GET `/admin/*` request must carry `x-agt-request: 1`; `server.ts` enforces this. Add `rateLimit` for credential-checking routes.
+2. Member/public routes: add the `case` to `backend/handler.ts`, enforcing roles with `requireActor` and the services' role checks. Admin routes: add it to `backend/admin-handler.ts`, which never reads `request.actor`. `backend/routes.test.ts` fails if the table and the switches disagree. The exceptions are the member and Admin sign-in, session, setup, logout, and password routes, which `server.ts` serves itself; they are listed in `serverRoutes` in `backend/routes.test.ts`, so a new server-served route must be added there too.
+3. Frontend client: `src/services/api.ts` and `src/types.ts` for member routes; `src/admin/api.ts` and `src/admin/types.ts` for admin routes.
+4. Tests: `backend/handler.test.ts` / `backend/admin-handler.test.ts` for authorization behavior, `backend/server.test.ts` for session separation and CSRF, and `backend/routes.test.ts` if the route is public.
 
 **Adding a database migration:**
 
@@ -84,10 +95,13 @@ Before finishing, run lint, typecheck, and the relevant tests; run the full suit
 2. Add the matching reviewable `migrations/NNN_snake_case.sql`, wrapped in `BEGIN;` / `COMMIT;`.
 3. Update `backend/migrations-runner.test.ts`.
 4. Never edit a migration that has already shipped; add a new one. Destructive (contract-phase) migrations must set `requiresExplicitTarget: true` so they are not applied by default.
+5. Never schema-qualify objects (no `public.`) and do not set `search_path`: backup restore replays migrations inside a staging schema with `search_path` set to that schema only, so every migration must work under any `search_path`. `backend/migrations-runner.test.ts` checks this.
 
 **Article visibility:** legacy text levels (`Public`, `Internal`, `Admin`) and AGT numeric levels (`0`–`5`) are both supported. Access rules live in `backend/domain.ts`; display options and colors in `src/visibility.ts`. Keep both in sync and preserve legacy behavior.
 
-**Authentication:** the API supports local accounts only; setting `AUTH_MODE` to anything other than `local` stops the server from starting. `backend/auth.ts` `authenticate()` is the single place a bearer token becomes a user, so a future provider (such as OIDC) belongs there. Handlers receive the resulting `Actor` on `request.actor` and must not inspect tokens themselves.
+**Authentication:** the API supports local accounts only; setting `AUTH_MODE` to anything other than `local` stops the server from starting. `backend/auth.ts` `authenticate()` is the single place a member bearer token becomes a user, so a future provider (such as OIDC) belongs there. Handlers receive the resulting `Actor` on `request.actor` and must not inspect tokens themselves. The Admin is authenticated separately in `backend/admin-auth.ts` (setup with `AGT_SETUP_PASSWORD`, sign-in, SHA-256-hashed cookie sessions); `server.ts` verifies the cookie for `auth: 'admin'` routes and passes `request.admin`. Bearer tokens are ignored on admin routes and the Admin cookie on member routes; never let one grant the other.
+
+**Configuration:** non-secret settings live in `config.yaml`, validated by the Zod schema in `backend/config.ts` (unknown keys are errors); document every key in `config.example.yaml`. Secrets stay in environment variables. Dashboard-editable keys resolve file → `application_settings` → default in `backend/settings-service.ts`, and a key the file defines must never be changeable through any API, migration, or restore.
 
 ## Security rules
 
@@ -95,8 +109,8 @@ Before finishing, run lint, typecheck, and the relevant tests; run the full suit
 - Never commit `.env` files, secrets, database URLs, or credentials. `VITE_*` values are public identifiers only; never put secrets in frontend code or Vite variables.
 - Markdown is rendered with `react-markdown` + `rehype-sanitize` without raw HTML, and the API rejects HTML/JSX/MDX imports. Do not enable raw HTML or execute content as MDX.
 - Updates, restores, and deletes carry the article `version` and must return HTTP `409` on mismatch rather than overwrite concurrent edits.
-- Server-owned fields (`created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, version) must not be accepted from clients. The only exception is the super-administrator database restore in `backend/backup-service.ts`, which restores rows verbatim.
-- A new application table must be added to `backupTables` in `backend/backup-service.ts` (in foreign-key order) so backups stay complete.
+- Server-owned fields (`created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, version) must not be accepted from clients. The only exception is the Admin backup restore in `backend/backup-service.ts`, which restores rows verbatim.
+- A new application table must be added to `backupTables` in `backend/backup-service.ts` (in foreign-key order) so backups stay complete. The one exception is `admin_sessions`, listed in `unbackedTables`: it is never backed up and is cleared by every restore. `config.yaml` is included in backups but never restored.
 
 ## Documentation and commits
 
