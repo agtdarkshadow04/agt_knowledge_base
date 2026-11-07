@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../services/api';
@@ -70,7 +70,7 @@ describe('AdminApp', () => {
 
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
     const tabs = screen.getByRole('navigation', { name: 'Administration sections' });
-    expect([...tabs.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Users', 'Data', 'Settings', 'Backup & restore', 'Account']);
+    expect([...tabs.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Users', 'Data', 'Settings', 'Backup & restore', 'Account', 'API']);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     // The member session is untouched.
     expect(localStorage.length).toBe(0);
@@ -100,6 +100,28 @@ describe('AdminApp', () => {
     expect(localStorage.getItem('agt-local-auth-token')).toBe('member-token');
   });
 
+  it('documents the Admin routes in the API tab', async () => {
+    const user = userEvent.setup();
+    mocks.getSession.mockResolvedValue(session);
+    render(<AdminApp />);
+    await screen.findByRole('heading', { name: 'Administration' });
+    await user.click(screen.getByRole('button', { name: 'API' }));
+
+    expect(await screen.findByRole('heading', { name: 'AGT Knowledge Base Admin API' })).toBeInTheDocument();
+    const settings = screen.getByRole('article', { name: 'Change dashboard settings' });
+    expect(within(settings).getByText('/admin/settings')).toBeInTheDocument();
+    expect(within(settings).getByText('Admin session')).toBeInTheDocument();
+    expect(within(settings).getByText('x-agt-request: 1', { selector: '.api-badge' })).toBeInTheDocument();
+    expect(within(settings).getByText('SETTING_DEFINED_IN_FILE', { selector: '.api-error-codes code' })).toBeInTheDocument();
+
+    const setup = screen.getByRole('article', { name: 'Create the Admin account' });
+    expect(within(setup).getByText('Public')).toBeInTheDocument();
+    expect(within(setup).getByText('CSRF_HEADER_REQUIRED', { selector: '.api-error-codes code' })).toBeInTheDocument();
+    // Member routes are documented in the member app, not here.
+    expect(screen.queryByText('/member/articles')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Member API reference' })).toHaveAttribute('href', '/api-docs');
+  });
+
   it('returns to sign-in when the session ends mid-use', async () => {
     mocks.getSession.mockResolvedValue(session);
     render(<AdminApp />);
@@ -120,6 +142,7 @@ describe('bundle separation', () => {
     for (const [path, source] of memberFiles) {
       expect(source, path).not.toMatch(/from ['"][./]*admin\//);
       expect(source, path).not.toMatch(/['"]\/admin['"]/);
+      expect(source, path).not.toContain('openapi-admin.yaml');
     }
   });
 

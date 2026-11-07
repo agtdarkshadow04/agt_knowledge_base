@@ -405,11 +405,61 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .site-footer nav a { font-size: 0.65rem; font-weight: 900; letter-spacing: 0.13em; text-decoration: none; text-transform: uppercase; }
 .site-footer nav a:hover { opacity: 0.6; }
 .site-footer p { margin: 0; font-family: ui-monospace, monospace; font-size: 0.6rem; font-weight: 900; letter-spacing: 0.16em; text-transform: uppercase; }
+.site-footer .footer-api-link { color: inherit; text-decoration: underline; text-underline-offset: 0.2em; }
+
+/* API reference (member /api-docs page and the admin API tab) */
+.api-docs-lede { max-width: 52rem; color: #b6afa6; line-height: 1.6; }
+.api-docs-lede code, .api-media code, .api-endpoint code, .api-table code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.api-docs-lede code { color: #ffb79e; }
+.api-reference { display: grid; grid-template-columns: 17rem minmax(0, 1fr); align-items: start; gap: clamp(1.5rem, 4vw, 3rem); }
+.api-toc ol ol { margin-top: 0.45rem; padding-left: 0.6rem; gap: 0.35rem; }
+.api-toc-method { display: inline-block; min-width: 3.4rem; color: var(--orange); font-family: ui-monospace, monospace; font-size: 0.6rem; font-weight: 900; }
+.api-content { display: grid; min-width: 0; gap: 2.5rem; }
+.api-group { display: grid; gap: 1rem; scroll-margin-top: 7rem; }
+.api-group > h2 { margin: 0; padding-bottom: 0.55rem; border-bottom: 1px solid var(--line); color: var(--gold); font-size: 1.5rem; }
+.api-operation { display: grid; min-width: 0; gap: 0.9rem; padding: clamp(1rem, 3vw, 1.5rem); scroll-margin-top: 7rem; border: 1px solid rgba(255, 180, 81, 0.14); border-radius: 0.75rem; background: rgba(18, 18, 18, 0.85); }
+.api-operation h3 { margin: 0; color: var(--white); font-size: 1.15rem; }
+.api-operation h4 { margin: 0 0 0.5rem; color: var(--muted); font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; }
+.api-operation-header { display: grid; gap: 0.55rem; }
+.api-endpoint { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0; overflow-wrap: anywhere; color: #ffd8a8; font-size: 0.9rem; }
+.api-method { padding: 0.25rem 0.5rem; border-radius: 0.35rem; color: #0a0a0a; font-family: ui-monospace, monospace; font-size: 0.68rem; font-weight: 900; letter-spacing: 0.06em; }
+.api-method-get { background: #86efac; }
+.api-method-post { background: #93c5fd; }
+.api-method-put { background: var(--gold); }
+.api-method-patch { background: #c4b5fd; }
+.api-method-delete { background: #fca5a5; }
+.api-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.api-badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.55rem; border: 1px solid #74706b; border-radius: 999px; color: #d7d2cb; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.06em; }
+.api-badge svg { width: 0.85rem; height: 0.85rem; }
+.api-auth-none { border-color: rgba(134, 239, 172, 0.45); color: #a7f3c0; }
+.api-auth-member { border-color: rgba(147, 197, 253, 0.5); color: #bfdbfe; }
+.api-auth-admin, .api-role { border-color: rgba(255, 180, 81, 0.55); color: var(--gold); }
+.api-csrf, .api-rate { border-color: rgba(252, 165, 165, 0.45); color: #fecaca; }
+.api-subsection { min-width: 0; }
+.api-media { margin: 0 0 0.5rem; color: var(--muted); font-size: 0.8rem; }
+.api-table { width: 100%; border-collapse: collapse; color: #ded8d1; font-size: 0.8rem; }
+.api-table th, .api-table td { padding: 0.55rem 0.65rem; border-bottom: 1px solid rgba(255, 180, 81, 0.12); text-align: left; vertical-align: top; }
+.api-table th { color: var(--muted); font-size: 0.64rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.api-table td:first-child code { color: #ffd8a8; white-space: nowrap; }
+.api-table .markdown-content { font-size: 0.8rem; line-height: 1.5; }
+.api-table .markdown-content p { margin: 0 0 0.35rem; }
+.api-required { color: var(--orange); font-size: 0.62rem; font-weight: 900; text-transform: uppercase; }
+.api-constraints, .api-error-codes { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.25rem 0 0; padding: 0; list-style: none; }
+.api-constraints li { padding: 0.12rem 0.4rem; border-radius: 0.3rem; color: #c9c2b9; background: #1d1d1d; font-size: 0.7rem; }
+.api-error-codes code { padding: 0.12rem 0.4rem; border-radius: 0.3rem; color: #ffb79e; background: #211512; font-size: 0.7rem; }
+.api-status { font-family: ui-monospace, monospace; font-weight: 900; }
+.api-status-2xx { color: #86efac; }
+.api-status-4xx { color: #fdba74; }
+.api-status-5xx { color: #fca5a5; }
+.api-admin-panel { display: grid; gap: 1.25rem; }
+.api-admin-panel .api-reference { grid-template-columns: 15rem minmax(0, 1fr); }
 
 @media (max-width: 68rem) {
   .article-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .audit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .article-layout { grid-template-columns: 13rem minmax(0, 1fr); gap: 2rem; }
+  .api-reference, .api-admin-panel .api-reference { grid-template-columns: minmax(0, 1fr); }
+  .api-toc { position: static; max-height: 22rem; }
   .revision-list li { grid-template-columns: minmax(9rem, 0.8fr) minmax(15rem, 1.5fr); }
   .revision-list li span:last-child { grid-column: 2; }
   .editor-workspace.with-preview { grid-template-columns: 1fr; }

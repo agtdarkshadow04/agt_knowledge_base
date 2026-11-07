@@ -94,7 +94,10 @@ export function Layout() {
           <a href="https://www.nms-agt.com/agt-galactic-archives" target="_blank" rel="noreferrer">Galactic Archives</a>
           <a href="https://www.nms-agt.com/support" target="_blank" rel="noreferrer">Support</a>
         </nav>
-        <p>© {new Date().getUTCFullYear()} Alliance of Galactic Travellers</p>
+        <p>
+          <Link to="/api-docs" className="footer-api-link">API reference</Link>
+          {' · '}© {new Date().getUTCFullYear()} Alliance of Galactic Travellers
+        </p>
       </footer>
       {settingsOpen && <SettingsModal user={user} onClose={closeSettings} />}
     </div>
