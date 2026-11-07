@@ -10,18 +10,28 @@ vi.mock('./db.js', () => ({ getPool: vi.fn(async () => database) }));
 
 import { AdminService } from './admin-service.js';
 
-const superAdmin = {
+const editorRow = {
   id: '10000000-0000-4000-8000-000000000001',
-  username: 'atlas',
-  display_name: 'Atlas',
-  email: 'atlas@example.com',
-  role: 'Admin' as const,
+  username: 'apollo',
+  display_name: 'Apollo',
+  email: 'apollo@example.com',
+  role: 'Editor' as const,
   is_active: true,
-  is_super_admin: true,
   session_version: 1,
   created_at: '2026-10-10T00:00:00.000Z',
   updated_at: '2026-10-10T00:00:00.000Z',
 };
+
+function fakeClient(rows = [editorRow]) {
+  const query = vi.fn(async (sql: string, _params?: unknown[]) => {
+    void _params;
+    if (sql.includes('FOR UPDATE')) return { rowCount: rows.length, rows };
+    if (sql.includes('RETURNING')) return { rowCount: 1, rows: [{ ...editorRow, role: 'Moderator' }] };
+    return { rowCount: 0, rows: [] };
+  });
+  database.connect.mockResolvedValue({ query, release: vi.fn() });
+  return query;
+}
 
 describe('AdminService', () => {
   beforeEach(() => {
@@ -29,70 +39,51 @@ describe('AdminService', () => {
     database.query.mockReset();
   });
 
-  it('locks the user table before checking bootstrap eligibility', async () => {
-    const query = vi.fn(async (sql: string) => {
-      if (sql === 'SELECT 1 FROM local_users LIMIT 1') return { rowCount: 0, rows: [] };
-      if (sql.includes('INSERT INTO local_users')) return { rowCount: 1, rows: [superAdmin] };
-      return { rowCount: 0, rows: [] };
-    });
-    database.connect.mockResolvedValue({ query, release: vi.fn() });
+  it('promotes a member to Moderator and signs them out when their role changes', async () => {
+    const query = fakeClient();
 
-    await expect(new AdminService().bootstrap({
-      username: 'atlas',
-      displayName: 'Atlas',
-      email: 'atlas@example.com',
-      password: 'Permanent123!',
-    })).resolves.toMatchObject({ sub: superAdmin.id, isSuperAdmin: true, sessionVersion: 1 });
-
-    const statements = query.mock.calls.map(([sql]) => sql);
-    expect(statements.indexOf('LOCK TABLE local_users IN SHARE ROW EXCLUSIVE MODE'))
-      .toBeLessThan(statements.indexOf('SELECT 1 FROM local_users LIMIT 1'));
-    expect(statements).toContain('COMMIT');
-  });
-
-  it('rejects setup once any local user exists', async () => {
-    const query = vi.fn(async (sql: string) => {
-      if (sql === 'SELECT 1 FROM local_users LIMIT 1') return { rowCount: 1, rows: [{}] };
-      return { rowCount: 0, rows: [] };
-    });
-    database.connect.mockResolvedValue({ query, release: vi.fn() });
-
-    await expect(new AdminService().bootstrap({
-      username: 'second',
-      displayName: 'Second',
-      password: 'Permanent123!',
-    })).rejects.toMatchObject({ statusCode: 409, code: 'SETUP_ALREADY_COMPLETED' });
-    expect(query).toHaveBeenCalledWith('ROLLBACK');
-  });
-
-  it('prevents another administrator from changing the super administrator', async () => {
-    const query = vi.fn(async (sql: string) => {
-      if (sql.includes("role = 'Admin'")) return { rowCount: 1, rows: [{}] };
-      if (sql.includes('FOR UPDATE')) return { rowCount: 1, rows: [superAdmin] };
-      return { rowCount: 0, rows: [] };
-    });
-    database.connect.mockResolvedValue({ query, release: vi.fn() });
-
-    await expect(new AdminService().updateUser(superAdmin.id, {
-      username: 'taken-over',
-      displayName: 'Taken over',
-      email: undefined,
-      role: 'Admin',
+    await expect(new AdminService().updateUser(editorRow.id, {
+      username: 'apollo',
+      displayName: 'Apollo',
+      role: 'Moderator',
       isActive: true,
-    }, { sub: '20000000-0000-4000-8000-000000000002', displayName: 'Other Admin', role: 'Admin' }))
-      .rejects.toMatchObject({ statusCode: 409, code: 'PROTECTED_USER' });
-    expect(query).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE local_users'), expect.anything());
+    })).resolves.toMatchObject({ role: 'Moderator' });
+
+    const update = query.mock.calls.find(([sql]) => sql.includes('UPDATE local_users'))!;
+    expect(update[1]).toEqual([editorRow.id, 'apollo', 'Apollo', null, 'Moderator', true, true]);
+    expect(query).toHaveBeenCalledWith('COMMIT');
+  });
+
+  it('never returns or references a super-administrator flag', async () => {
+    database.query.mockImplementation(async (sql: string) => {
+      expect(sql).not.toContain('is_super_admin');
+      return sql.includes('count(*)') ? { rows: [{ count: '1' }] } : { rows: [editorRow] };
+    });
+
+    const users = await new AdminService().listUsers({ search: '', role: 'all', active: 'all', page: 1, pageSize: 25 });
+    expect(users.items[0]).not.toHaveProperty('isSuperAdmin');
+    expect(users.items[0]).toMatchObject({ username: 'apollo', role: 'Editor' });
+  });
+
+  it('reports a missing user without changing anything', async () => {
+    const query = fakeClient([]);
+    await expect(new AdminService().deleteUser(editorRow.id)).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
+    expect(query).not.toHaveBeenCalledWith('DELETE FROM local_users WHERE id = $1', expect.anything());
     expect(query).toHaveBeenCalledWith('ROLLBACK');
   });
 
-  it('returns an optimistic concurrency conflict for stale settings', async () => {
-    database.query.mockResolvedValue({ rows: [] });
-    await expect(new AdminService().updateSettings({
-      applicationName: 'Archive',
-      applicationSubtitle: 'A local archive',
-      defaultVisibility: 'Internal',
-      allowPublicBrowsing: true,
-      version: 2,
-    })).rejects.toMatchObject({ statusCode: 409, code: 'VERSION_CONFLICT' });
+  it('maps duplicate usernames to a conflict', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('INSERT INTO local_users')) throw Object.assign(new Error('duplicate'), { code: '23505' });
+      return { rowCount: 0, rows: [] };
+    });
+    database.connect.mockResolvedValue({ query, release: vi.fn() });
+
+    await expect(new AdminService().createUser({
+      username: 'apollo',
+      displayName: 'Apollo',
+      role: 'Editor',
+      password: 'Permanent123!',
+    })).rejects.toMatchObject({ statusCode: 409, code: 'USER_CONFLICT' });
   });
 });

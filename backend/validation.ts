@@ -1,12 +1,5 @@
 import { z } from 'zod';
-import {
-  backupFormat,
-  backupFormatVersion,
-  backupTables,
-  type BackupTable,
-  type DatabaseBackup,
-} from './backup-service.js';
-import type { ArticleWrite, ListArticlesQuery, TagWrite } from './domain.js';
+import { roles, type ArticleWrite, type ListArticlesQuery, type TagWrite } from './domain.js';
 
 const unsafeMdx = /(^|\n)\s*(import|export)\s|<\/?[A-Za-z][^>]*>/m;
 
@@ -18,10 +11,20 @@ const tagIdsSchema = z.array(uuidSchema).max(12).superRefine((tagIds, context) =
   }
 });
 
-const visibilitySchema = z.union([
+export const visibilitySchema = z.union([
   z.enum(['Public', 'Internal', 'Admin']),
   z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
 ]);
+
+/** Largest database.json a backup may contain: it is parsed as one string, so it must stay below V8's string limit. */
+export const backupUncompressedCeiling = 500 * 1024 * 1024;
+
+/** Bounds for the backup limits, which can be set in config.yaml or the admin dashboard. */
+export const backupLimitSchemas = {
+  maxBytes: z.number().int().min(1024 * 1024).max(1024 * 1024 * 1024),
+  maxEntries: z.number().int().min(3).max(10_000),
+  maxUncompressedBytes: z.number().int().min(1024 * 1024).max(backupUncompressedCeiling),
+};
 
 const articleSchema = z.object({
   title: z.string().trim().min(3).max(180),
@@ -76,10 +79,23 @@ const passwordSchema = z.string().min(12).max(1024)
   .regex(/[0-9]/, 'Password must include a number.')
   .regex(/[^A-Za-z0-9]/, 'Password must include a symbol.');
 
-const setupSchema = z.object({
+const adminSetupSchema = z.object({
+  setupPassword: z.string().min(1).max(1024),
   username: usernameSchema,
-  displayName: displayNameSchema,
-  email: emailSchema.optional(),
+  password: passwordSchema,
+  passwordConfirmation: z.string(),
+}).strict().refine((value) => value.password === value.passwordConfirmation, {
+  message: 'Passwords do not match.',
+  path: ['passwordConfirmation'],
+});
+
+const credentialsSchema = z.object({
+  username: z.string().max(254),
+  password: z.string().max(1024),
+}).strict();
+
+const adminAccountPasswordSchema = z.object({
+  currentPassword: z.string().max(1024),
   password: passwordSchema,
   passwordConfirmation: z.string(),
 }).strict().refine((value) => value.password === value.passwordConfirmation, {
@@ -91,7 +107,7 @@ const adminUserCreateSchema = z.object({
   username: usernameSchema,
   displayName: displayNameSchema,
   email: emailSchema.optional(),
-  role: z.enum(['Admin', 'Standard']),
+  role: z.enum(roles),
   password: passwordSchema,
 }).strict();
 
@@ -99,7 +115,7 @@ const adminUserUpdateSchema = z.object({
   username: usernameSchema,
   displayName: displayNameSchema,
   email: emailSchema.optional(),
-  role: z.enum(['Admin', 'Standard']),
+  role: z.enum(roles),
   isActive: z.boolean(),
 }).strict();
 
@@ -107,17 +123,21 @@ const adminPasswordSchema = z.object({ password: passwordSchema }).strict();
 
 const userListSchema = z.object({
   search: z.string().trim().max(200).default(''),
-  role: z.enum(['all', 'Admin', 'Standard']).default('all'),
+  role: z.enum(['all', ...roles]).default('all'),
   active: z.enum(['all', 'active', 'inactive']).default('all'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
 
 const applicationSettingsSchema = z.object({
-  applicationName: z.string().trim().min(1).max(80),
-  applicationSubtitle: z.string().trim().min(1).max(240),
-  defaultVisibility: visibilitySchema,
-  allowPublicBrowsing: z.boolean(),
+  applicationName: z.string().trim().min(1).max(80).optional(),
+  applicationSubtitle: z.string().trim().min(1).max(240).optional(),
+  defaultVisibility: visibilitySchema.optional(),
+  allowPublicBrowsing: z.boolean().optional(),
+  /** null clears the dashboard value so the default applies again. */
+  backupMaxBytes: backupLimitSchemas.maxBytes.nullable().optional(),
+  backupMaxEntries: backupLimitSchemas.maxEntries.nullable().optional(),
+  backupMaxUncompressedBytes: backupLimitSchemas.maxUncompressedBytes.nullable().optional(),
   version: z.number().int().positive(),
 }).strict();
 
@@ -149,8 +169,17 @@ export function parseTagListQuery(query: Record<string, string | string[] | unde
   return tagListSchema.parse({ search: first(query.search) });
 }
 
-export function parseSetupWrite(value: unknown) {
-  return setupSchema.parse(value);
+export function parseAdminSetup(value: unknown) {
+  return adminSetupSchema.parse(value);
+}
+
+/** Username and password for member or Admin sign-in. */
+export function parseCredentials(value: unknown) {
+  return credentialsSchema.parse(value);
+}
+
+export function parseAdminAccountPassword(value: unknown) {
+  return adminAccountPasswordSchema.parse(value);
 }
 
 export function parseAdminUserCreate(value: unknown) {
@@ -207,20 +236,4 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
     page: first(query.page),
     pageSize: first(query.pageSize),
   });
-}
-
-const backupRowsSchema = z.array(z.record(z.string(), z.unknown()));
-
-const backupSchema = z.object({
-  format: z.literal(backupFormat),
-  formatVersion: z.literal(backupFormatVersion),
-  createdAt: z.string(),
-  migrations: z.array(z.string().max(200)).min(1).max(1000),
-  tables: z.object(
-    Object.fromEntries(backupTables.map((table) => [table, backupRowsSchema])) as Record<BackupTable, typeof backupRowsSchema>,
-  ).strict(),
-}).strict();
-
-export function parseBackup(input: unknown): DatabaseBackup {
-  return backupSchema.parse(input);
 }

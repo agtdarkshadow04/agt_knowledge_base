@@ -71,7 +71,7 @@ export function ArticleHistoryPage() {
   const latest = revisions[0];
 
   async function restore() {
-    if (!left || !latest || user?.role !== 'Admin' || left.version === latest.version) return;
+    if (!left || !latest || user?.role !== 'Moderator' || left.version === latest.version) return;
     if (!window.confirm(`Restore version ${left.version} as a new latest revision?`)) return;
     setRestoring(true);
     setError('');
@@ -122,7 +122,7 @@ export function ArticleHistoryPage() {
             <p className="eyebrow">Side-by-side comparison</p>
             <h2 id="comparison-title"><ArrowLeftRight aria-hidden="true" />Compare revisions</h2>
           </div>
-          {user?.role === 'Admin' && (
+          {user?.role === 'Moderator' && (
             <button
               className="button button-secondary"
               disabled={restoring || left.version === latest.version}

@@ -1,0 +1,80 @@
+# AGT Knowledge Base configuration.
+#
+# Copy this file to config.yaml and edit it. Docker Compose mounts config.yaml
+# read-only at /app/config.yaml (override the path with CONFIG_FILE). The file
+# is validated when the API starts: an unknown key or invalid value stops the
+# server with an error naming the key. A missing file means "all defaults".
+#
+# This file holds settings that are not secret. Secrets (POSTGRES_PASSWORD,
+# LOCAL_AUTH_SECRET, AGT_SETUP_PASSWORD) belong in .env, which is never
+# included in backups.
+#
+# Every key is shown with its default. Keys under site, articles, access and
+# backup (except backup.preRestore) can also be edited in the admin dashboard;
+# when this file sets one, the file always wins and the dashboard shows it as
+# read-only.
+
+server:
+  # host: 0.0.0.0
+  # port: 3001
+  # The site's externally visible origin, without a trailing slash. Behind a
+  # TLS proxy use the HTTPS origin, which also makes the Admin cookie Secure.
+  # frontendOrigin: http://localhost:8080
+  # How many reverse proxies in front of the API to trust for X-Forwarded-For
+  # (client addresses for rate limits) and X-Forwarded-Proto. false (the
+  # default) uses the socket address. The bundled Nginx is one hop, so the
+  # Compose stack sets 1; use 2 behind an additional TLS proxy.
+  trustProxy: 1
+
+session:
+  # Member sign-in lifetime, 1 to 168 hours.
+  # ttlHours: 12
+
+adminSession:
+  # Admin sign-in lifetime at /admin, 1 to 168 hours.
+  # ttlHours: 12
+  # auto sets Secure when frontendOrigin is https:// or a trusted proxy reports HTTPS.
+  # secureCookie: auto
+
+rateLimits:
+  # Attempts per client address per window, applied by the API.
+  # login:            # member sign-in
+  #   max: 5
+  #   windowMinutes: 1
+  # adminLogin:       # Admin sign-in
+  #   max: 10
+  #   windowMinutes: 15
+  # setup:            # first-run Admin setup
+  #   max: 10
+  #   windowMinutes: 15
+  # adminPassword:    # Admin password change
+  #   max: 10
+  #   windowMinutes: 15
+
+storage:
+  # Where pre-restore backups are written (a volume in docker-compose.yml).
+  # backupsDir: /app/data/backups
+
+backup:
+  # Largest backup upload in bytes (100 MB). A TLS proxy in front of the stack
+  # must accept request bodies at least this large.
+  # maxBytes: 104857600
+  # Most entries an uploaded archive may contain.
+  # maxEntries: 16
+  # Largest total uncompressed size of an uploaded archive (256 MB; at most 500 MB).
+  # maxUncompressedBytes: 268435456
+  preRestore:
+    # Pre-restore backups to keep. Unset keeps every one.
+    # keep: 10
+
+site:
+  # applicationName: AGT Knowledge Base
+  # applicationSubtitle: Field-tested guides, community procedures, and traveller intelligence.
+
+articles:
+  # Default visibility for new articles: Public, Internal, Admin (legacy), or 0-5.
+  # defaultVisibility: Internal
+
+access:
+  # Allow visitors who are not signed in to browse public articles.
+  # allowPublicBrowsing: true

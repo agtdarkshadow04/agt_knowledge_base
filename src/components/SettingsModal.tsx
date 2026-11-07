@@ -109,7 +109,7 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
           <dl className="account-details">
             <div><dt>Username</dt><dd>{user?.username ?? 'Public user'}</dd></div>
             <div><dt>Email</dt><dd>{user?.email ?? 'N/A'}</dd></div>
-            <div><dt>Account type</dt><dd>{user ? user.role === 'Admin' ? 'Administrator' : 'Standard' : 'N/A'}</dd></div>
+            <div><dt>Account type</dt><dd>{user?.role ?? 'N/A'}</dd></div>
           </dl>
         </section>
 

@@ -1,4 +1,4 @@
-import { BookOpen, LogIn, LogOut, Plus, ShieldCheck } from 'lucide-react';
+import { BookOpen, LogIn, LogOut, Plus, ShieldCheck, Tags } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -48,13 +48,13 @@ export function Layout() {
                 <Plus aria-hidden="true" /> <span className="desktop-only">New article</span>
               </NavLink>
             )}
-            {user?.role === 'Admin' && (
-              <NavLink to="/admin" className="icon-link">
-                <ShieldCheck aria-hidden="true" /> <span className="desktop-only">Admin</span>
+            {user?.role === 'Moderator' && (
+              <NavLink to="/tags" className="icon-link">
+                <Tags aria-hidden="true" /> <span className="desktop-only">Tags</span>
               </NavLink>
             )}
-            <span className={`identity-badge ${user?.role === 'Admin' ? 'admin' : ''}`}>
-              {user?.role === 'Admin' && <ShieldCheck aria-hidden="true" />}
+            <span className={`identity-badge ${user?.role === 'Moderator' ? 'moderator' : ''}`}>
+              {user?.role === 'Moderator' && <ShieldCheck aria-hidden="true" />}
               <span>{user ? `${user.displayName} · ${user.role}` : 'Public user'}</span>
             </span>
             {user ? (

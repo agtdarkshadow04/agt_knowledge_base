@@ -1,4 +1,5 @@
-export type UserRole = 'Admin' | 'Standard';
+/** Member roles. The installation Admin is a separate account that signs in at /admin. */
+export type UserRole = 'Editor' | 'Moderator';
 export type LegacyArticleVisibility = 'Public' | 'Internal' | 'Admin';
 export type AgtArticleVisibility = 0 | 1 | 2 | 3 | 4 | 5;
 export type ArticleVisibility = LegacyArticleVisibility | AgtArticleVisibility;
@@ -10,27 +11,6 @@ export interface SessionUser {
   displayName: string;
   email?: string;
   role: UserRole;
-  isSuperAdmin?: boolean;
-}
-
-export interface LocalUser {
-  id: string;
-  username: string;
-  displayName: string;
-  email?: string;
-  role: UserRole;
-  isActive: boolean;
-  isSuperAdmin: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface LocalUserListResponse {
-  items: LocalUser[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
 }
 
 export interface ApplicationSettings {
@@ -39,19 +19,6 @@ export interface ApplicationSettings {
   defaultVisibility: ArticleVisibility;
   allowPublicBrowsing: boolean;
   version: number;
-}
-
-export interface AdminStats {
-  totalArticles: number;
-  publicArticles: number;
-  internalArticles: number;
-  adminArticles: number;
-  pinnedArticles: number;
-  protectedArticles: number;
-  verifiedArticles: number;
-  articleRevisions: number;
-  canonicalTags: number;
-  orphanedTagReferences: number;
 }
 
 export interface CanonicalTag {
@@ -139,16 +106,4 @@ export interface ArticleInput {
   tagIds: string[];
   visibility?: ArticleVisibility;
   version?: number;
-}
-
-export type BackupTable =
-  | 'app_users'
-  | 'local_users'
-  | 'tags'
-  | 'articles'
-  | 'article_revisions'
-  | 'application_settings';
-
-export interface BackupRestoreResult {
-  restored: Record<BackupTable, number>;
 }

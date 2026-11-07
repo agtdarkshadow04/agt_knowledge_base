@@ -18,6 +18,11 @@ export class ArticleService {
     return this.repository.list(query, actor?.role ?? null);
   }
 
+  /** Every article at every visibility level, for the admin panel's inventory. */
+  listAll(query: ListArticlesQuery) {
+    return this.repository.list(query, 'System');
+  }
+
   async get(id: string, actor: Actor | null) {
     const article = await this.repository.get(id, actor?.role ?? null);
     if (!article) throw new NotFoundError();
@@ -32,7 +37,7 @@ export class ArticleService {
   create(input: ArticleWrite, actor: Actor) {
     const visibility = input.visibility ?? 'Internal';
     if (!canAssignArticleVisibility(actor.role, visibility)) {
-      throw new ForbiddenError('Standard users cannot assign this visibility level.');
+      throw new ForbiddenError('Editors cannot assign this visibility level.');
     }
     return this.repository.create({ ...input, visibility }, actor);
   }
@@ -41,12 +46,12 @@ export class ArticleService {
     if (!input.version) throw new ConflictError('A version is required when updating an article.');
     const existing = await this.repository.get(id, actor.role);
     if (!existing) throw new NotFoundError();
-    if (existing.isProtected && actor.role !== 'Admin') {
-      throw new ForbiddenError('This protected article can only be edited by an Administrator.');
+    if (existing.isProtected && actor.role !== 'Moderator') {
+      throw new ForbiddenError('This protected article can only be edited by a Moderator.');
     }
     const visibility = input.visibility ?? existing.visibility;
     if (!canAssignArticleVisibility(actor.role, visibility)) {
-      throw new ForbiddenError('Standard users cannot assign this visibility level.');
+      throw new ForbiddenError('Editors cannot assign this visibility level.');
     }
     if (existing.version !== input.version) throw new ConflictError();
     const unchanged = existing.title === input.title
@@ -61,7 +66,7 @@ export class ArticleService {
   }
 
   async setProtection(id: string, isProtected: boolean, version: number, actor: Actor) {
-    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can change protection status.');
+    if (actor.role !== 'Moderator') throw new ForbiddenError('Only Moderators can change protection status.');
     if (!(await this.repository.get(id, actor.role))) throw new NotFoundError();
     const updated = await this.repository.setProtection(id, isProtected, version, actor);
     if (!updated) throw new ConflictError();
@@ -69,7 +74,7 @@ export class ArticleService {
   }
 
   async setPinned(id: string, isPinned: boolean, version: number, actor: Actor) {
-    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can change pin status.');
+    if (actor.role !== 'Moderator') throw new ForbiddenError('Only Moderators can change pin status.');
     if (!(await this.repository.get(id, actor.role))) throw new NotFoundError();
     const updated = await this.repository.setPinned(id, isPinned, version, actor);
     if (!updated) throw new ConflictError();
@@ -77,7 +82,7 @@ export class ArticleService {
   }
 
   async setVerified(id: string, isVerified: boolean, version: number, actor: Actor) {
-    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can change verification status.');
+    if (actor.role !== 'Moderator') throw new ForbiddenError('Only Moderators can change verification status.');
     if (!(await this.repository.get(id, actor.role))) throw new NotFoundError();
     const updated = await this.repository.setVerified(id, isVerified, version, actor);
     if (!updated) throw new ConflictError();
@@ -85,7 +90,7 @@ export class ArticleService {
   }
 
   async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
-    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can restore article revisions.');
+    if (actor.role !== 'Moderator') throw new ForbiddenError('Only Moderators can restore article revisions.');
     if (!(await this.repository.get(id, actor.role))) throw new NotFoundError();
     if (!(await this.repository.getRevision(id, revisionVersion))) {
       throw new NotFoundError('Article revision not found.');
@@ -96,13 +101,13 @@ export class ArticleService {
   }
 
   async delete(id: string, version: number, actor: Actor) {
-    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can delete articles.');
+    if (actor.role !== 'Moderator') throw new ForbiddenError('Only Moderators can delete articles.');
     if (!(await this.repository.get(id, actor.role))) throw new NotFoundError();
     if (!(await this.repository.delete(id, version))) throw new ConflictError();
   }
 
   async removeOrphanTag(id: string, tagId: string, version: number, actor: Actor) {
-    if (actor.role !== 'Admin') throw new ForbiddenError('Only Administrators can clean up unresolved tag references.');
+    if (actor.role !== 'Moderator') throw new ForbiddenError('Only Moderators can clean up unresolved tag references.');
     const result = await this.repository.removeOrphanTag(id, tagId, version, actor);
     if (result.status === 'not-found') throw new NotFoundError();
     if (result.status === 'conflict') throw new ConflictError();

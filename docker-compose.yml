@@ -42,11 +42,15 @@ services:
     restart: unless-stopped
     environment:
       <<: *database-environment
-      API_HOST: 0.0.0.0
-      API_PORT: 3001
-      LOCAL_FRONTEND_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
       LOCAL_AUTH_SECRET: ${LOCAL_AUTH_SECRET:?Set LOCAL_AUTH_SECRET in .env}
-      LOCAL_AUTH_SESSION_HOURS: ${LOCAL_AUTH_SESSION_HOURS:-12}
+      # One-time password for creating the Admin at /admin. Remove it from .env
+      # once setup is complete; it is ignored after the Admin exists.
+      AGT_SETUP_PASSWORD: ${AGT_SETUP_PASSWORD:-}
+    volumes:
+      # Non-secret settings; create it with: cp config.example.yaml config.yaml
+      - ./config.yaml:/app/config.yaml:ro
+      # Pre-restore backups (storage.backupsDir).
+      - agt-backups:/app/data/backups
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -64,3 +68,4 @@ services:
 
 volumes:
   agt-postgres:
+  agt-backups:

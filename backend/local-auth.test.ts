@@ -2,6 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const database = vi.hoisted(() => ({ query: vi.fn() }));
+const config = vi.hoisted(() => ({ ttlHours: 12 }));
+
+vi.mock('./config.js', () => ({ getConfig: () => ({ session: { ttlHours: config.ttlHours } }) }));
 
 vi.mock('./db.js', () => ({
   getPool: vi.fn(async () => database),
@@ -18,7 +21,7 @@ import {
 describe('local authentication', () => {
   afterEach(() => {
     delete process.env.LOCAL_AUTH_SECRET;
-    delete process.env.LOCAL_AUTH_SESSION_HOURS;
+    config.ttlHours = 12;
     database.query.mockReset();
   });
 
@@ -39,8 +42,7 @@ describe('local authentication', () => {
       username: 'traveller',
       displayName: 'Traveller',
       email: 'traveller@example.com',
-      role: 'Admin' as const,
-      isSuperAdmin: true,
+      role: 'Moderator' as const,
       sessionVersion: 3,
     };
     database.query.mockResolvedValue({ rows: [{
@@ -50,7 +52,6 @@ describe('local authentication', () => {
       display_name: user.displayName,
       email: user.email,
       role: user.role,
-      is_super_admin: true,
       session_version: 3,
     }] });
     const token = issueLocalToken(user);
@@ -72,8 +73,7 @@ describe('local authentication', () => {
       password_hash: passwordHash,
       display_name: 'Traveller',
       email: 'traveller@example.com',
-      role: 'Standard',
-      is_super_admin: false,
+      role: 'Editor',
       session_version: 1,
     }] });
 
@@ -82,8 +82,7 @@ describe('local authentication', () => {
       username: 'traveller',
       displayName: 'Traveller',
       email: 'traveller@example.com',
-      role: 'Standard',
-      isSuperAdmin: false,
+      role: 'Editor',
       sessionVersion: 1,
     });
     expect(database.query).toHaveBeenCalledWith(expect.stringContaining('is_active = true'), ['traveller']);
@@ -96,9 +95,30 @@ describe('local authentication', () => {
       sub: 'user-id',
       username: 'traveller',
       displayName: 'Traveller',
-      role: 'Standard',
-      isSuperAdmin: false,
+      role: 'Editor',
       sessionVersion: 1,
     })).toThrow('LOCAL_AUTH_SECRET must contain at least 32 characters.');
+  });
+
+  it('rejects tokens that carry a pre-migration role or the removed super-admin flag', async () => {
+    process.env.LOCAL_AUTH_SECRET = 'a-secure-local-auth-secret-with-32-chars';
+    const legacy = issueLocalToken({
+      sub: 'user-id',
+      username: 'atlas',
+      displayName: 'Atlas',
+      role: 'Admin' as never,
+      sessionVersion: 1,
+    });
+    await expect(verifyLocalToken(legacy)).rejects.toThrow('Invalid session token.');
+    expect(database.query).not.toHaveBeenCalled();
+  });
+
+  it('issues member tokens for the configured session lifetime', () => {
+    process.env.LOCAL_AUTH_SECRET = 'a-secure-local-auth-secret-with-32-chars';
+    config.ttlHours = 2;
+    const token = issueLocalToken({ sub: 'user-id', username: 'apollo', displayName: 'Apollo', role: 'Editor', sessionVersion: 1 });
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')) as { iat: number; exp: number };
+    expect(payload.exp - payload.iat).toBe(2 * 60 * 60);
+    expect(payload).not.toHaveProperty('isSuperAdmin');
   });
 });

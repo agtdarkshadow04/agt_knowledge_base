@@ -4,9 +4,20 @@ import { describe, expect, it, vi } from 'vitest';
 const localAuth = vi.hoisted(() => ({ verifyLocalToken: vi.fn() }));
 vi.mock('./local-auth.js', () => localAuth);
 
-import { authenticate, requireActor, requireAdmin, toActor } from './auth.js';
+import { authenticate, requireActor, requireAdminSession, toActor } from './auth.js';
 import type { Actor } from './domain.js';
-import { parseArticleWrite, parseListQuery, parseTagWrite, parseVerificationWrite } from './validation.js';
+import {
+  parseAdminAccountPassword,
+  parseAdminSetup,
+  parseAdminUserCreate,
+  parseAdminUserUpdate,
+  parseApplicationSettingsWrite,
+  parseArticleWrite,
+  parseCredentials,
+  parseListQuery,
+  parseTagWrite,
+  parseVerificationWrite,
+} from './validation.js';
 
 const tagId = '10000000-0000-4000-8000-000000000001';
 
@@ -16,8 +27,7 @@ describe('authentication and validation', () => {
       sub: '00000000-0000-4000-8000-000000000001',
       username: 'traveller',
       displayName: 'Traveller',
-      role: 'Admin',
-      isSuperAdmin: false,
+      role: 'Moderator',
       sessionVersion: 3,
     });
     const user = await authenticate('token');
@@ -27,15 +37,13 @@ describe('authentication and validation', () => {
       username: 'traveller',
       displayName: 'Traveller',
       email: undefined,
-      role: 'Admin',
-      isSuperAdmin: false,
+      role: 'Moderator',
     });
     expect(toActor(user)).toEqual({
       sub: '00000000-0000-4000-8000-000000000001',
-      role: 'Admin',
+      role: 'Moderator',
       displayName: 'Traveller',
       email: undefined,
-      isSuperAdmin: false,
     });
   });
 
@@ -44,14 +52,44 @@ describe('authentication and validation', () => {
     await expect(authenticate('forged')).rejects.toThrow('Invalid session token.');
   });
 
-  it('requires a signed-in actor and an Admin role where requested', () => {
-    const standard: Actor = { sub: 'standard-sub', role: 'Standard', displayName: 'Standard' };
-    const admin: Actor = { sub: 'admin-sub', role: 'Admin', displayName: 'Admin' };
+  it('requires a signed-in actor, and an Admin session on admin routes', () => {
+    const editor: Actor = { sub: 'editor-sub', role: 'Editor', displayName: 'Editor' };
     expect(() => requireActor({ actor: null })).toThrow(expect.objectContaining({ statusCode: 401 }));
-    expect(requireActor({ actor: standard })).toBe(standard);
-    expect(() => requireAdmin({ actor: null })).toThrow(expect.objectContaining({ statusCode: 401 }));
-    expect(() => requireAdmin({ actor: standard })).toThrow(expect.objectContaining({ statusCode: 403 }));
-    expect(requireAdmin({ actor: admin })).toBe(admin);
+    expect(requireActor({ actor: editor })).toBe(editor);
+    expect(() => requireAdminSession({ admin: null })).toThrow(expect.objectContaining({ statusCode: 401 }));
+    expect(() => requireAdminSession({})).toThrow(expect.objectContaining({ statusCode: 401 }));
+    expect(requireAdminSession({ admin: { username: 'atlas' } })).toEqual({ username: 'atlas' });
+  });
+
+  it('accepts only the Editor and Moderator member roles for user management', () => {
+    const user = { username: 'apollo', displayName: 'Apollo', password: 'Permanent123!' };
+    expect(parseAdminUserCreate({ ...user, role: 'Editor' })).toMatchObject({ role: 'Editor' });
+    expect(parseAdminUserCreate({ ...user, role: 'Moderator' })).toMatchObject({ role: 'Moderator' });
+    for (const role of ['Admin', 'Standard', 'SuperAdmin']) {
+      expect(() => parseAdminUserCreate({ ...user, role })).toThrow();
+      expect(() => parseAdminUserUpdate({ username: 'apollo', displayName: 'Apollo', role, isActive: true })).toThrow();
+    }
+    expect(() => parseAdminUserCreate({ ...user, role: 'Editor', isSuperAdmin: true })).toThrow();
+  });
+
+  it('validates Admin setup, sign-in, and password-change requests', () => {
+    expect(parseAdminSetup({ setupPassword: 'one-time', username: 'Atlas', password: 'Permanent123!', passwordConfirmation: 'Permanent123!' }))
+      .toMatchObject({ username: 'atlas' });
+    expect(() => parseAdminSetup({ setupPassword: 'one-time', username: 'atlas', password: 'Permanent123!', passwordConfirmation: 'Other123!' })).toThrow();
+    expect(() => parseAdminSetup({ setupPassword: '', username: 'atlas', password: 'Permanent123!', passwordConfirmation: 'Permanent123!' })).toThrow();
+    expect(() => parseAdminSetup({ setupPassword: 'x', username: 'atlas', password: 'short', passwordConfirmation: 'short' })).toThrow();
+    expect(parseCredentials({ username: 'atlas', password: 'x' })).toEqual({ username: 'atlas', password: 'x' });
+    expect(() => parseCredentials({ username: 'atlas' })).toThrow();
+    expect(() => parseAdminAccountPassword({ currentPassword: 'old', password: 'Permanent123!', passwordConfirmation: 'Different123!' })).toThrow();
+  });
+
+  it('accepts partial settings writes and clears only backup limits with null', () => {
+    expect(parseApplicationSettingsWrite({ version: 1, applicationName: 'Archive' })).toEqual({ version: 1, applicationName: 'Archive' });
+    expect(parseApplicationSettingsWrite({ version: 1, backupMaxBytes: null })).toEqual({ version: 1, backupMaxBytes: null });
+    expect(() => parseApplicationSettingsWrite({ version: 1, backupMaxBytes: 10 })).toThrow();
+    expect(() => parseApplicationSettingsWrite({ version: 1, backupMaxUncompressedBytes: 600 * 1024 * 1024 })).toThrow();
+    expect(() => parseApplicationSettingsWrite({ version: 1, applicationName: null })).toThrow();
+    expect(() => parseApplicationSettingsWrite({ applicationName: 'Archive' })).toThrow();
   });
 
   it('rejects executable MDX and raw HTML while accepting Markdown', () => {

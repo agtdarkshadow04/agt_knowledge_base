@@ -83,7 +83,7 @@ img { max-width: 100%; }
 .icon-link svg, .icon-button svg, .button svg { width: 1rem; height: 1rem; flex: 0 0 auto; }
 .icon-button .settings-icon { width: 1.5rem; height: 1.5rem; }
 .identity-badge { display: inline-flex; max-width: 13rem; align-items: center; gap: 0.35rem; overflow: hidden; padding: 0.38rem 0.65rem; border: 1px solid #74706b; border-radius: 0.45rem; color: #d7d2cb; background: rgba(116, 112, 107, 0.1); font-family: ui-monospace, monospace; font-size: 0.66rem; letter-spacing: 0.06em; text-overflow: ellipsis; white-space: nowrap; }
-.identity-badge.admin { border-color: var(--gold); color: var(--gold); background: rgba(255, 180, 81, 0.08); }
+.identity-badge.moderator, .identity-badge.admin { border-color: var(--gold); color: var(--gold); background: rgba(255, 180, 81, 0.08); }
 .identity-badge svg { width: 0.8rem; }
 
 .main-content { flex: 1; }
@@ -388,6 +388,15 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .tag-management-page .settings-dialog.embedded { width: 100%; max-height: none; overflow: visible; }
 .tag-management-page .settings-header { position: static; }
 .settings-admin-panel { width: min(100%, 46rem); }
+.inline-notice { margin: 1rem 0; padding: 0.8rem 1rem; border: 1px solid rgba(255, 180, 81, 0.35); border-radius: 0.55rem; color: #f5e3c8; background: rgba(255, 180, 81, 0.08); font-size: 0.8rem; line-height: 1.45; }
+.admin-identity { display: inline-flex; align-items: center; gap: 0.5rem; }
+.admin-panel h3 { margin: 1.25rem 0 0.5rem; color: var(--white); font-size: 1rem; }
+.setting-source { display: block; margin-top: 0.3rem; }
+.config-diff { max-height: 22rem; overflow: auto; margin: 0.75rem 0; padding: 0.75rem; border: 1px solid rgba(255, 180, 81, 0.12); border-radius: 0.5rem; background: #0d0d0d; font-size: 0.75rem; line-height: 1.5; white-space: pre; }
+.diff-added { color: #8cf58c; }
+.diff-removed { color: #ff9c99; }
+.diff-same { color: var(--muted); }
+.tags-page { display: grid; gap: 1.5rem; }
 .public-browsing-disabled { display: grid; justify-items: start; gap: 0.8rem; }
 .public-browsing-disabled p { margin: 0; }
 

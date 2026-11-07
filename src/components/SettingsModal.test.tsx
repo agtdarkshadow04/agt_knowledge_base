@@ -24,8 +24,8 @@ describe('SettingsModal', () => {
   });
 
   it.each([
-    ['Standard', 'Standard'],
-    ['Admin', 'Administrator'],
+    ['Editor', 'Editor'],
+    ['Moderator', 'Moderator'],
   ] as const)('shows the %s group as %s', (role, accountType) => {
     render(
       <SettingsModal
@@ -47,7 +47,7 @@ describe('SettingsModal', () => {
           username: 'traveller',
           displayName: 'Traveller',
           email: 'traveller@example.com',
-          role: 'Admin',
+          role: 'Moderator',
         }}
         onClose={() => undefined}
       />,
@@ -55,7 +55,7 @@ describe('SettingsModal', () => {
 
     expect(screen.getByText('traveller')).toBeInTheDocument();
     expect(screen.getByText('traveller@example.com')).toBeInTheDocument();
-    expect(screen.getByText('Administrator')).toBeInTheDocument();
+    expect(screen.getByText('Moderator')).toBeInTheDocument();
 
     expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual([
       'Account',

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArticleHistoryPage } from './ArticleHistoryPage';
 
 const mocks = vi.hoisted(() => ({
-  user: { sub: 'author', username: 'apollo', displayName: 'Apollo', role: 'Standard' as 'Admin' | 'Standard' },
+  user: { sub: 'author', username: 'apollo', displayName: 'Apollo', role: 'Editor' as 'Moderator' | 'Editor' },
   getToken: vi.fn(async () => 'token'),
   listArticleRevisions: vi.fn(),
   restoreArticleRevision: vi.fn(),
@@ -63,7 +63,7 @@ function renderHistory() {
 
 describe('ArticleHistoryPage', () => {
   beforeEach(() => {
-    mocks.user.role = 'Standard';
+    mocks.user.role = 'Editor';
     mocks.listArticleRevisions.mockReset();
     mocks.listArticleRevisions.mockResolvedValue(revisions);
     mocks.restoreArticleRevision.mockReset();
@@ -71,7 +71,7 @@ describe('ArticleHistoryPage', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
-  it('labels and compares the latest and previous revisions for Standard users', async () => {
+  it('labels and compares the latest and previous revisions for Editors', async () => {
     renderHistory();
     expect(await screen.findByRole('heading', { name: 'Revision history' })).toBeInTheDocument();
     expect(screen.getAllByText('Version 2 · Latest').length).toBeGreaterThan(0);
@@ -86,8 +86,8 @@ describe('ArticleHistoryPage', () => {
     expect(screen.queryByRole('button', { name: /Restore version/i })).not.toBeInTheDocument();
   });
 
-  it('allows an Administrator to restore the selected revision as a new latest copy', async () => {
-    mocks.user.role = 'Admin';
+  it('allows a Moderator to restore the selected revision as a new latest copy', async () => {
+    mocks.user.role = 'Moderator';
     const user = userEvent.setup();
     renderHistory();
     await user.click(await screen.findByRole('button', { name: 'Restore version 1' }));

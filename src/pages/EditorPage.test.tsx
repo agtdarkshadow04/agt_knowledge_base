@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
-    user: { sub: 'author', username: 'apollo', displayName: 'Apollo', role: 'Standard' },
+    user: { sub: 'author', username: 'apollo', displayName: 'Apollo', role: 'Editor' },
     getToken: mocks.getToken,
   }),
 }));
@@ -61,7 +61,7 @@ describe('EditorPage', () => {
     mocks.updateArticle.mockResolvedValue({ id: 'article-1', title: 'Updated Portal Guide', tags: [portalTag], content: '# Portal Guide\n\nUpdated instructions.', visibility: 'Internal', version: 2 });
   });
 
-  it('offers Standard users the permitted AGT-standard visibility levels', () => {
+  it('offers Editors the permitted AGT-standard visibility levels', () => {
     renderEditor();
 
     expect(screen.getByRole('option', { name: 'Private' })).toHaveValue('1');

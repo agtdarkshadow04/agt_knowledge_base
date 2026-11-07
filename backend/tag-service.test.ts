@@ -4,8 +4,8 @@ import { ForbiddenError, TagNotFoundError, type Actor, type CanonicalTag, type T
 import type { TagRepository } from './repository.js';
 import { TagService } from './tag-service.js';
 
-const admin: Actor = { sub: 'admin-sub', displayName: 'Atlas', role: 'Admin' };
-const standard: Actor = { sub: 'standard-sub', displayName: 'Apollo', role: 'Standard' };
+const moderator: Actor = { sub: 'moderator-sub', displayName: 'Atlas', role: 'Moderator' };
+const editor: Actor = { sub: 'editor-sub', displayName: 'Apollo', role: 'Editor' };
 
 class MemoryTagRepository implements TagRepository {
   tags: CanonicalTag[] = [
@@ -47,39 +47,39 @@ class MemoryTagRepository implements TagRepository {
 }
 
 describe('TagService authorization', () => {
-  it('allows everyone to search the catalog but reserves orphan inspection for Administrators', async () => {
+  it('allows everyone to search the catalog but reserves orphan inspection for Moderators', async () => {
     const service = new TagService(new MemoryTagRepository());
 
     await expect(service.list('port')).resolves.toEqual([
       expect.objectContaining({ name: 'Portal', color: '#B5C3B7' }),
     ]);
-    expect(() => service.listOrphans(standard)).toThrow(ForbiddenError);
-    await expect(service.listOrphans(admin)).resolves.toEqual([
+    expect(() => service.listOrphans(editor)).toThrow(ForbiddenError);
+    await expect(service.listOrphans(moderator)).resolves.toEqual([
       expect.objectContaining({ articleTitle: 'Portal Guide', version: 3 }),
     ]);
   });
 
-  it('allows only Administrators to create, update, and delete tags', async () => {
+  it('allows only Moderators to create, update, and delete tags', async () => {
     const repository = new MemoryTagRepository();
     const service = new TagService(repository);
 
-    expect(() => service.create({ name: 'Galaxy', color: '#ABCDEF' }, standard)).toThrow(ForbiddenError);
-    await expect(service.update(repository.tags[0].id, { name: 'Gateway', color: '#ABCDEF' }, standard)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(service.delete(repository.tags[0].id, standard)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(() => service.create({ name: 'Galaxy', color: '#ABCDEF' }, editor)).toThrow(ForbiddenError);
+    await expect(service.update(repository.tags[0].id, { name: 'Gateway', color: '#ABCDEF' }, editor)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.delete(repository.tags[0].id, editor)).rejects.toBeInstanceOf(ForbiddenError);
 
-    const created = await service.create({ name: 'Galaxy', color: '#ABCDEF' }, admin);
-    await expect(service.update(created.id, { name: 'Galaxies', color: '#FEDCBA' }, admin)).resolves.toMatchObject({
+    const created = await service.create({ name: 'Galaxy', color: '#ABCDEF' }, moderator);
+    await expect(service.update(created.id, { name: 'Galaxies', color: '#FEDCBA' }, moderator)).resolves.toMatchObject({
       name: 'Galaxies',
       color: '#FEDCBA',
     });
-    await expect(service.delete(created.id, admin)).resolves.toBeUndefined();
+    await expect(service.delete(created.id, moderator)).resolves.toBeUndefined();
   });
 
   it('reports missing tags consistently for update and delete', async () => {
     const service = new TagService(new MemoryTagRepository());
     const missing = '10000000-0000-4000-8000-000000000099';
 
-    await expect(service.update(missing, { name: 'Missing', color: '#ABCDEF' }, admin)).rejects.toBeInstanceOf(TagNotFoundError);
-    await expect(service.delete(missing, admin)).rejects.toBeInstanceOf(TagNotFoundError);
+    await expect(service.update(missing, { name: 'Missing', color: '#ABCDEF' }, moderator)).rejects.toBeInstanceOf(TagNotFoundError);
+    await expect(service.delete(missing, moderator)).rejects.toBeInstanceOf(TagNotFoundError);
   });
 });

@@ -1,14 +1,26 @@
-export type Role = 'Admin' | 'Standard';
+/** Member roles. The installation Admin is not a member and has no role. */
+export const roles = ['Editor', 'Moderator'] as const;
+export type Role = typeof roles[number];
+/**
+ * Who is reading articles: a member role, an anonymous visitor (null), or the
+ * internal system viewer the admin panel uses for inventory and statistics.
+ */
+export type Viewer = Role | 'System' | null;
 export type LegacyArticleVisibility = 'Public' | 'Internal' | 'Admin';
 export type AgtArticleVisibility = 0 | 1 | 2 | 3 | 4 | 5;
 export type ArticleVisibility = LegacyArticleVisibility | AgtArticleVisibility;
 export type ArticleVisibilityFilter = 'all' | 'public' | 'internal' | 'admin' | `${AgtArticleVisibility}`;
 
-export function canViewArticleVisibility(role: Role | null, visibility: ArticleVisibility) {
-  return role === 'Admin'
+/**
+ * Moderators (and the system viewer) see every level, including legacy
+ * `Admin`, which now means Moderator-only. Editors also see Internal and 1.
+ */
+export function canViewArticleVisibility(viewer: Viewer, visibility: ArticleVisibility) {
+  return viewer === 'Moderator'
+    || viewer === 'System'
     || visibility === 'Public'
     || visibility === 0
-    || (role === 'Standard' && (visibility === 'Internal' || visibility === 1));
+    || (viewer === 'Editor' && (visibility === 'Internal' || visibility === 1));
 }
 
 export function canAssignArticleVisibility(role: Role, visibility: ArticleVisibility) {
@@ -30,17 +42,23 @@ export interface LocalUserRecord {
   email?: string;
   role: Role;
   isActive: boolean;
-  isSuperAdmin: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
+/** The effective settings every visitor receives from `GET /settings`. */
 export interface ApplicationSettings {
   applicationName: string;
   applicationSubtitle: string;
   defaultVisibility: ArticleVisibility;
   allowPublicBrowsing: boolean;
   version: number;
+}
+
+export interface BackupLimits {
+  backupMaxBytes: number;
+  backupMaxEntries: number;
+  backupMaxUncompressedBytes: number;
 }
 
 export interface AdminStats {
@@ -61,7 +79,6 @@ export interface Actor {
   displayName: string;
   email?: string;
   role: Role;
-  isSuperAdmin?: boolean;
 }
 
 export interface CanonicalTag {

@@ -1,25 +1,24 @@
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { RequireAuth } from './auth/RequireAuth';
-import { RequireAdmin } from './auth/RequireAdmin';
-import { SetupGate } from './auth/SetupGate';
+import { RequireModerator } from './auth/RequireModerator';
 import { Layout } from './components/Layout';
 import { ArticlePage } from './pages/ArticlePage';
 import { ArticleHistoryPage } from './pages/ArticleHistoryPage';
 import { EditorPage } from './pages/EditorPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
-import { AdminPage } from './pages/AdminPage';
 import { NotFoundPage } from './pages/NotFoundPage';
-import { SetupPage } from './pages/SetupPage';
+import { TagsPage } from './pages/TagsPage';
 
+// The admin panel is a separate entry (admin.html) served at /admin; it is
+// deliberately not part of this router or bundle.
 const router = createBrowserRouter([
   {
-    element: <SetupGate><Layout /></SetupGate>,
+    element: <Layout />,
     children: [
       { index: true, element: <HomePage /> },
       { path: 'login', element: <LoginPage /> },
-      { path: 'setup', element: <SetupPage /> },
-      { path: 'admin', element: <RequireAdmin><AdminPage /></RequireAdmin> },
+      { path: 'tags', element: <RequireModerator><TagsPage /></RequireModerator> },
       { path: 'articles/:id', element: <ArticlePage /> },
       { path: 'articles/:id/history', element: <RequireAuth><ArticleHistoryPage /></RequireAuth> },
       { path: 'articles/new', element: <RequireAuth><EditorPage /></RequireAuth> },

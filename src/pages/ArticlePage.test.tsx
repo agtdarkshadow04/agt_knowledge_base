@@ -9,7 +9,7 @@ import { ArticlePage } from './ArticlePage';
 const mocks = vi.hoisted(() => {
   const pdfWorker = { set: vi.fn(), from: vi.fn(), save: vi.fn() };
   return {
-    user: { sub: 'admin', username: 'atlas', displayName: 'Atlas', role: 'Admin' } as SessionUser | null,
+    user: { sub: 'admin', username: 'atlas', displayName: 'Atlas', role: 'Moderator' } as SessionUser | null,
     getToken: vi.fn(async () => 'token'),
     getArticle: vi.fn(),
     setArticlePinned: vi.fn(),
@@ -60,7 +60,7 @@ const article: Article = {
 describe('ArticlePage', () => {
   beforeEach(() => {
     localStorage.clear();
-    mocks.user = { sub: 'admin', username: 'atlas', displayName: 'Atlas', role: 'Admin' };
+    mocks.user = { sub: 'admin', username: 'atlas', displayName: 'Atlas', role: 'Moderator' };
     mocks.getArticle.mockReset();
     mocks.getArticle.mockResolvedValue(article);
     mocks.setArticlePinned.mockReset();
@@ -77,8 +77,8 @@ describe('ArticlePage', () => {
     mocks.pdfWorker.save.mockResolvedValue(undefined);
   });
 
-  it('hides Markdown and PDF downloads by default for Standard users', async () => {
-    mocks.user = { sub: 'standard', username: 'apollo', displayName: 'Apollo', role: 'Standard' };
+  it('hides Markdown and PDF downloads by default for Editors', async () => {
+    mocks.user = { sub: 'standard', username: 'apollo', displayName: 'Apollo', role: 'Editor' };
     const router = createMemoryRouter(
       [{ path: '/articles/:id', element: <ArticlePage /> }],
       { initialEntries: [`/articles/${article.id}`] },
@@ -90,9 +90,9 @@ describe('ArticlePage', () => {
     expect(screen.queryByRole('button', { name: 'Download PDF' })).not.toBeInTheDocument();
   });
 
-  it('offers Markdown and PDF downloads to Standard users when enabled', async () => {
+  it('offers Markdown and PDF downloads to Editors when enabled', async () => {
     localStorage.setItem('agt-allow-downloads', 'true');
-    mocks.user = { sub: 'standard', username: 'apollo', displayName: 'Apollo', role: 'Standard' };
+    mocks.user = { sub: 'standard', username: 'apollo', displayName: 'Apollo', role: 'Editor' };
     const router = createMemoryRouter(
       [{ path: '/articles/:id', element: <ArticlePage /> }],
       { initialEntries: [`/articles/${article.id}`] },
@@ -198,7 +198,7 @@ describe('ArticlePage', () => {
     await screen.findByRole('button', { name: 'Download PDF' });
   });
 
-  it('allows an Administrator to pin an article', async () => {
+  it('allows a Moderator to pin an article', async () => {
     const router = createMemoryRouter(
       [{ path: '/articles/:id', element: <ArticlePage /> }],
       { initialEntries: [`/articles/${article.id}`] },
@@ -214,7 +214,7 @@ describe('ArticlePage', () => {
     expect(await screen.findByRole('button', { name: 'Unpin' })).toBeInTheDocument();
   });
 
-  it('allows an Administrator to verify an article', async () => {
+  it('allows a Moderator to verify an article', async () => {
     const router = createMemoryRouter(
       [{ path: '/articles/:id', element: <ArticlePage /> }],
       { initialEntries: [`/articles/${article.id}`] },

@@ -177,14 +177,14 @@ export function ManageTagsModal({ onClose, embedded = false }: { onClose(): void
     }
   }
 
-  if (user?.role !== 'Admin') return null;
+  if (user?.role !== 'Moderator') return null;
 
   return (
     <div className={embedded ? 'tag-management-page' : 'modal-backdrop'} onMouseDown={(event) => !embedded && event.target === event.currentTarget && onClose()}>
       <section ref={dialog} className={`settings-dialog tag-management-dialog${embedded ? ' embedded' : ''}`} role={embedded ? 'region' : 'dialog'} aria-modal={embedded ? undefined : true} aria-labelledby={titleId}>
         <header className="settings-header">
           <div>
-            <p className="eyebrow">Administrator tools</p>
+            <p className="eyebrow">Moderator tools</p>
             <h2 id={titleId}>Manage Tags</h2>
           </div>
           {!embedded && (
@@ -251,7 +251,7 @@ export function ManageTagsModal({ onClose, embedded = false }: { onClose(): void
 
         <section className="settings-section" aria-labelledby={`${titleId}-orphans`}>
           <h3 id={`${titleId}-orphans`}>Orphaned references</h3>
-          <p className="field-help">Missing tag IDs stay hidden on articles until an Administrator explicitly removes them.</p>
+          <p className="field-help">Missing tag IDs stay hidden on articles until a Moderator explicitly removes them.</p>
           {!loading && orphans.length === 0 && <p className="tag-catalog-empty">No current articles contain missing tag IDs.</p>}
           <ul className="orphan-list">
             {orphans.flatMap((orphan) => orphan.missingTagIds.map((tagId) => (

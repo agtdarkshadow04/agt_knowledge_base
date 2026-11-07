@@ -5,24 +5,21 @@ import type { SessionUser } from '../types';
 import { AuthProvider, useAuth } from './AuthContext';
 
 const mocks = vi.hoisted(() => ({
-  getSetupStatus: vi.fn(),
   getLocalSession: vi.fn(),
   createLocalSession: vi.fn(),
-  createInitialAdmin: vi.fn(),
 }));
 
 vi.mock('../services/api', () => mocks);
 
 const tokenKey = 'agt-local-auth-token';
-const traveller: SessionUser = { sub: 'user-1', username: 'traveller', displayName: 'Traveller', role: 'Standard' };
+const traveller: SessionUser = { sub: 'user-1', username: 'traveller', displayName: 'Traveller', role: 'Editor' };
 
 function Probe() {
-  const { user, loading, setupRequired, signIn, signOut, getToken } = useAuth();
+  const { user, loading, signIn, signOut, getToken } = useAuth();
   return (
     <div>
       <p>{loading ? 'loading' : 'ready'}</p>
       <p>user:{user?.username ?? 'none'}</p>
-      <p>setup:{String(setupRequired)}</p>
       <button type="button" onClick={() => void signIn('traveller', 'Correct-Horse-9')}>sign in</button>
       <button type="button" onClick={() => void signOut()}>sign out</button>
       <button type="button" onClick={() => void getToken().catch((error: Error) => { document.title = error.message; })}>token</button>
@@ -39,7 +36,6 @@ describe('AuthProvider', () => {
     localStorage.clear();
     document.title = '';
     Object.values(mocks).forEach((mock) => mock.mockReset());
-    mocks.getSetupStatus.mockResolvedValue({ required: false });
   });
 
   it('restores the session from a stored token', async () => {
@@ -59,16 +55,6 @@ describe('AuthProvider', () => {
     expect(await screen.findByText('ready')).toBeInTheDocument();
     expect(screen.getByText('user:none')).toBeInTheDocument();
     expect(localStorage.getItem(tokenKey)).toBeNull();
-  });
-
-  it('clears any stored token while first-run setup is required', async () => {
-    localStorage.setItem(tokenKey, 'old-token');
-    mocks.getSetupStatus.mockResolvedValue({ required: true });
-    renderProvider();
-
-    expect(await screen.findByText('setup:true')).toBeInTheDocument();
-    expect(localStorage.getItem(tokenKey)).toBeNull();
-    expect(mocks.getLocalSession).not.toHaveBeenCalled();
   });
 
   it('stores the token on sign-in and removes it on sign-out', async () => {

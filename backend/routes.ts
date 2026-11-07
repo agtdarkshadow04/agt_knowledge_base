@@ -1,75 +1,100 @@
 import type { Actor } from './domain.js';
 
+export interface AdminIdentity {
+  username: string;
+}
+
 export interface ApiRequest {
   routeKey: string;
   pathParameters: Record<string, string>;
   query: Record<string, string>;
+  /** The UTF-8 request body, for JSON routes. */
   body?: string;
-  /** The signed-in user, or null on public routes and anonymous requests. */
+  /** The raw request body, for routes declared with `rawBody` (backup uploads). */
+  rawBody?: Buffer;
+  /** The signed-in member, or null on public and admin routes and anonymous requests. */
   actor: Actor | null;
+  /** The signed-in installation Admin; set only on admin routes. */
+  admin?: AdminIdentity | null;
   requestId: string;
 }
 
 export interface ApiResponse {
   statusCode: number;
   headers: Record<string, string>;
-  body?: string;
+  body?: string | Buffer;
 }
+
+/**
+ * - `none`: no credentials are checked (public reads, member sign-in, Admin setup and sign-in).
+ * - `member`: a member bearer token is required; admin cookies are ignored.
+ * - `admin`: an Admin session cookie is required; bearer tokens are ignored.
+ */
+export type RouteAuth = 'none' | 'member' | 'admin';
+export type RateLimitName = 'login' | 'adminLogin' | 'setup' | 'adminPassword';
 
 interface RouteDefinition {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
-  /** Whether the server must verify a bearer token before dispatching. */
-  authenticated: boolean;
-  /** Largest accepted request body in bytes; defaults to `defaultMaxBodyBytes`. */
-  maxBodyBytes?: number;
+  auth: RouteAuth;
+  /** Largest accepted body in bytes, or `backup` for the effective `backup.maxBytes`. */
+  maxBodyBytes?: number | 'backup';
+  /** Pass the body to the handler as a Buffer instead of a string. */
+  rawBody?: boolean;
+  /** Rate limit applied before authentication and body parsing. */
+  rateLimit?: RateLimitName;
 }
 
 export const defaultMaxBodyBytes = 1_000_000;
-/** Keep in step with `client_max_body_size` for `/api/admin/backup` in nginx.conf. */
-export const backupMaxBodyBytes = 100 * 1024 * 1024;
 
 // The single list of API routes. Literal paths are listed before parameterized
 // paths that could otherwise match them.
 const routes: RouteDefinition[] = [
-  { method: 'POST', path: '/auth/login', authenticated: false },
-  { method: 'GET', path: '/auth/session', authenticated: true },
-  { method: 'GET', path: '/setup/status', authenticated: false },
-  { method: 'POST', path: '/setup', authenticated: false },
-  { method: 'GET', path: '/settings', authenticated: false },
+  { method: 'POST', path: '/auth/login', auth: 'none', rateLimit: 'login' },
+  { method: 'GET', path: '/auth/session', auth: 'member' },
+  { method: 'GET', path: '/settings', auth: 'none' },
 
-  { method: 'GET', path: '/articles', authenticated: false },
-  { method: 'POST', path: '/articles', authenticated: true },
-  { method: 'GET', path: '/articles/{id}', authenticated: false },
-  { method: 'PUT', path: '/articles/{id}', authenticated: true },
-  { method: 'DELETE', path: '/articles/{id}', authenticated: true },
-  { method: 'GET', path: '/articles/{id}/revisions', authenticated: true },
-  { method: 'POST', path: '/articles/{id}/revisions/{version}/restore', authenticated: true },
-  { method: 'PATCH', path: '/articles/{id}/protection', authenticated: true },
-  { method: 'PATCH', path: '/articles/{id}/pinning', authenticated: true },
-  { method: 'PATCH', path: '/articles/{id}/verification', authenticated: true },
-  { method: 'DELETE', path: '/articles/{id}/orphan-tags/{tagId}', authenticated: true },
+  { method: 'GET', path: '/articles', auth: 'none' },
+  { method: 'POST', path: '/articles', auth: 'member' },
+  { method: 'GET', path: '/articles/{id}', auth: 'none' },
+  { method: 'PUT', path: '/articles/{id}', auth: 'member' },
+  { method: 'DELETE', path: '/articles/{id}', auth: 'member' },
+  { method: 'GET', path: '/articles/{id}/revisions', auth: 'member' },
+  { method: 'POST', path: '/articles/{id}/revisions/{version}/restore', auth: 'member' },
+  { method: 'PATCH', path: '/articles/{id}/protection', auth: 'member' },
+  { method: 'PATCH', path: '/articles/{id}/pinning', auth: 'member' },
+  { method: 'PATCH', path: '/articles/{id}/verification', auth: 'member' },
+  { method: 'DELETE', path: '/articles/{id}/orphan-tags/{tagId}', auth: 'member' },
 
-  { method: 'GET', path: '/tags', authenticated: false },
-  { method: 'POST', path: '/tags', authenticated: true },
-  { method: 'GET', path: '/tags/orphans', authenticated: true },
-  { method: 'PUT', path: '/tags/{tagId}', authenticated: true },
-  { method: 'DELETE', path: '/tags/{tagId}', authenticated: true },
+  { method: 'GET', path: '/tags', auth: 'none' },
+  { method: 'POST', path: '/tags', auth: 'member' },
+  { method: 'GET', path: '/tags/orphans', auth: 'member' },
+  { method: 'PUT', path: '/tags/{tagId}', auth: 'member' },
+  { method: 'DELETE', path: '/tags/{tagId}', auth: 'member' },
 
-  { method: 'GET', path: '/member/articles', authenticated: true },
-  { method: 'GET', path: '/member/articles/{id}', authenticated: true },
-  { method: 'GET', path: '/member/tags', authenticated: true },
+  { method: 'GET', path: '/member/articles', auth: 'member' },
+  { method: 'GET', path: '/member/articles/{id}', auth: 'member' },
+  { method: 'GET', path: '/member/tags', auth: 'member' },
 
-  { method: 'GET', path: '/admin/users', authenticated: true },
-  { method: 'POST', path: '/admin/users', authenticated: true },
-  { method: 'PUT', path: '/admin/users/{userId}', authenticated: true },
-  { method: 'PUT', path: '/admin/users/{userId}/password', authenticated: true },
-  { method: 'DELETE', path: '/admin/users/{userId}', authenticated: true },
-  { method: 'GET', path: '/admin/stats', authenticated: true },
-  { method: 'GET', path: '/admin/articles', authenticated: true },
-  { method: 'PUT', path: '/admin/settings', authenticated: true },
-  { method: 'GET', path: '/admin/backup', authenticated: true },
-  { method: 'POST', path: '/admin/backup/restore', authenticated: true, maxBodyBytes: backupMaxBodyBytes },
+  // Admin setup and authentication, served by the HTTP server itself.
+  { method: 'GET', path: '/admin/setup/status', auth: 'none' },
+  { method: 'POST', path: '/admin/setup', auth: 'none', rateLimit: 'setup' },
+  { method: 'POST', path: '/admin/auth/login', auth: 'none', rateLimit: 'adminLogin' },
+  { method: 'POST', path: '/admin/auth/logout', auth: 'admin' },
+  { method: 'GET', path: '/admin/auth/session', auth: 'admin' },
+  { method: 'PUT', path: '/admin/auth/password', auth: 'admin', rateLimit: 'adminPassword' },
+
+  { method: 'GET', path: '/admin/users', auth: 'admin' },
+  { method: 'POST', path: '/admin/users', auth: 'admin' },
+  { method: 'PUT', path: '/admin/users/{userId}', auth: 'admin' },
+  { method: 'PUT', path: '/admin/users/{userId}/password', auth: 'admin' },
+  { method: 'DELETE', path: '/admin/users/{userId}', auth: 'admin' },
+  { method: 'GET', path: '/admin/stats', auth: 'admin' },
+  { method: 'GET', path: '/admin/articles', auth: 'admin' },
+  { method: 'GET', path: '/admin/settings', auth: 'admin' },
+  { method: 'PUT', path: '/admin/settings', auth: 'admin' },
+  { method: 'GET', path: '/admin/backup', auth: 'admin' },
+  { method: 'POST', path: '/admin/backup/restore', auth: 'admin', maxBodyBytes: 'backup', rawBody: true },
 ];
 
 const compiled = routes.map((route) => {
@@ -84,17 +109,36 @@ const compiled = routes.map((route) => {
 /** Every declared route key, e.g. `GET /articles/{id}`. */
 export const routeKeys: readonly string[] = compiled.map((route) => route.routeKey);
 
-const bodyLimits = new Map(compiled.map((route) => [route.routeKey, route.maxBodyBytes ?? defaultMaxBodyBytes]));
+const byKey = new Map(compiled.map((route) => [route.routeKey, route]));
 
-/** The largest request body accepted for a route key. */
-export function maxBodyBytes(routeKey: string) {
-  return bodyLimits.get(routeKey) ?? defaultMaxBodyBytes;
+/** Whether a path belongs to the admin API, which uses cookie sessions and CSRF headers. */
+export function isAdminPath(pathname: string) {
+  return pathname === '/admin' || pathname.startsWith('/admin/');
+}
+
+/**
+ * The largest request body accepted for a route key. The restore route takes
+ * the effective `backup.maxBytes` setting, which the caller resolves.
+ */
+export function maxBodyBytes(routeKey: string, backupMaxBytes?: number) {
+  const limit = byKey.get(routeKey)?.maxBodyBytes;
+  if (limit === 'backup') {
+    if (backupMaxBytes === undefined) throw new Error(`${routeKey} needs the effective backup.maxBytes setting.`);
+    return backupMaxBytes;
+  }
+  return limit ?? defaultMaxBodyBytes;
+}
+
+export function usesBackupBodyLimit(routeKey: string) {
+  return byKey.get(routeKey)?.maxBodyBytes === 'backup';
 }
 
 export interface RouteMatch {
   routeKey: string;
   pathParameters: Record<string, string>;
-  authenticated: boolean;
+  auth: RouteAuth;
+  rawBody: boolean;
+  rateLimit?: RateLimitName;
 }
 
 export function matchRoute(method: string, pathname: string): RouteMatch | null {
@@ -103,7 +147,13 @@ export function matchRoute(method: string, pathname: string): RouteMatch | null 
     const match = route.pattern.exec(pathname);
     if (!match) continue;
     const pathParameters = Object.fromEntries(route.names.map((name, index) => [name, match[index + 1]]));
-    return { routeKey: route.routeKey, pathParameters, authenticated: route.authenticated };
+    return {
+      routeKey: route.routeKey,
+      pathParameters,
+      auth: route.auth,
+      rawBody: route.rawBody ?? false,
+      ...(route.rateLimit ? { rateLimit: route.rateLimit } : {}),
+    };
   }
   return null;
 }
