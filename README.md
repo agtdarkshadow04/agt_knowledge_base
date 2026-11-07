@@ -288,6 +288,10 @@ A documented procedure for moving data from an AWS deployment is planned. In out
 
 References: [Install Docker Engine](https://docs.docker.com/engine/install/) and [install Docker Compose](https://docs.docker.com/compose/install/).
 
+## API
+
+The API is documented in [`docs/API.md`](docs/API.md), which covers member and Admin authentication, the CSRF header, optimistic concurrency, roles and visibility, pagination, error codes, and limits, with `curl` examples. Per-route detail is in the hand-written OpenAPI 3.1 descriptions [`docs/openapi.yaml`](docs/openapi.yaml) (public and member routes) and [`docs/openapi-admin.yaml`](docs/openapi-admin.yaml) (Admin routes). The member app renders the first at `/api-docs` (linked from the footer, readable without signing in), and the admin panel renders the second in its **API** tab. `backend/openapi.test.ts` fails if the spec and the route table in `backend/routes.ts` disagree.
+
 ## Checks
 
 ```bash
@@ -323,6 +327,7 @@ src/              React member UI, authentication session, safe Markdown, editor
 src/admin/        Admin panel (separate entry: admin.html)
 backend/          HTTP server, route table, domain services, authorization, PostgreSQL adapter
 migrations/       Reviewable SQL schema
+docs/             API guide (API.md) and OpenAPI descriptions
 scripts/          migration and local-user recovery
 .github/          CI workflow
 ```

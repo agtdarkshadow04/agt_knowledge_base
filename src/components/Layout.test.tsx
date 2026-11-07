@@ -52,6 +52,11 @@ describe('Layout settings', () => {
     }
   });
 
+  it('links to the API reference from the footer for everyone', () => {
+    renderLayout();
+    expect(screen.getByRole('link', { name: 'API reference' })).toHaveAttribute('href', '/api-docs');
+  });
+
   it('shows the Tags link and Moderator badge only to Moderators', () => {
     mocks.user = { sub: 'moderator', username: 'atlas', displayName: 'Atlas', role: 'Moderator' };
     renderLayout();

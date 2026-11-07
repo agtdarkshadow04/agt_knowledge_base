@@ -19,7 +19,8 @@ The former AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) h
 
 ```text
 src/              Member React UI (index.html → src/main.tsx): pages/, components/, auth/,
-                  settings/, services/api.ts (member API client)
+                  settings/, services/api.ts (member API client),
+                  components/api-docs/ (OpenAPI renderer shared by both bundles)
 src/admin/        Admin panel, a separate Vite entry (admin.html → src/admin/main.tsx):
                   AdminApp (setup/login/dashboard), *Panel.tsx tabs, api.ts (admin client).
                   The member bundle must never import from src/admin/.
@@ -37,6 +38,8 @@ backend/          API: routes.ts (route table + ApiRequest/ApiResponse types),
                   validation.ts (Zod request parsing), repository.ts (interfaces),
                   postgres-article-repository.ts (SQL), migrations.ts + migrations-runner.ts
 migrations/       Reviewable SQL copies of each migration
+docs/             API.md (API guide), openapi.yaml (public/member routes),
+                  openapi-admin.yaml (/admin/* routes), rendered at /api-docs and the admin API tab
 scripts/          migrate, member-account recovery CLI
 config.example.yaml  Every config.yaml key with its default
 .github/          CI workflow
@@ -87,7 +90,8 @@ Before finishing, run lint, typecheck, and the relevant tests; run the full suit
 1. `backend/routes.ts` — add the route to the table with `auth: 'member'` (bearer token), `auth: 'admin'` (Admin cookie session; path must start with `/admin/`), or `auth: 'none'` for public reads. Every non-GET `/admin/*` request must carry `x-agt-request: 1`; `server.ts` enforces this. Add `rateLimit` for credential-checking routes.
 2. Member/public routes: add the `case` to `backend/handler.ts`, enforcing roles with `requireActor` and the services' role checks. Admin routes: add it to `backend/admin-handler.ts`, which never reads `request.actor`. `backend/routes.test.ts` fails if the table and the switches disagree. The exceptions are the member and Admin sign-in, session, setup, logout, and password routes, which `server.ts` serves itself; they are listed in `serverRoutes` in `backend/routes.test.ts`, so a new server-served route must be added there too.
 3. Frontend client: `src/services/api.ts` and `src/types.ts` for member routes; `src/admin/api.ts` and `src/admin/types.ts` for admin routes.
-4. Tests: `backend/handler.test.ts` / `backend/admin-handler.test.ts` for authorization behavior, `backend/server.test.ts` for session separation and CSRF, and `backend/routes.test.ts` if the route is public.
+4. API docs: document the operation in `docs/openapi.yaml` (public and member routes) or `docs/openapi-admin.yaml` (`/admin/*`), with its security, parameters, request body constraints from `validation.ts`, responses, and `x-error-codes`; mark Moderator-only operations with `x-required-role: Moderator`. Update `docs/API.md` if the change affects concepts it covers, and add any new error code to its table. `backend/openapi.test.ts` fails if routes, auth modes, rate limits, or error codes and the docs disagree.
+5. Tests: `backend/handler.test.ts` / `backend/admin-handler.test.ts` for authorization behavior, `backend/server.test.ts` for session separation and CSRF, and `backend/routes.test.ts` if the route is public.
 
 **Adding a database migration:**
 

@@ -18,8 +18,9 @@ function adminEntry(): Plugin {
 
 // The API is proxied under /api so the browser sees one origin, as behind
 // Nginx: the Admin session cookie is scoped to /api/admin and same-origin only.
+// The key ends in a slash so app pages such as /api-docs are not proxied.
 const apiProxy = {
-  '/api': {
+  '/api/': {
     target: 'http://localhost:3001',
     rewrite: (path: string) => path.replace(/^\/api/, ''),
   },

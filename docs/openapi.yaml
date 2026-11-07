@@ -1,0 +1,1029 @@
+openapi: 3.1.0
+info:
+  title: AGT Knowledge Base API
+  version: 1.0.0
+  summary: Public and member routes of the AGT Knowledge Base.
+  description: |
+    Public reads and member routes of the AGT Knowledge Base API. The Admin
+    routes (`/admin/*`) are described separately in `openapi-admin.yaml`.
+
+    Requests and responses are JSON (`application/json; charset=utf-8`).
+    Every error response has the body `{ code, message }`, plus `issues` for
+    `VALIDATION_ERROR`. See `docs/API.md` for authentication, concurrency,
+    visibility, and the full list of error codes.
+
+    Request bodies are strict: unknown fields are rejected with
+    `400 VALIDATION_ERROR`, and server-owned fields (`createdAt`, `createdBy`,
+    `modifiedAt`, `modifiedBy`, pinning, protection, verification) are never
+    accepted.
+servers:
+  - url: /api
+    description: Behind Nginx, and through the Vite proxy in development.
+security: []
+tags:
+  - name: Auth & settings
+    description: Member sign-in, the current member session, and the public application settings.
+  - name: Articles
+    description: |
+      Article reads and writes. Reads are filtered by visibility for the caller:
+      anonymous visitors see `Public` and `0` only. An article the caller may not
+      see answers `404 NOT_FOUND`, as if it did not exist.
+  - name: Tags
+    description: The canonical tag catalog. Every tag write is Moderator-only.
+  - name: Member reads
+    description: |
+      The same reads as `GET /articles`, `GET /articles/{id}`, and `GET /tags`,
+      filtered for the signed-in member's role. They work whether or not
+      public browsing is enabled.
+
+paths:
+  /auth/login:
+    post:
+      operationId: memberLogin
+      tags: [Auth & settings]
+      summary: Sign in as a member
+      description: |
+        Exchanges a member's username and password for a signed bearer token.
+        Send the token as `Authorization: Bearer <token>` on member routes.
+        Inactive accounts cannot sign in. Rate-limited per client address
+        (`rateLimits.login`, 5 attempts per minute by default).
+      x-rate-limit: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '400':
+          description: The body is not JSON, or the username or password is missing.
+          x-error-codes: [INVALID_JSON, VALIDATION_ERROR]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: The username or password is wrong, or the account is inactive.
+          x-error-codes: [INVALID_CREDENTIALS]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/session:
+    get:
+      operationId: memberSession
+      tags: [Auth & settings]
+      summary: Get the signed-in member
+      description: Returns the member the bearer token belongs to. Use it to check that a stored token is still valid.
+      security:
+        - memberBearer: []
+      responses:
+        '200':
+          description: The signed-in member.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionUser' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [Auth & settings]
+      summary: Get the public application settings
+      description: |
+        The effective application name, subtitle, default visibility for new
+        articles, and whether public browsing is enabled. Always available,
+        even when public browsing is off. Sent with `Cache-Control: public, max-age=30`.
+      responses:
+        '200':
+          description: The effective settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationSettings' }
+
+  /articles:
+    get:
+      operationId: listArticles
+      tags: [Articles]
+      summary: List public articles
+      description: |
+        Lists articles an anonymous visitor may see (`Public` and `0`), with
+        search, filters, sorting, and pagination. Pinned articles sort first.
+        Sent with `Cache-Control: public, max-age=30`.
+      parameters:
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/TagFilter'
+        - $ref: '#/components/parameters/VisibilityFilter'
+        - $ref: '#/components/parameters/PinnedFilter'
+        - $ref: '#/components/parameters/ProtectionFilter'
+        - $ref: '#/components/parameters/VerificationFilter'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Direction'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/ArticlePageSize'
+      responses:
+        '200':
+          description: One page of article summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArticleListResult' }
+        '400': { $ref: '#/components/responses/InvalidQuery' }
+        '403': { $ref: '#/components/responses/PublicBrowsingDisabled' }
+    post:
+      operationId: createArticle
+      tags: [Articles]
+      summary: Create an article
+      description: |
+        Creates an article as the signed-in member. Without `visibility`, the
+        article is `Internal`; the member app pre-fills the configured default
+        visibility. Editors may assign only `Public`, `Internal`, `0`, and `1`;
+        Moderators may assign any level. `version` is ignored.
+      security:
+        - memberBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ArticleInput' }
+      responses:
+        '201':
+          description: The created article, at version 1.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Article' }
+        '400':
+          description: The body is missing, not JSON, or invalid, or a tag ID does not exist.
+          x-error-codes: [INVALID_REQUEST, INVALID_JSON, VALIDATION_ERROR, INVALID_TAG_IDS]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: An Editor tried to assign a Moderator-only visibility level.
+          x-error-codes: [FORBIDDEN]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+
+  /articles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+    get:
+      operationId: getArticle
+      tags: [Articles]
+      summary: Get a public article
+      description: |
+        Returns one article an anonymous visitor may see, with its full
+        Markdown content. Sent with `Cache-Control: public, max-age=30`.
+      responses:
+        '200':
+          description: The article.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Article' }
+        '400': { $ref: '#/components/responses/InvalidArticleId' }
+        '403': { $ref: '#/components/responses/PublicBrowsingDisabled' }
+        '404': { $ref: '#/components/responses/ArticleNotFound' }
+    put:
+      operationId: updateArticle
+      tags: [Articles]
+      summary: Update an article
+      description: |
+        Replaces the title, content, tags, and (optionally) visibility. `version`
+        is required and must equal the article's current version. Protected
+        articles can be edited only by Moderators, and Editors cannot assign
+        Moderator-only visibility levels. A request that changes nothing is
+        rejected with `NO_CHANGES`. A revision of the previous state is kept.
+      security:
+        - memberBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ArticleInput' }
+      responses:
+        '200':
+          description: The updated article, with its version incremented.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Article' }
+        '400':
+          description: The ID, body, or tag IDs are invalid, or nothing changed.
+          x-error-codes: [INVALID_ID, INVALID_REQUEST, INVALID_JSON, VALIDATION_ERROR, INVALID_TAG_IDS, NO_CHANGES]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: The article is protected and the caller is an Editor, or an Editor tried to assign a Moderator-only visibility level.
+          x-error-codes: [FORBIDDEN]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/ArticleNotFound' }
+        '409':
+          description: '`version` is missing or the article has changed since it was read.'
+          x-error-codes: [VERSION_CONFLICT]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+    delete:
+      operationId: deleteArticle
+      tags: [Articles]
+      summary: Delete an article
+      description: Permanently deletes an article and its revisions. The current version is passed in the query string.
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      parameters:
+        - $ref: '#/components/parameters/VersionQuery'
+      responses:
+        '204':
+          description: Deleted.
+        '400':
+          description: The ID or version is invalid.
+          x-error-codes: [INVALID_ID, INVALID_VERSION]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+        '404': { $ref: '#/components/responses/ArticleNotFound' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+
+  /articles/{id}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+    get:
+      operationId: listArticleRevisions
+      tags: [Articles]
+      summary: List an article's revisions
+      description: Returns every saved revision of an article the member may see, newest first.
+      security:
+        - memberBearer: []
+      responses:
+        '200':
+          description: The revisions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ArticleRevision' }
+        '400': { $ref: '#/components/responses/InvalidArticleId' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/ArticleNotFound' }
+
+  /articles/{id}/revisions/{version}/restore:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+      - name: version
+        in: path
+        required: true
+        description: The revision version to restore.
+        schema: { type: integer, minimum: 1 }
+    post:
+      operationId: restoreArticleRevision
+      tags: [Articles]
+      summary: Restore a revision
+      description: |
+        Restores an article to the content, tags, visibility, and flags of an
+        earlier revision, as a new version. `currentVersion` must equal the
+        article's current version.
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RestoreInput' }
+      responses:
+        '200':
+          description: The restored article, with its version incremented.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Article' }
+        '400':
+          description: The ID, revision version, or body is invalid.
+          x-error-codes: [INVALID_ID, INVALID_VERSION, INVALID_REQUEST, INVALID_JSON, VALIDATION_ERROR]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+        '404':
+          description: The article or the revision does not exist.
+          x-error-codes: [NOT_FOUND]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+
+  /articles/{id}/protection:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+    patch:
+      operationId: setArticleProtection
+      tags: [Articles]
+      summary: Protect or unprotect an article
+      description: A protected article can be edited only by Moderators.
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProtectionInput' }
+      responses:
+        '200': { $ref: '#/components/responses/ArticleUpdated' }
+        '400': { $ref: '#/components/responses/InvalidFlagWrite' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+        '404': { $ref: '#/components/responses/ArticleNotFound' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+
+  /articles/{id}/pinning:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+    patch:
+      operationId: setArticlePinning
+      tags: [Articles]
+      summary: Pin or unpin an article
+      description: Pinned articles are listed before all others.
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PinningInput' }
+      responses:
+        '200': { $ref: '#/components/responses/ArticleUpdated' }
+        '400': { $ref: '#/components/responses/InvalidFlagWrite' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+        '404': { $ref: '#/components/responses/ArticleNotFound' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+
+  /articles/{id}/verification:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+    patch:
+      operationId: setArticleVerification
+      tags: [Articles]
+      summary: Mark an article verified or unverified
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerificationInput' }
+      responses:
+        '200': { $ref: '#/components/responses/ArticleUpdated' }
+        '400': { $ref: '#/components/responses/InvalidFlagWrite' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+        '404': { $ref: '#/components/responses/ArticleNotFound' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+
+  /articles/{id}/orphan-tags/{tagId}:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+      - $ref: '#/components/parameters/TagId'
+    delete:
+      operationId: removeOrphanTag
+      tags: [Articles]
+      summary: Remove an unresolved tag reference
+      description: |
+        Removes a tag ID from an article when that tag no longer exists in the
+        catalog (see `GET /tags/orphans`). The current version is passed in
+        the query string.
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      parameters:
+        - $ref: '#/components/parameters/VersionQuery'
+      responses:
+        '200': { $ref: '#/components/responses/ArticleUpdated' }
+        '400':
+          description: The IDs or version are invalid, or the tag is not an unresolved reference on this article.
+          x-error-codes: [INVALID_ID, INVALID_TAG_ID, INVALID_VERSION, TAG_NOT_ORPHANED]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+        '404': { $ref: '#/components/responses/ArticleNotFound' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+
+  /tags:
+    get:
+      operationId: listTags
+      tags: [Tags]
+      summary: List tags
+      description: Lists the canonical tags, sorted by name. Not publicly cached.
+      parameters:
+        - $ref: '#/components/parameters/TagSearch'
+      responses:
+        '200':
+          description: The matching tags.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Tag' }
+        '400': { $ref: '#/components/responses/InvalidQuery' }
+        '403': { $ref: '#/components/responses/PublicBrowsingDisabled' }
+    post:
+      operationId: createTag
+      tags: [Tags]
+      summary: Create a tag
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TagInput' }
+      responses:
+        '201':
+          description: The created tag.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tag' }
+        '400': { $ref: '#/components/responses/InvalidBody' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+        '409': { $ref: '#/components/responses/TagNameConflict' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+
+  /tags/orphans:
+    get:
+      operationId: listTagOrphans
+      tags: [Tags]
+      summary: List unresolved tag references
+      description: Lists articles that still reference tag IDs missing from the catalog, for example after a tag was deleted.
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      responses:
+        '200':
+          description: Articles with unresolved tag references.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TagOrphan' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+
+  /tags/{tagId}:
+    parameters:
+      - $ref: '#/components/parameters/TagId'
+    put:
+      operationId: updateTag
+      tags: [Tags]
+      summary: Rename or recolor a tag
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TagInput' }
+      responses:
+        '200':
+          description: The updated tag.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tag' }
+        '400':
+          description: The tag ID or body is invalid.
+          x-error-codes: [INVALID_TAG_ID, INVALID_REQUEST, INVALID_JSON, VALIDATION_ERROR]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+        '404': { $ref: '#/components/responses/TagNotFound' }
+        '409': { $ref: '#/components/responses/TagNameConflict' }
+        '413': { $ref: '#/components/responses/BodyTooLarge' }
+    delete:
+      operationId: deleteTag
+      tags: [Tags]
+      summary: Delete a tag
+      description: Deletes a tag from the catalog. Articles that used it keep an unresolved reference until it is removed.
+      x-required-role: Moderator
+      security:
+        - memberBearer: []
+      responses:
+        '204':
+          description: Deleted.
+        '400':
+          description: The tag ID is invalid.
+          x-error-codes: [INVALID_TAG_ID]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/ModeratorRequired' }
+        '404': { $ref: '#/components/responses/TagNotFound' }
+
+  /member/articles:
+    get:
+      operationId: listMemberArticles
+      tags: [Member reads]
+      summary: List articles visible to the member
+      description: |
+        Like `GET /articles`, but filtered for the member's role: Editors also
+        see `Internal` and `1`; Moderators see every level. Not publicly cached.
+      security:
+        - memberBearer: []
+      parameters:
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/TagFilter'
+        - $ref: '#/components/parameters/VisibilityFilter'
+        - $ref: '#/components/parameters/PinnedFilter'
+        - $ref: '#/components/parameters/ProtectionFilter'
+        - $ref: '#/components/parameters/VerificationFilter'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Direction'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/ArticlePageSize'
+      responses:
+        '200':
+          description: One page of article summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArticleListResult' }
+        '400': { $ref: '#/components/responses/InvalidQuery' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /member/articles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ArticleId'
+    get:
+      operationId: getMemberArticle
+      tags: [Member reads]
+      summary: Get an article visible to the member
+      security:
+        - memberBearer: []
+      responses:
+        '200':
+          description: The article.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Article' }
+        '400': { $ref: '#/components/responses/InvalidArticleId' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/ArticleNotFound' }
+
+  /member/tags:
+    get:
+      operationId: listMemberTags
+      tags: [Member reads]
+      summary: List tags as a member
+      description: Like `GET /tags`, but available when public browsing is off.
+      security:
+        - memberBearer: []
+      parameters:
+        - $ref: '#/components/parameters/TagSearch'
+      responses:
+        '200':
+          description: The matching tags.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Tag' }
+        '400': { $ref: '#/components/responses/InvalidQuery' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+components:
+  securitySchemes:
+    memberBearer:
+      type: http
+      scheme: bearer
+      description: |
+        A signed member token from `POST /auth/login`, sent as
+        `Authorization: Bearer <token>`. Tokens expire after `session.ttlHours`
+        and are invalidated when the member's role, status, or password changes.
+        The Admin session cookie is ignored on these routes.
+
+  parameters:
+    ArticleId:
+      name: id
+      in: path
+      required: true
+      description: The article ID.
+      schema: { type: string, format: uuid }
+    TagId:
+      name: tagId
+      in: path
+      required: true
+      description: The tag ID.
+      schema: { type: string, format: uuid }
+    VersionQuery:
+      name: version
+      in: query
+      required: true
+      description: The article's current version.
+      schema: { type: integer, minimum: 1 }
+    Search:
+      name: search
+      in: query
+      description: Full-text search over titles and content.
+      schema: { type: string, maxLength: 200, default: '' }
+    TagFilter:
+      name: tagId
+      in: query
+      description: Only articles with this tag. Empty means any tag.
+      schema: { type: string, format: uuid }
+    VisibilityFilter:
+      name: visibility
+      in: query
+      description: |
+        Only articles at one visibility level: `public`, `internal`, and `admin`
+        select the legacy levels; `0`–`5` select AGT levels. Levels the caller
+        cannot see return no results.
+      schema:
+        type: string
+        enum: [all, public, internal, admin, '0', '1', '2', '3', '4', '5']
+        default: all
+    PinnedFilter:
+      name: pinned
+      in: query
+      schema: { type: string, enum: [all, pinned], default: all }
+    ProtectionFilter:
+      name: protection
+      in: query
+      schema: { type: string, enum: [all, protected, unprotected], default: all }
+    VerificationFilter:
+      name: verification
+      in: query
+      schema: { type: string, enum: [all, verified, unverified], default: all }
+    Sort:
+      name: sort
+      in: query
+      schema: { type: string, enum: [createdAt, modifiedAt, title], default: modifiedAt }
+    Direction:
+      name: direction
+      in: query
+      schema: { type: string, enum: [asc, desc], default: desc }
+    Page:
+      name: page
+      in: query
+      description: The page number, starting at 1.
+      schema: { type: integer, minimum: 1, default: 1 }
+    ArticlePageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 12 }
+    TagSearch:
+      name: search
+      in: query
+      description: Case-insensitive substring match on the tag name.
+      schema: { type: string, maxLength: 40, default: '' }
+
+  responses:
+    Unauthenticated:
+      description: The bearer token is missing, invalid, or expired.
+      x-error-codes: [UNAUTHENTICATED]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ModeratorRequired:
+      description: Only Moderators may do this.
+      x-error-codes: [FORBIDDEN]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PublicBrowsingDisabled:
+      description: Public browsing is turned off; sign in and use the `/member/*` routes.
+      x-error-codes: [PUBLIC_BROWSING_DISABLED]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidQuery:
+      description: A query parameter is invalid.
+      x-error-codes: [VALIDATION_ERROR]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+    InvalidBody:
+      description: The body is missing, not JSON, or fails validation.
+      x-error-codes: [INVALID_REQUEST, INVALID_JSON, VALIDATION_ERROR]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+    InvalidArticleId:
+      description: The article ID is not a UUID.
+      x-error-codes: [INVALID_ID]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidFlagWrite:
+      description: The article ID or body is invalid.
+      x-error-codes: [INVALID_ID, INVALID_REQUEST, INVALID_JSON, VALIDATION_ERROR]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+    ArticleNotFound:
+      description: The article does not exist or the caller may not see it.
+      x-error-codes: [NOT_FOUND]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ArticleUpdated:
+      description: The updated article, with its version incremented.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Article' }
+    VersionConflict:
+      description: The article has changed since it was read. Reload it and retry with the new version.
+      x-error-codes: [VERSION_CONFLICT]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TagNotFound:
+      description: The tag does not exist.
+      x-error-codes: [TAG_NOT_FOUND]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TagNameConflict:
+      description: Another tag already has this name.
+      x-error-codes: [TAG_NAME_CONFLICT]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BodyTooLarge:
+      description: The request body is larger than 1 MB.
+      x-error-codes: [BODY_TOO_LARGE]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many attempts from this address. Retry after the number of seconds in `Retry-After`.
+      x-error-codes: [RATE_LIMITED]
+      headers:
+        Retry-After:
+          description: Seconds until another attempt is allowed.
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      description: The body of every error response.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: A stable, machine-readable error code, such as `VERSION_CONFLICT`.
+        message:
+          type: string
+          description: A human-readable explanation. Never contains internal details.
+    ValidationError:
+      type: object
+      description: An error body; `VALIDATION_ERROR` responses also carry the Zod `issues`.
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message:
+          type: string
+          description: Names the first issue.
+        issues:
+          type: array
+          description: Every validation issue, each with `path` and `message`. Present only for `VALIDATION_ERROR`.
+          items: { type: object }
+    Visibility:
+      description: |
+        An article's visibility: a legacy level (`Public`, `Internal`, `Admin`)
+        or an AGT numeric level (`0` Public, `1` Private, `2` Restricted,
+        `3` Top Secret, `4` SLT Restricted, `5` SCC Restricted). Anonymous
+        visitors see `Public` and `0`; Editors also see `Internal` and `1`;
+        Moderators see every level, including legacy `Admin`.
+      oneOf:
+        - type: string
+          enum: [Public, Internal, Admin]
+        - type: integer
+          enum: [0, 1, 2, 3, 4, 5]
+    Credentials:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, maxLength: 254, description: The member's username or email address. }
+        password: { type: string, maxLength: 1024 }
+    SessionUser:
+      type: object
+      required: [sub, username, displayName, role]
+      properties:
+        sub:
+          type: string
+          description: The member's stable user key (`app_users.user_id`).
+        username: { type: string }
+        displayName: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [Editor, Moderator] }
+    LoginResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          description: The bearer token for member routes.
+        user: { $ref: '#/components/schemas/SessionUser' }
+    ApplicationSettings:
+      type: object
+      required: [applicationName, applicationSubtitle, defaultVisibility, allowPublicBrowsing, version]
+      properties:
+        applicationName: { type: string }
+        applicationSubtitle: { type: string }
+        defaultVisibility: { $ref: '#/components/schemas/Visibility' }
+        allowPublicBrowsing:
+          type: boolean
+          description: When false, `GET /articles`, `GET /articles/{id}`, and `GET /tags` answer `403 PUBLIC_BROWSING_DISABLED`.
+        version: { type: integer }
+    Tag:
+      type: object
+      required: [id, name, color]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        color: { type: string, description: 'Canonical `#RRGGBB`.' }
+    TagInput:
+      type: object
+      additionalProperties: false
+      required: [name, color]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: Trimmed; must be unique.
+        color:
+          type: string
+          pattern: '^#[0-9A-F]{6}$'
+          description: Canonical `#RRGGBB` with uppercase hex digits.
+    TagOrphan:
+      type: object
+      required: [articleId, articleTitle, version, missingTagIds]
+      properties:
+        articleId: { type: string, format: uuid }
+        articleTitle: { type: string }
+        version:
+          type: integer
+          description: The article's current version, for `DELETE /articles/{id}/orphan-tags/{tagId}`.
+        missingTagIds:
+          type: array
+          items: { type: string, format: uuid }
+    ArticleSummary:
+      type: object
+      required: [id, title, excerpt, tags, visibility, isPinned, isProtected, isVerified, createdAt, createdBy, createdByName, modifiedAt, modifiedBy, modifiedByName, version]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        excerpt:
+          type: string
+          description: The start of the content, as plain text.
+        tags:
+          type: array
+          items: { $ref: '#/components/schemas/Tag' }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        isPinned: { type: boolean }
+        isProtected: { type: boolean }
+        isVerified: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string, description: The author's user key. }
+        createdByName: { type: string }
+        modifiedAt: { type: string, format: date-time }
+        modifiedBy: { type: string }
+        modifiedByName: { type: string }
+        version:
+          type: integer
+          description: Incremented by every change; send it back on writes.
+    Article:
+      description: An `ArticleSummary` without `excerpt`, plus the full Markdown `content`.
+      type: object
+      required: [id, title, content, tags, visibility, isPinned, isProtected, isVerified, createdAt, createdBy, createdByName, modifiedAt, modifiedBy, modifiedByName, version]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        content: { type: string, description: GitHub-flavored Markdown. }
+        tags:
+          type: array
+          items: { $ref: '#/components/schemas/Tag' }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        isPinned: { type: boolean }
+        isProtected: { type: boolean }
+        isVerified: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        createdByName: { type: string }
+        modifiedAt: { type: string, format: date-time }
+        modifiedBy: { type: string }
+        modifiedByName: { type: string }
+        version: { type: integer }
+    ArticleListResult:
+      type: object
+      required: [items, page, pageSize, total, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ArticleSummary' }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer, description: Matching articles across all pages. }
+        totalPages: { type: integer }
+    ArticleRevision:
+      type: object
+      required: [articleId, title, content, tags, visibility, isPinned, isProtected, isVerified, revisedAt, revisedBy, revisedByName, version]
+      properties:
+        articleId: { type: string, format: uuid }
+        title: { type: string }
+        content: { type: string }
+        tags:
+          type: array
+          items: { $ref: '#/components/schemas/Tag' }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        isPinned: { type: boolean }
+        isProtected: { type: boolean }
+        isVerified: { type: boolean }
+        revisedAt: { type: string, format: date-time }
+        revisedBy: { type: string }
+        revisedByName: { type: string }
+        version: { type: integer, description: The article version this revision recorded. }
+    ArticleInput:
+      type: object
+      additionalProperties: false
+      required: [title, content, tagIds]
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 180
+          description: Trimmed before the length check.
+        content:
+          type: string
+          minLength: 20
+          maxLength: 250000
+          description: Markdown. Raw HTML or JSX tags and MDX `import`/`export` lines are rejected.
+        tagIds:
+          type: array
+          maxItems: 12
+          uniqueItems: true
+          description: Existing tag IDs; unknown IDs fail with `INVALID_TAG_IDS`.
+          items: { type: string, format: uuid }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+        version:
+          type: integer
+          minimum: 1
+          description: Required on update; the article's current version.
+    ProtectionInput:
+      type: object
+      additionalProperties: false
+      required: [isProtected, version]
+      properties:
+        isProtected: { type: boolean }
+        version: { type: integer, minimum: 1, description: The article's current version. }
+    PinningInput:
+      type: object
+      additionalProperties: false
+      required: [isPinned, version]
+      properties:
+        isPinned: { type: boolean }
+        version: { type: integer, minimum: 1, description: The article's current version. }
+    VerificationInput:
+      type: object
+      additionalProperties: false
+      required: [isVerified, version]
+      properties:
+        isVerified: { type: boolean }
+        version: { type: integer, minimum: 1, description: The article's current version. }
+    RestoreInput:
+      type: object
+      additionalProperties: false
+      required: [currentVersion]
+      properties:
+        currentVersion: { type: integer, minimum: 1, description: The article's current version. }

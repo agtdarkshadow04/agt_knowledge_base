@@ -1,5 +1,5 @@
-import { Archive, Database, KeyRound, LockKeyhole, LogIn, LogOut, Settings, ShieldCheck, Users } from 'lucide-react';
-import { type FormEvent, useCallback, useEffect, useState } from 'react';
+import { Archive, Braces, Database, KeyRound, LockKeyhole, LogIn, LogOut, Settings, ShieldCheck, Users } from 'lucide-react';
+import { type FormEvent, lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { LoadingState } from '../components/States';
 import { AccountPanel } from './AccountPanel';
 import { adminUnauthorizedEvent, completeSetup, getSession, getSetupStatus, signIn, signOut } from './api';
@@ -16,7 +16,10 @@ type Phase =
   | { name: 'login'; notice?: string }
   | { name: 'dashboard'; session: AdminSession };
 
-type Tab = 'users' | 'data' | 'settings' | 'backup' | 'account';
+type Tab = 'users' | 'data' | 'settings' | 'backup' | 'account' | 'api';
+
+// The bundled API description is loaded only when the API tab is opened.
+const ApiPanel = lazy(async () => ({ default: (await import('./ApiPanel')).ApiPanel }));
 
 const tabs: { id: Tab; label: string; icon: typeof Users }[] = [
   { id: 'users', label: 'Users', icon: Users },
@@ -24,6 +27,7 @@ const tabs: { id: Tab; label: string; icon: typeof Users }[] = [
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'backup', label: 'Backup & restore', icon: Archive },
   { id: 'account', label: 'Account', icon: KeyRound },
+  { id: 'api', label: 'API', icon: Braces },
 ];
 
 function failure(cause: unknown, fallback: string) {
@@ -147,6 +151,7 @@ function Dashboard({ session, onSessionChange, onSignedOut }: {
       {tab === 'settings' && <SettingsPanel />}
       {tab === 'backup' && <BackupPanel onRestored={() => onSignedOut('The backup was restored. Sign in with the Admin account from the backup.')} />}
       {tab === 'account' && <AccountPanel session={session} onSessionRenewed={onSessionChange} />}
+      {tab === 'api' && <Suspense fallback={<LoadingState message="Loading the API reference…" />}><ApiPanel /></Suspense>}
     </div>
   );
 }
