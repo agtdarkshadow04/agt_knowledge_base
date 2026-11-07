@@ -1,15 +1,19 @@
 import { getPool } from '../backend/db.js';
 import { hashPassword } from '../backend/local-auth.js';
-import type { Role } from '../backend/domain.js';
+import { roles, type Role } from '../backend/domain.js';
 
 function arg(name: string) {
   const index = process.argv.indexOf(`--${name}`);
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+/**
+ * Creates or resets a member account (Editor or Moderator) for recovery. It
+ * cannot create the installation Admin; see README for Admin lockout recovery.
+ */
 function fail(message: string): never {
   console.error(message);
-  console.error('Usage: --username <name> --display-name <name> [--email <address>] --role <Admin|Standard> --confirm');
+  console.error('Usage: --username <name> --display-name <name> [--email <address>] --role <Editor|Moderator> --confirm');
   console.error('Provide the password through LOCAL_USER_PASSWORD.');
   process.exit(2);
 }
@@ -24,7 +28,7 @@ if (!process.argv.includes('--confirm')) fail('--confirm is required.');
 if (!username || !/^[a-z0-9_.-]{3,64}$/.test(username)) fail('Username must be 3-64 lowercase letters, numbers, dots, underscores, or hyphens.');
 if (!displayName || displayName.length > 120) fail('Display name must contain 1-120 characters.');
 if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) fail('Email address is invalid.');
-if (role !== 'Admin' && role !== 'Standard') fail('Role must be Admin or Standard.');
+if (!role || !roles.includes(role)) fail('Role must be Editor or Moderator. The installation Admin is managed at /admin, not here.');
 if (!password || password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password)
   || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
   fail('LOCAL_USER_PASSWORD must contain at least 12 characters, including uppercase, lowercase, a number, and a symbol.');
@@ -45,7 +49,7 @@ try {
            updated_at = now()`,
     [username, passwordHash, displayName, email ?? null, role],
   );
-  console.log(`Local ${role} account ${username} is ready.`);
+  console.log(`Member ${role} account ${username} is ready.`);
 } finally {
   await pool.end();
 }

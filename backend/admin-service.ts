@@ -1,14 +1,7 @@
 import type pg from 'pg';
 import { getPool } from './db.js';
-import {
-  AppError,
-  type Actor,
-  type AdminStats,
-  type ApplicationSettings,
-  type LocalUserRecord,
-  type Role,
-} from './domain.js';
-import { hashPassword, type LocalSessionUser } from './local-auth.js';
+import { AppError, type AdminStats, type LocalUserRecord, type Role } from './domain.js';
+import { hashPassword } from './local-auth.js';
 
 interface LocalUserRow {
   id: string;
@@ -17,22 +10,13 @@ interface LocalUserRow {
   email: string | null;
   role: Role;
   is_active: boolean;
-  is_super_admin: boolean;
   session_version: number;
   created_at: Date | string;
   updated_at: Date | string;
 }
 
-interface SettingsRow {
-  application_name: string;
-  application_subtitle: string;
-  default_visibility: ApplicationSettings['defaultVisibility'];
-  allow_public_browsing: boolean;
-  version: number;
-}
-
 const userColumns = `
-  id, username, display_name, email, role, is_active, is_super_admin,
+  id, username, display_name, email, role, is_active,
   session_version, created_at, updated_at
 `;
 
@@ -48,31 +32,8 @@ function toUser(row: LocalUserRow): LocalUserRecord {
     email: row.email ?? undefined,
     role: row.role,
     isActive: row.is_active,
-    isSuperAdmin: row.is_super_admin,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
-  };
-}
-
-function toSessionUser(row: LocalUserRow): LocalSessionUser {
-  return {
-    sub: row.id,
-    username: row.username,
-    displayName: row.display_name,
-    email: row.email ?? undefined,
-    role: row.role,
-    isSuperAdmin: row.is_super_admin,
-    sessionVersion: row.session_version,
-  };
-}
-
-function toSettings(row: SettingsRow): ApplicationSettings {
-  return {
-    applicationName: row.application_name,
-    applicationSubtitle: row.application_subtitle,
-    defaultVisibility: row.default_visibility,
-    allowPublicBrowsing: row.allow_public_browsing,
-    version: row.version,
   };
 }
 
@@ -96,76 +57,7 @@ async function lockedUser(client: pg.PoolClient, id: string) {
   return result.rows[0];
 }
 
-async function assertActiveAdmin(client: pg.PoolClient, actor: Actor) {
-  const result = await client.query(
-    `SELECT 1
-     FROM local_users
-     WHERE id = $1 AND is_active = true AND role = 'Admin'
-     FOR KEY SHARE`,
-    [actor.sub],
-  );
-  if (!result.rowCount) throw new AppError('Administrator access is required.', 403, 'FORBIDDEN');
-}
-
-function assertMutable(target: LocalUserRow, actor: Actor, input?: { role: Role; isActive: boolean }) {
-  if (target.is_super_admin) {
-    if (input && (input.role !== 'Admin' || !input.isActive)) {
-      throw new AppError('The super administrator cannot be demoted or deactivated.', 409, 'PROTECTED_USER');
-    }
-    if (actor.sub !== target.id) {
-      throw new AppError('Only the super administrator can change their own account.', 409, 'PROTECTED_USER');
-    }
-  }
-  if (target.id === actor.sub && input && !input.isActive) {
-    throw new AppError('You cannot deactivate your own account.', 409, 'PROTECTED_USER');
-  }
-}
-
 export class AdminService {
-  async setupRequired() {
-    const pool = await getPool();
-    const result = await pool.query<{ required: boolean }>(
-      'SELECT NOT EXISTS (SELECT 1 FROM local_users) AS required',
-    );
-    return result.rows[0]?.required ?? false;
-  }
-
-  async bootstrap(input: {
-    username: string;
-    displayName: string;
-    email?: string;
-    password: string;
-  }): Promise<LocalSessionUser> {
-    const passwordHash = await hashPassword(input.password);
-    const pool = await getPool();
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('LOCK TABLE local_users IN SHARE ROW EXCLUSIVE MODE');
-      const existing = await client.query('SELECT 1 FROM local_users LIMIT 1');
-      if (existing.rowCount) {
-        throw new AppError('Setup has already been completed.', 409, 'SETUP_ALREADY_COMPLETED');
-      }
-      const result = await client.query<LocalUserRow>(
-        `INSERT INTO local_users (
-           username, password_hash, display_name, email, role, is_super_admin
-         ) VALUES ($1, $2, $3, $4, 'Admin', true)
-         RETURNING ${userColumns}`,
-        [input.username, passwordHash, input.displayName, input.email ?? null],
-      );
-      await client.query('COMMIT');
-      return toSessionUser(result.rows[0]);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      if (isUniqueViolation(error)) {
-        throw new AppError('Setup has already been completed.', 409, 'SETUP_ALREADY_COMPLETED');
-      }
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
   async listUsers(query: {
     search: string;
     role: 'all' | Role;
@@ -187,7 +79,7 @@ export class AdminService {
         `SELECT ${userColumns}
          FROM local_users
          WHERE ${conditions.join(' AND ')}
-         ORDER BY is_super_admin DESC, lower(username), id
+         ORDER BY lower(username), id
          LIMIT $4 OFFSET $5`,
         [...params, query.pageSize, offset],
       ),
@@ -208,13 +100,12 @@ export class AdminService {
     email?: string;
     role: Role;
     password: string;
-  }, actor: Actor) {
+  }) {
     const passwordHash = await hashPassword(input.password);
     const pool = await getPool();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await assertActiveAdmin(client, actor);
       const result = await client.query<LocalUserRow>(
         `INSERT INTO local_users (username, password_hash, display_name, email, role)
          VALUES ($1, $2, $3, $4, $5)
@@ -237,14 +128,12 @@ export class AdminService {
     email?: string;
     role: Role;
     isActive: boolean;
-  }, actor: Actor) {
+  }) {
     const pool = await getPool();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await assertActiveAdmin(client, actor);
       const current = await lockedUser(client, id);
-      assertMutable(current, actor, input);
       const securityChanged = current.role !== input.role || current.is_active !== input.isActive;
       const result = await client.query<LocalUserRow>(
         `UPDATE local_users
@@ -269,15 +158,13 @@ export class AdminService {
     }
   }
 
-  async setPassword(id: string, password: string, actor: Actor) {
+  async setPassword(id: string, password: string) {
     const passwordHash = await hashPassword(password);
     const pool = await getPool();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await assertActiveAdmin(client, actor);
-      const current = await lockedUser(client, id);
-      assertMutable(current, actor);
+      await lockedUser(client, id);
       await client.query(
         `UPDATE local_users
          SET password_hash = $2, session_version = session_version + 1, updated_at = now()
@@ -293,19 +180,12 @@ export class AdminService {
     }
   }
 
-  async deleteUser(id: string, actor: Actor) {
+  async deleteUser(id: string) {
     const pool = await getPool();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await assertActiveAdmin(client, actor);
-      const current = await lockedUser(client, id);
-      if (current.id === actor.sub) {
-        throw new AppError('You cannot delete your own account.', 409, 'PROTECTED_USER');
-      }
-      if (current.is_super_admin) {
-        throw new AppError('The super administrator cannot be deleted.', 409, 'PROTECTED_USER');
-      }
+      await lockedUser(client, id);
       await client.query('DELETE FROM local_users WHERE id = $1', [id]);
       await client.query('COMMIT');
     } catch (error) {
@@ -339,39 +219,4 @@ export class AdminService {
     return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, Number(value)])) as unknown as AdminStats;
   }
 
-  async getSettings() {
-    const pool = await getPool();
-    const result = await pool.query<SettingsRow>(
-      `SELECT application_name, application_subtitle, default_visibility, allow_public_browsing, version
-       FROM application_settings WHERE singleton = true`,
-    );
-    if (!result.rows[0]) throw new Error('Application settings are missing.');
-    return toSettings(result.rows[0]);
-  }
-
-  async updateSettings(input: ApplicationSettings) {
-    const pool = await getPool();
-    const result = await pool.query<SettingsRow>(
-      `UPDATE application_settings
-       SET application_name = $1,
-           application_subtitle = $2,
-           default_visibility = $3::jsonb,
-           allow_public_browsing = $4,
-           version = version + 1,
-           updated_at = now()
-       WHERE singleton = true AND version = $5
-       RETURNING application_name, application_subtitle, default_visibility, allow_public_browsing, version`,
-      [
-        input.applicationName,
-        input.applicationSubtitle,
-        JSON.stringify(input.defaultVisibility),
-        input.allowPublicBrowsing,
-        input.version,
-      ],
-    );
-    if (!result.rows[0]) {
-      throw new AppError('Application settings changed after you opened them. Reload and try again.', 409, 'VERSION_CONFLICT');
-    }
-    return toSettings(result.rows[0]);
-  }
 }

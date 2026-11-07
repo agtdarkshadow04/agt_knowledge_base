@@ -12,12 +12,12 @@ import {
   type ArticleWrite,
   type CanonicalTag,
   type ListArticlesQuery,
-  type Role,
+  type Viewer,
 } from './domain.js';
 import type { ArticleRepository } from './repository.js';
 
-const admin: Actor = { sub: 'admin-sub', displayName: 'Atlas', role: 'Admin' };
-const standard: Actor = { sub: 'standard-sub', displayName: 'Apollo', role: 'Standard' };
+const moderator: Actor = { sub: 'moderator-sub', displayName: 'Atlas', role: 'Moderator' };
+const editor: Actor = { sub: 'editor-sub', displayName: 'Apollo', role: 'Editor' };
 const tagCatalog: Record<string, CanonicalTag> = {
   ships: { id: '10000000-0000-4000-8000-000000000001', name: 'ships', color: '#AABBCC' },
   portals: { id: '10000000-0000-4000-8000-000000000002', name: 'portals', color: '#B5C3B7' },
@@ -58,7 +58,7 @@ class MemoryRepository implements ArticleRepository {
     this.revisions.set(record.id, history);
   }
 
-  async list(query: ListArticlesQuery, viewerRole: Role | null) {
+  async list(query: ListArticlesQuery, viewer: Viewer) {
     let items = [...this.records.values()];
     const search = query.search.toLowerCase();
     if (search) items = items.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(search));
@@ -68,7 +68,7 @@ class MemoryRepository implements ArticleRepository {
     if (query.pinned === 'pinned') items = items.filter((item) => item.isPinned);
     if (query.protection !== 'all') items = items.filter((item) => item.isProtected === (query.protection === 'protected'));
     if (query.verification !== 'all') items = items.filter((item) => item.isVerified === (query.verification === 'verified'));
-    items = items.filter((item) => canViewArticleVisibility(viewerRole, item.visibility));
+    items = items.filter((item) => canViewArticleVisibility(viewer, item.visibility));
     items.sort((left, right) => {
       if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1;
       const leftValue = query.sort === 'title' ? left.title.toLowerCase() : left[query.sort];
@@ -84,10 +84,10 @@ class MemoryRepository implements ArticleRepository {
     };
   }
 
-  async get(id: string, viewerRole: Role | null) {
+  async get(id: string, viewer: Viewer) {
     const article = this.records.get(id);
     if (!article) return null;
-    return canViewArticleVisibility(viewerRole, article.visibility) ? article : null;
+    return canViewArticleVisibility(viewer, article.visibility) ? article : null;
   }
   async listRevisions(id: string) { return this.revisions.get(id) ?? []; }
   async getRevision(id: string, version: number) {
@@ -110,7 +110,7 @@ class MemoryRepository implements ArticleRepository {
 
   async update(id: string, input: ArticleWrite & { version: number }, actor: Actor) {
     const current = this.records.get(id);
-    if (!current || current.version !== input.version || (current.isProtected && actor.role !== 'Admin')) return null;
+    if (!current || current.version !== input.version || (current.isProtected && actor.role !== 'Moderator')) return null;
     const updated: ArticleRecord = {
       ...current,
       title: input.title,
@@ -199,22 +199,22 @@ describe('ArticleService authorization and persistence', () => {
   it('maintains server-owned creator and editor audit fields', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    const created = await service.create(articleInput('Portal Primer'), standard);
-    expect(created).toMatchObject({ createdBy: standard.sub, modifiedBy: standard.sub, version: 1 });
+    const created = await service.create(articleInput('Portal Primer'), editor);
+    expect(created).toMatchObject({ createdBy: editor.sub, modifiedBy: editor.sub, version: 1 });
 
-    const updated = await service.update(created.id, { ...articleInput('Portal Primer Revised'), version: 1 }, admin);
-    expect(updated).toMatchObject({ createdBy: standard.sub, modifiedBy: admin.sub, version: 2 });
+    const updated = await service.update(created.id, { ...articleInput('Portal Primer Revised'), version: 1 }, moderator);
+    expect(updated).toMatchObject({ createdBy: editor.sub, modifiedBy: moderator.sub, version: 2 });
   });
 
   it('rejects updates that do not change document fields', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    const created = await service.create(articleInput('Unchanged Guide'), standard);
+    const created = await service.create(articleInput('Unchanged Guide'), editor);
 
     await expect(service.update(
       created.id,
       { ...articleInput('Unchanged Guide'), version: created.version },
-      standard,
+      editor,
     )).rejects.toMatchObject({
       statusCode: 400,
       code: 'NO_CHANGES',
@@ -224,39 +224,39 @@ describe('ArticleService authorization and persistence', () => {
     expect(await repository.listRevisions(created.id)).toHaveLength(1);
   });
 
-  it('allows Standard users to edit open articles but blocks protected articles', async () => {
+  it('allows Editors to edit open articles but blocks protected articles', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    const created = await service.create(articleInput('Open Guide'), standard);
-    await service.update(created.id, { ...articleInput('Open Guide Updated'), version: 1 }, standard);
-    const protectedArticle = await service.setProtection(created.id, true, 2, admin);
+    const created = await service.create(articleInput('Open Guide'), editor);
+    await service.update(created.id, { ...articleInput('Open Guide Updated'), version: 1 }, editor);
+    const protectedArticle = await service.setProtection(created.id, true, 2, moderator);
 
-    await expect(service.update(created.id, { ...articleInput('Forbidden Change'), version: protectedArticle.version }, standard)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(service.update(created.id, { ...articleInput('Admin Change'), version: protectedArticle.version }, admin)).resolves.toMatchObject({ title: 'Admin Change' });
+    await expect(service.update(created.id, { ...articleInput('Forbidden Change'), version: protectedArticle.version }, editor)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.update(created.id, { ...articleInput('Admin Change'), version: protectedArticle.version }, moderator)).resolves.toMatchObject({ title: 'Admin Change' });
   });
 
-  it('restricts protection and deletion to Admins and rejects stale writes', async () => {
+  it('restricts protection and deletion to Moderators and rejects stale writes', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    const created = await service.create(articleInput('Security Guide'), standard);
-    await expect(service.setProtection(created.id, true, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(service.setPinned(created.id, true, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(service.setVerified(created.id, true, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(service.delete(created.id, 1, standard)).rejects.toBeInstanceOf(ForbiddenError);
-    await service.update(created.id, { ...articleInput('Security Guide v2'), version: 1 }, standard);
-    await expect(service.update(created.id, { ...articleInput('Stale'), version: 1 }, standard)).rejects.toBeInstanceOf(ConflictError);
+    const created = await service.create(articleInput('Security Guide'), editor);
+    await expect(service.setProtection(created.id, true, 1, editor)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.setPinned(created.id, true, 1, editor)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.setVerified(created.id, true, 1, editor)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.delete(created.id, 1, editor)).rejects.toBeInstanceOf(ForbiddenError);
+    await service.update(created.id, { ...articleInput('Security Guide v2'), version: 1 }, editor);
+    await expect(service.update(created.id, { ...articleInput('Stale'), version: 1 }, editor)).rejects.toBeInstanceOf(ConflictError);
   });
 
-  it('allows only Admins to change verification status', async () => {
+  it('allows only Moderators to change verification status', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    const created = await service.create(articleInput('Verification Guide'), standard);
+    const created = await service.create(articleInput('Verification Guide'), editor);
 
-    const verified = await service.setVerified(created.id, true, created.version, admin);
-    expect(verified).toMatchObject({ isVerified: true, modifiedBy: admin.sub, version: 2 });
-    await expect(service.setVerified(created.id, false, created.version, admin)).rejects.toBeInstanceOf(ConflictError);
-    await expect(service.setVerified(created.id, false, verified.version, standard)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(service.setVerified(created.id, false, verified.version, admin)).resolves.toMatchObject({
+    const verified = await service.setVerified(created.id, true, created.version, moderator);
+    expect(verified).toMatchObject({ isVerified: true, modifiedBy: moderator.sub, version: 2 });
+    await expect(service.setVerified(created.id, false, created.version, moderator)).rejects.toBeInstanceOf(ConflictError);
+    await expect(service.setVerified(created.id, false, verified.version, editor)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.setVerified(created.id, false, verified.version, moderator)).resolves.toMatchObject({
       isVerified: false,
       version: 3,
     });
@@ -265,11 +265,11 @@ describe('ArticleService authorization and persistence', () => {
   it('searches, filters, sorts predictably, and paginates', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    await service.create(articleInput('Zeta Freighter', ['ships']), standard);
-    await service.create(articleInput('Alpha Portal', ['portals']), standard);
-    await service.create(articleInput('Beta Portal', ['portals']), standard);
+    await service.create(articleInput('Zeta Freighter', ['ships']), editor);
+    await service.create(articleInput('Alpha Portal', ['portals']), editor);
+    await service.create(articleInput('Beta Portal', ['portals']), editor);
 
-    const result = await service.list({ ...query, search: 'portal', tagId: tagCatalog.portals.id, pageSize: 1 }, standard);
+    const result = await service.list({ ...query, search: 'portal', tagId: tagCatalog.portals.id, pageSize: 1 }, editor);
     expect(result.total).toBe(2);
     expect(result.totalPages).toBe(2);
     expect(result.items[0].title).toBe('Alpha Portal');
@@ -278,14 +278,14 @@ describe('ArticleService authorization and persistence', () => {
   it('places pinned articles first and filters to pinned articles', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    await service.create(articleInput('Alpha Portal'), standard);
-    const beta = await service.create(articleInput('Beta Portal'), standard);
-    await service.setPinned(beta.id, true, beta.version, admin);
+    await service.create(articleInput('Alpha Portal'), editor);
+    const beta = await service.create(articleInput('Beta Portal'), editor);
+    await service.setPinned(beta.id, true, beta.version, moderator);
 
-    const result = await service.list(query, standard);
+    const result = await service.list(query, editor);
     expect(result.items.map((article) => article.title)).toEqual(['Beta Portal', 'Alpha Portal']);
 
-    const pinned = await service.list({ ...query, pinned: 'pinned' }, standard);
+    const pinned = await service.list({ ...query, pinned: 'pinned' }, editor);
     expect(pinned.items).toHaveLength(1);
     expect(pinned.items[0]).toMatchObject({ title: 'Beta Portal', isPinned: true });
   });
@@ -293,14 +293,14 @@ describe('ArticleService authorization and persistence', () => {
   it('filters articles by verification status', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    await service.create(articleInput('Unverified Portal'), standard);
-    const verified = await service.create(articleInput('Verified Portal'), standard);
-    await service.setVerified(verified.id, true, verified.version, admin);
+    await service.create(articleInput('Unverified Portal'), editor);
+    const verified = await service.create(articleInput('Verified Portal'), editor);
+    await service.setVerified(verified.id, true, verified.version, moderator);
 
-    await expect(service.list({ ...query, verification: 'verified' }, standard)).resolves.toMatchObject({
+    await expect(service.list({ ...query, verification: 'verified' }, editor)).resolves.toMatchObject({
       items: [expect.objectContaining({ title: 'Verified Portal', isVerified: true })],
     });
-    await expect(service.list({ ...query, verification: 'unverified' }, standard)).resolves.toMatchObject({
+    await expect(service.list({ ...query, verification: 'unverified' }, editor)).resolves.toMatchObject({
       items: [expect.objectContaining({ title: 'Unverified Portal', isVerified: false })],
     });
   });
@@ -308,17 +308,17 @@ describe('ArticleService authorization and persistence', () => {
   it('defaults to Internal visibility and enforces role-based visibility', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    const internal = await service.create(articleInput('Internal Guide'), standard);
-    const published = await service.create(articleInput('Public Guide', [], 'Public'), standard);
-    const adminOnly = await service.create(articleInput('Admin Guide', [], 'Admin'), admin);
-    const agtPublic = await service.create(articleInput('AGT Public Guide', [], 0), standard);
-    const privateArticle = await service.create(articleInput('Private Guide', [], 1), standard);
-    const restricted = await service.create(articleInput('Restricted Guide', [], 2), admin);
+    const internal = await service.create(articleInput('Internal Guide'), editor);
+    const published = await service.create(articleInput('Public Guide', [], 'Public'), editor);
+    const adminOnly = await service.create(articleInput('Admin Guide', [], 'Admin'), moderator);
+    const agtPublic = await service.create(articleInput('AGT Public Guide', [], 0), editor);
+    const privateArticle = await service.create(articleInput('Private Guide', [], 1), editor);
+    const restricted = await service.create(articleInput('Restricted Guide', [], 2), moderator);
 
     expect(internal.visibility).toBe('Internal');
-    expect(() => service.create(articleInput('Forbidden Admin Guide', [], 'Admin'), standard)).toThrow(ForbiddenError);
-    expect(() => service.create(articleInput('Forbidden Restricted Guide', [], 2), standard)).toThrow(ForbiddenError);
-    await expect(service.update(internal.id, { ...articleInput('Hidden Guide', [], 'Admin'), version: internal.version }, standard)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(() => service.create(articleInput('Forbidden Admin Guide', [], 'Admin'), editor)).toThrow(ForbiddenError);
+    expect(() => service.create(articleInput('Forbidden Restricted Guide', [], 2), editor)).toThrow(ForbiddenError);
+    await expect(service.update(internal.id, { ...articleInput('Hidden Guide', [], 'Admin'), version: internal.version }, editor)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(service.get(internal.id, null)).rejects.toMatchObject({ statusCode: 404 });
 
     await expect(service.list(query, null)).resolves.toMatchObject({
@@ -327,41 +327,63 @@ describe('ArticleService authorization and persistence', () => {
         expect.objectContaining({ id: agtPublic.id }),
       ]),
     });
-    await expect(service.list(query, standard)).resolves.toMatchObject({
+    await expect(service.list(query, editor)).resolves.toMatchObject({
       items: expect.arrayContaining([expect.objectContaining({ id: privateArticle.id })]),
     });
-    await expect(service.list(query, standard)).resolves.toMatchObject({
+    await expect(service.list(query, editor)).resolves.toMatchObject({
       items: expect.not.arrayContaining([
         expect.objectContaining({ id: adminOnly.id }),
         expect.objectContaining({ id: restricted.id }),
       ]),
     });
-    await expect(service.list({ ...query, visibility: 'admin' }, admin)).resolves.toMatchObject({
+    await expect(service.list({ ...query, visibility: 'admin' }, moderator)).resolves.toMatchObject({
       items: [expect.objectContaining({ id: adminOnly.id })],
     });
-    await expect(service.list({ ...query, visibility: '2' }, admin)).resolves.toMatchObject({
+    await expect(service.list({ ...query, visibility: '2' }, moderator)).resolves.toMatchObject({
       items: [expect.objectContaining({ id: restricted.id })],
     });
   });
 
-  it('retains five dated revisions for Standard users and restricts restoration to Admins', async () => {
+  it('lists every visibility level for the admin inventory without a member actor', async () => {
     const repository = new MemoryRepository();
     const service = new ArticleService(repository);
-    let article = await service.create(articleInput('Portal Guide v1'), standard);
+    await service.create(articleInput('Internal Guide'), editor);
+    await service.create(articleInput('Legacy Moderator Guide', [], 'Admin'), moderator);
+    await service.create(articleInput('SCC Guide', [], 5), moderator);
+
+    const all = await service.listAll(query);
+    expect(all.items.map((item) => item.title).sort()).toEqual(['Internal Guide', 'Legacy Moderator Guide', 'SCC Guide']);
+    await expect(service.list(query, editor)).resolves.toMatchObject({ total: 1 });
+  });
+
+  it('lets Moderators see legacy Admin and AGT 2-5 articles and Editors only Public, Internal, 0 and 1', () => {
+    for (const visibility of ['Admin', 2, 3, 4, 5] as const) {
+      expect(canViewArticleVisibility('Moderator', visibility)).toBe(true);
+      expect(canViewArticleVisibility('Editor', visibility)).toBe(false);
+      expect(canViewArticleVisibility(null, visibility)).toBe(false);
+    }
+    for (const visibility of ['Public', 'Internal', 0, 1] as const) expect(canViewArticleVisibility('Editor', visibility)).toBe(true);
+    expect(canViewArticleVisibility(null, 'Internal')).toBe(false);
+  });
+
+  it('retains five dated revisions for Editors and restricts restoration to Moderators', async () => {
+    const repository = new MemoryRepository();
+    const service = new ArticleService(repository);
+    let article = await service.create(articleInput('Portal Guide v1'), editor);
     for (let version = 2; version <= 7; version += 1) {
-      article = await service.update(article.id, { ...articleInput(`Portal Guide v${version}`), version: article.version }, standard);
+      article = await service.update(article.id, { ...articleInput(`Portal Guide v${version}`), version: article.version }, editor);
     }
 
-    const history = await service.listRevisions(article.id, standard);
+    const history = await service.listRevisions(article.id, editor);
     expect(history.map((revision) => revision.version)).toEqual([7, 6, 5, 4, 3]);
     expect(history.every((revision) => revision.revisedAt.endsWith('Z'))).toBe(true);
-    await expect(service.restore(article.id, 4, article.version, standard)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.restore(article.id, 4, article.version, editor)).rejects.toBeInstanceOf(ForbiddenError);
 
-    const restored = await service.restore(article.id, 4, article.version, admin);
-    expect(restored).toMatchObject({ title: 'Portal Guide v4', version: 8, modifiedBy: admin.sub });
-    await expect(service.restore(article.id, 2, restored.version, admin)).rejects.toMatchObject({ statusCode: 404 });
-    await expect(service.restore(article.id, 4, 7, admin)).rejects.toBeInstanceOf(ConflictError);
-    await expect(service.listRevisions(article.id, admin)).resolves.toEqual(
+    const restored = await service.restore(article.id, 4, article.version, moderator);
+    expect(restored).toMatchObject({ title: 'Portal Guide v4', version: 8, modifiedBy: moderator.sub });
+    await expect(service.restore(article.id, 2, restored.version, moderator)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(service.restore(article.id, 4, 7, moderator)).rejects.toBeInstanceOf(ConflictError);
+    await expect(service.listRevisions(article.id, moderator)).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ version: 8, title: 'Portal Guide v4' })]),
     );
   });

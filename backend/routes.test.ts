@@ -1,21 +1,36 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { backupMaxBodyBytes, defaultMaxBodyBytes, matchRoute, maxBodyBytes, routeKeys } from './routes.js';
+import { defaultMaxBodyBytes, isAdminPath, matchRoute, maxBodyBytes, routeKeys, usesBackupBodyLimit } from './routes.js';
 
-// Routes answered by the HTTP server itself rather than by handleRequest.
-const serverRoutes = ['POST /auth/login', 'GET /auth/session', 'GET /setup/status', 'POST /setup'];
+// Routes answered by the HTTP server (server.ts) itself rather than by a handler.
+const serverRoutes = [
+  'POST /auth/login',
+  'GET /auth/session',
+  'GET /admin/setup/status',
+  'POST /admin/setup',
+  'POST /admin/auth/login',
+  'POST /admin/auth/logout',
+  'GET /admin/auth/session',
+  'PUT /admin/auth/password',
+];
 
 const articleId = '00000000-0000-4000-8000-000000000001';
 const tagId = '10000000-0000-4000-8000-000000000001';
 
+function handledRoutes(file: string) {
+  const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+  return [...source.matchAll(/case '([A-Z]+ [^']+)':/g)].map((match) => match[1]);
+}
+
 describe('route table', () => {
   it('matches literal and parameterized routes and extracts path parameters', () => {
-    expect(matchRoute('GET', '/articles')).toEqual({ routeKey: 'GET /articles', pathParameters: {}, authenticated: false });
+    expect(matchRoute('GET', '/articles')).toEqual({ routeKey: 'GET /articles', pathParameters: {}, auth: 'none', rawBody: false });
     expect(matchRoute('POST', `/articles/${articleId}/revisions/4/restore`)).toEqual({
       routeKey: 'POST /articles/{id}/revisions/{version}/restore',
       pathParameters: { id: articleId, version: '4' },
-      authenticated: true,
+      auth: 'member',
+      rawBody: false,
     });
     expect(matchRoute('DELETE', `/articles/${articleId}/orphan-tags/${tagId}`)).toMatchObject({
       routeKey: 'DELETE /articles/{id}/orphan-tags/{tagId}',
@@ -35,16 +50,17 @@ describe('route table', () => {
   it('keeps public reads public and requires authentication everywhere else', () => {
     const publicRoutes = [
       ['POST', '/auth/login'],
-      ['GET', '/setup/status'],
-      ['POST', '/setup'],
       ['GET', '/settings'],
       ['GET', '/articles'],
       ['GET', `/articles/${articleId}`],
       ['GET', '/tags'],
+      ['GET', '/admin/setup/status'],
+      ['POST', '/admin/setup'],
+      ['POST', '/admin/auth/login'],
     ];
-    for (const [method, path] of publicRoutes) expect(matchRoute(method, path)?.authenticated).toBe(false);
+    for (const [method, path] of publicRoutes) expect(matchRoute(method, path)?.auth).toBe('none');
 
-    const protectedRoutes = [
+    const memberRoutes = [
       ['GET', '/auth/session'],
       ['POST', '/articles'],
       ['PUT', `/articles/${articleId}`],
@@ -56,20 +72,42 @@ describe('route table', () => {
       ['GET', '/member/tags'],
       ['GET', '/tags/orphans'],
       ['POST', '/tags'],
-      ['GET', '/admin/users'],
-      ['GET', '/admin/stats'],
-      ['PUT', '/admin/settings'],
-      ['GET', '/admin/backup'],
-      ['POST', '/admin/backup/restore'],
     ];
-    for (const [method, path] of protectedRoutes) expect(matchRoute(method, path)?.authenticated).toBe(true);
+    for (const [method, path] of memberRoutes) expect(matchRoute(method, path)?.auth).toBe('member');
   });
 
-  it('accepts large bodies only on the backup restore route', () => {
-    expect(maxBodyBytes('POST /admin/backup/restore')).toBe(backupMaxBodyBytes);
-    expect(backupMaxBodyBytes).toBeGreaterThan(defaultMaxBodyBytes);
+  it('puts every admin route behind the Admin session except setup and sign-in', () => {
+    const adminKeys = routeKeys.filter((key) => isAdminPath(key.split(' ')[1]));
+    const open = ['GET /admin/setup/status', 'POST /admin/setup', 'POST /admin/auth/login'];
+    expect(adminKeys.length).toBeGreaterThan(10);
+    for (const key of adminKeys) {
+      const [method, path] = key.split(' ');
+      const concrete = path.replace(/\{[^}]+\}/g, articleId);
+      expect(matchRoute(method, concrete)?.auth, key).toBe(open.includes(key) ? 'none' : 'admin');
+    }
+    // No member route lives under /admin, and no admin route outside it.
+    for (const key of routeKeys) {
+      const route = matchRoute(key.split(' ')[0], key.split(' ')[1].replace(/\{[^}]+\}/g, articleId))!;
+      if (route.auth === 'admin') expect(isAdminPath(key.split(' ')[1])).toBe(true);
+      if (route.auth === 'member') expect(isAdminPath(key.split(' ')[1])).toBe(false);
+    }
+  });
+
+  it('rate-limits member sign-in, Admin sign-in, setup, and Admin password changes', () => {
+    expect(matchRoute('POST', '/auth/login')?.rateLimit).toBe('login');
+    expect(matchRoute('POST', '/admin/auth/login')?.rateLimit).toBe('adminLogin');
+    expect(matchRoute('POST', '/admin/setup')?.rateLimit).toBe('setup');
+    expect(matchRoute('PUT', '/admin/auth/password')?.rateLimit).toBe('adminPassword');
+  });
+
+  it('takes the restore body limit from the effective backup.maxBytes setting', () => {
+    expect(usesBackupBodyLimit('POST /admin/backup/restore')).toBe(true);
+    expect(matchRoute('POST', '/admin/backup/restore')?.rawBody).toBe(true);
+    expect(maxBodyBytes('POST /admin/backup/restore', 5_000_000)).toBe(5_000_000);
+    expect(() => maxBodyBytes('POST /admin/backup/restore')).toThrow();
     for (const key of routeKeys.filter((routeKey) => routeKey !== 'POST /admin/backup/restore')) {
       expect(maxBodyBytes(key)).toBe(defaultMaxBodyBytes);
+      expect(usesBackupBodyLimit(key)).toBe(false);
     }
     expect(maxBodyBytes('GET /unknown')).toBe(defaultMaxBodyBytes);
   });
@@ -79,12 +117,18 @@ describe('route table', () => {
     expect(matchRoute('PATCH', `/articles/${articleId}`)).toBeNull();
     expect(matchRoute('GET', `/articles/${articleId}/extra/segments`)).toBeNull();
     expect(matchRoute('GET', '/articles/')).toBeNull();
+    expect(matchRoute('GET', '/setup/status')).toBeNull();
+    expect(matchRoute('POST', '/setup')).toBeNull();
   });
 
-  it('declares exactly the routes the handler dispatches', () => {
-    const source = readFileSync(new URL('./handler.ts', import.meta.url), 'utf8');
-    const handled = [...source.matchAll(/case '([A-Z]+ [^']+)':/g)].map((match) => match[1]).sort();
+  it('declares exactly the routes the handlers dispatch', () => {
+    const member = handledRoutes('./handler.ts');
+    const admin = handledRoutes('./admin-handler.ts');
     expect(new Set(routeKeys).size).toBe(routeKeys.length);
-    expect(routeKeys.filter((key) => !serverRoutes.includes(key)).sort()).toEqual(handled);
+    expect(member.every((key) => !isAdminPath(key.split(' ')[1]))).toBe(true);
+    expect(admin.every((key) => isAdminPath(key.split(' ')[1]))).toBe(true);
+    expect(routeKeys.filter((key) => !serverRoutes.includes(key)).sort()).toEqual([...member, ...admin].sort());
+    const served = handledRoutes('./server.ts');
+    expect(served.sort()).toEqual([...serverRoutes].sort());
   });
 });

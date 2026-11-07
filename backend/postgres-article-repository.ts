@@ -9,7 +9,7 @@ import type {
   CanonicalTag,
   ListArticlesQuery,
   OrphanCleanupResult,
-  Role,
+  Viewer,
   TagOrphan,
   TagWrite,
 } from './domain.js';
@@ -184,7 +184,7 @@ function isUniqueViolation(error: unknown) {
 }
 
 export class PostgresArticleRepository implements ArticleRepository, TagRepository {
-  async list(query: ListArticlesQuery, viewerRole: Role | null): Promise<ArticleListResult> {
+  async list(query: ListArticlesQuery, viewer: Viewer): Promise<ArticleListResult> {
     const pool = await getPool();
     const visibilityFilter = articleVisibilityFromFilter(query.visibility);
     const conditions = [
@@ -194,9 +194,9 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       `($4 = 'all' OR ($4 = 'protected' AND a.is_protected) OR ($4 = 'unprotected' AND NOT a.is_protected))`,
       `($5::jsonb IS NULL OR a.visibility = $5::jsonb)`,
       `($6 = 'all' OR ($6 = 'verified' AND a.is_verified) OR ($6 = 'unverified' AND NOT a.is_verified))`,
-      `($7::text = 'Admin'
+      `($7::text IN ('Moderator', 'System')
         OR a.visibility IN ('"Public"'::jsonb, '0'::jsonb)
-        OR ($7::text = 'Standard' AND a.visibility IN ('"Internal"'::jsonb, '1'::jsonb)))`,
+        OR ($7::text = 'Editor' AND a.visibility IN ('"Internal"'::jsonb, '1'::jsonb)))`,
     ];
     const where = conditions.join(' AND ');
     const sortColumns = { createdAt: 'a.created_at', modifiedAt: 'a.modified_at', title: 'lower(a.title)' } as const;
@@ -209,7 +209,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       query.protection,
       visibilityFilter === null ? null : JSON.stringify(visibilityFilter),
       query.verification,
-      viewerRole,
+      viewer,
     ];
 
     const [countResult, dataResult] = await Promise.all([
@@ -260,7 +260,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
     };
   }
 
-  async get(id: string, viewerRole: Role | null) {
+  async get(id: string, viewer: Viewer) {
     const pool = await getPool();
     const result = await pool.query<ArticleRow>(
       `SELECT ${baseSelect}
@@ -268,10 +268,10 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
        JOIN app_users creator ON creator.user_id = a.created_by
        JOIN app_users editor ON editor.user_id = a.modified_by
        WHERE a.id = $1
-         AND ($2::text = 'Admin'
+         AND ($2::text IN ('Moderator', 'System')
            OR a.visibility IN ('"Public"'::jsonb, '0'::jsonb)
-           OR ($2::text = 'Standard' AND a.visibility IN ('"Internal"'::jsonb, '1'::jsonb)))`,
-      [id, viewerRole],
+           OR ($2::text = 'Editor' AND a.visibility IN ('"Internal"'::jsonb, '1'::jsonb)))`,
+      [id, viewer],
     );
     return result.rows[0] ? toArticle(result.rows[0]) : null;
   }
@@ -345,7 +345,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
            AND (NOT is_protected OR $8::boolean)
            AND ($8::boolean OR $4::jsonb IN ('"Public"'::jsonb, '"Internal"'::jsonb, '0'::jsonb, '1'::jsonb))
          RETURNING id`,
-        [input.title, input.content, input.tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub, id, input.version, actor.role === 'Admin'],
+        [input.title, input.content, input.tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub, id, input.version, actor.role === 'Moderator'],
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');

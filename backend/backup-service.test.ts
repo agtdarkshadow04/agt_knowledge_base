@@ -1,82 +1,80 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const database = vi.hoisted(() => ({
-  connect: vi.fn(),
-  query: vi.fn(),
-}));
-
+const database = vi.hoisted(() => ({ connect: vi.fn(), query: vi.fn() }));
 vi.mock('./db.js', () => ({ getPool: vi.fn(async () => database) }));
 
-import { BackupService, backupTables, type DatabaseBackup } from './backup-service.js';
+import { buildBackupArchive, readBackupArchive, type BackupRow } from './backup-archive.js';
+import { BackupService, backupTables, unbackedTables, upgradePlan } from './backup-service.js';
+import { parseConfig, setConfigForTests } from './config.js';
 import { migrations as schemaMigrations } from './migrations.js';
-import type { Actor } from './domain.js';
+import type { SettingsService } from './settings-service.js';
 
-const superAdmin: Actor = {
-  sub: '10000000-0000-4000-8000-000000000001',
-  displayName: 'Atlas',
-  role: 'Admin',
-  isSuperAdmin: true,
-};
-
-const migrations = ['001_initial', '002_article_revisions'];
+const current = schemaMigrations.filter((migration) => !migration.requiresExplicitTarget).map((migration) => migration.id);
 
 const columns: Record<string, string[]> = {
   app_users: ['user_id', 'display_name'],
-  local_users: ['id', 'username', 'role', 'is_active', 'is_super_admin', 'session_version'],
+  local_users: ['id', 'username', 'role', 'is_active', 'session_version'],
   tags: ['id', 'name', 'color'],
   articles: ['id', 'title', 'tag_ids'],
   article_revisions: ['article_id', 'version'],
-  application_settings: ['singleton', 'application_name'],
+  application_settings: ['singleton', 'application_name', 'application_subtitle'],
+  admin: ['id', 'username', 'password_hash'],
+  admin_sessions: ['token_hash', 'expires_at'],
 };
 
-const columnRows = [
-  ...Object.entries(columns).flatMap(([table, names]) => names.map((name) => ({
-    table_name: table,
-    column_name: name,
-    is_generated: 'NEVER',
-  }))),
-  { table_name: 'articles', column_name: 'search_vector', is_generated: 'ALWAYS' },
-];
-
-function backup(overrides: Partial<DatabaseBackup['tables']> = {}, backupMigrations = migrations): DatabaseBackup {
+function tables(overrides: Record<string, BackupRow[]> = {}): Record<string, BackupRow[]> {
   return {
-    format: 'agt-knowledge-base-backup',
-    formatVersion: 1,
-    createdAt: '2026-11-01T00:00:00.000Z',
-    migrations: backupMigrations,
-    tables: {
-      app_users: [{ user_id: superAdmin.sub, display_name: 'Atlas' }],
-      local_users: [{
-        id: superAdmin.sub,
-        username: 'atlas',
-        role: 'Admin',
-        is_active: true,
-        is_super_admin: true,
-        session_version: 3,
-      }],
-      tags: [],
-      articles: [{ id: '00000000-0000-4000-8000-000000000001', title: 'Portal Guide', tag_ids: [] }],
-      article_revisions: [{ article_id: '00000000-0000-4000-8000-000000000001', version: 1 }],
-      application_settings: [{ singleton: true, application_name: 'Archive' }],
-      ...overrides,
-    },
+    app_users: [{ user_id: 'u1', display_name: 'Atlas' }],
+    local_users: [{ id: 'l1', username: 'apollo', role: 'Editor', is_active: true, session_version: 3 }],
+    tags: [],
+    articles: [{ id: 'a1', title: 'Portal Guide', tag_ids: [] }],
+    article_revisions: [{ article_id: 'a1', version: 1 }],
+    application_settings: [{ singleton: true, application_name: 'Backup Archive', application_subtitle: 'From the backup' }],
+    admin: [{ id: true, username: 'atlas', password_hash: 'scrypt$x$y' }],
+    ...overrides,
   };
 }
 
-function fakeClient(options: { isSuperAdmin?: boolean; failInsert?: { code: string; message: string; table?: string; constraint?: string } } = {}) {
+function archive(options: { migrations?: string[]; tables?: Record<string, BackupRow[]>; configText?: string | null } = {}) {
+  return buildBackupArchive({
+    appVersion: '1.0.0',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    migrations: options.migrations ?? current,
+    database: { tables: options.tables ?? tables() },
+    configText: options.configText === undefined ? 'server:\n  port: 3001\n' : options.configText,
+  });
+}
+
+interface FakeOptions {
+  failOn?: (sql: string) => { code: string; message: string; table?: string; constraint?: string } | undefined;
+}
+
+function fakeClient(options: FakeOptions = {}) {
   const query = vi.fn(async (sql: string, params?: unknown[]) => {
-    if (sql.includes('is_super_admin = true')) {
-      return { rowCount: options.isSuperAdmin === false ? 0 : 1, rows: [] };
+    const failure = options.failOn?.(sql);
+    if (failure) throw Object.assign(new Error(failure.message), failure);
+    if (sql.startsWith('SELECT id FROM schema_migrations')) return { rows: current.map((id) => ({ id })) };
+    if (sql.includes('current_schema()')) return { rows: [{ schema: 'public' }] };
+    if (sql.includes('information_schema.columns')) {
+      const only = params?.[1] as string[] | null;
+      const rows = Object.entries(columns)
+        .filter(([table]) => !only || only.includes(table))
+        .flatMap(([table, names]) => [
+          ...names.map((name) => ({ table_name: table, column_name: name, is_generated: 'NEVER' })),
+          ...(table === 'articles' ? [{ table_name: table, column_name: 'search_vector', is_generated: 'ALWAYS' }] : []),
+        ]);
+      return { rows };
     }
-    if (sql.includes('FROM schema_migrations')) return { rowCount: migrations.length, rows: migrations.map((id) => ({ id })) };
-    if (sql.includes('information_schema.columns')) return { rowCount: columnRows.length, rows: columnRows };
     if (sql.includes('jsonb_agg')) {
-      const table = /FROM "([a-z_]+)" source/.exec(sql)?.[1];
-      return { rowCount: 1, rows: [{ rows: [{ table, excluded: params?.[0] }] }] };
+      const table = /\."([a-z_]+)" source/.exec(sql)?.[1] ?? '';
+      return { rows: [{ rows: tables()[table] ?? [] }] };
     }
-    if (sql.startsWith('INSERT INTO') && options.failInsert) throw Object.assign(new Error(options.failInsert.message), options.failInsert);
-    return { rowCount: 0, rows: [] };
+    if (sql.includes('to_jsonb(settings)')) return { rows: [{ row: { application_name: 'Live Archive' } }] };
+    return { rows: [], rowCount: 0 };
   });
   const client = { query, release: vi.fn() };
   database.connect.mockResolvedValue(client);
@@ -87,131 +85,257 @@ function statements(client: ReturnType<typeof fakeClient>) {
   return client.query.mock.calls.map(([sql]) => sql);
 }
 
+const settings = {
+  getEffective: vi.fn(async () => ({ backupMaxBytes: 10 * 1024 * 1024, backupMaxEntries: 16, backupMaxUncompressedBytes: 10 * 1024 * 1024 })),
+} as unknown as SettingsService;
+
+let backupsDir: string;
+let configDir: string;
+
+function useConfig(text: string, path = join(configDir, 'config.yaml')) {
+  writeFileSync(path, text);
+  const withStorage = `${text}\nstorage:\n  backupsDir: ${JSON.stringify(backupsDir)}\n`;
+  setConfigForTests({ path, text, config: parseConfig(withStorage) });
+}
+
+function service() {
+  return new BackupService(settings, () => new Date('2026-11-07T06:15:00.123Z'));
+}
+
 describe('BackupService', () => {
   beforeEach(() => {
+    backupsDir = join(mkdtempSync(join(tmpdir(), 'agt-backups-')), 'backups');
+    configDir = mkdtempSync(join(tmpdir(), 'agt-config-'));
+    useConfig('server:\n  port: 3001\n');
     database.connect.mockReset();
-    database.query.mockReset();
   });
 
-  it('covers every table the migrations create', () => {
+  afterEach(() => setConfigForTests(undefined));
+
+  it('covers every table the migrations create except Admin sessions', () => {
     const created = schemaMigrations.flatMap((migration) => [...migration.sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)/g)]
       .map((match) => match[1]));
-    expect([...new Set(created)].sort()).toEqual([...backupTables].sort());
+    expect([...new Set(created)].sort()).toEqual([...backupTables, ...unbackedTables].sort());
+    expect(backupTables).toContain('admin');
+    expect(backupTables).not.toContain('admin_sessions');
   });
 
-  it('exports every table from one read-only snapshot without generated columns', async () => {
+  it('exports a ZIP of every table from one read-only snapshot, with config.yaml and a manifest', async () => {
     const client = fakeClient();
 
-    const result = await new BackupService().export(superAdmin);
+    const result = await service().export();
 
+    expect(result.filename).toBe('agt-kb-backup-20261107-061500.zip');
     expect(statements(client)[0]).toBe('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    expect(result).toMatchObject({ format: 'agt-knowledge-base-backup', formatVersion: 1, migrations });
-    expect(Object.keys(result.tables)).toEqual([...backupTables]);
-    expect(result.tables.articles).toEqual([{ table: 'articles', excluded: ['search_vector'] }]);
-    expect(result.tables.tags).toEqual([{ table: 'tags', excluded: [] }]);
-    expect(statements(client)).toContain('COMMIT');
-    expect(client.release).toHaveBeenCalled();
+    const contents = await readBackupArchive(result.archive, { maxBytes: 1e8, maxEntries: 16, maxUncompressedBytes: 1e8 });
+    expect(Object.keys(contents.database.tables)).toEqual([...backupTables]);
+    expect(contents.database.tables).not.toHaveProperty('admin_sessions');
+    expect(contents.manifest).toMatchObject({ appVersion: expect.any(String), migrations: current });
+    expect(contents.configText).toBe('server:\n  port: 3001\n');
+    const articleDump = client.query.mock.calls.find(([sql]) => String(sql).includes('"public"."articles" source'))!;
+    expect(articleDump[1]).toEqual([['search_vector']]);
   });
 
-  it('rejects exports by anyone who is not the active super administrator', async () => {
-    const client = fakeClient({ isSuperAdmin: false });
-
-    await expect(new BackupService().export({ ...superAdmin, sub: '20000000-0000-4000-8000-000000000002' }))
-      .rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
-    expect(statements(client).some((sql) => sql.includes('jsonb_agg'))).toBe(false);
-    expect(statements(client)).toContain('ROLLBACK');
-  });
-
-  it('replaces all data in one transaction and signs every user out', async () => {
+  it('previews without changing anything', async () => {
     const client = fakeClient();
+    useConfig('server:\n  port: 4000\n');
 
-    await expect(new BackupService().restore(backup(), superAdmin)).resolves.toEqual({
-      app_users: 1,
-      local_users: 1,
-      tags: 0,
-      articles: 1,
-      article_revisions: 1,
-      application_settings: 1,
-    });
+    const preview = await service().preview(await archive());
 
     const sql = statements(client);
-    const truncate = sql.findIndex((statement) => statement.startsWith('TRUNCATE'));
-    expect(sql[0]).toBe('BEGIN');
-    expect(sql[truncate]).toBe(`TRUNCATE ${backupTables.map((table) => `"${table}"`).join(', ')}`);
-    expect(sql.findIndex((statement) => statement.includes('is_super_admin = true'))).toBeLessThan(truncate);
-    expect(sql.filter((statement) => statement.endsWith('DISABLE TRIGGER USER'))).toHaveLength(backupTables.length);
-    expect(sql.filter((statement) => statement.endsWith('ENABLE TRIGGER USER'))).toHaveLength(backupTables.length);
-
-    const inserts = client.query.mock.calls.filter(([statement]) => statement.startsWith('INSERT INTO'));
-    expect(inserts.map(([statement]) => /INSERT INTO "([a-z_]+)"/.exec(statement)?.[1]))
-      .toEqual(['app_users', 'local_users', 'articles', 'article_revisions', 'application_settings']);
-    const articleInsert = inserts.find(([statement]) => statement.startsWith('INSERT INTO "articles"'))!;
-    expect(articleInsert[0]).toContain('("id", "title", "tag_ids")');
-    expect(articleInsert[0]).not.toContain('search_vector');
-    expect(JSON.parse(String(articleInsert[1]?.[0]))).toEqual(backup().tables.articles);
-
-    const bump = sql.indexOf('UPDATE local_users SET session_version = session_version + 1');
-    expect(bump).toBeGreaterThan(truncate);
-    expect(sql.indexOf('COMMIT')).toBeGreaterThan(bump);
+    expect(sql).toContain('ROLLBACK');
+    expect(sql).not.toContain('COMMIT');
+    expect(sql.some((statement) => /TRUNCATE "public"/.test(statement))).toBe(false);
+    expect(sql.some((statement) => /INSERT INTO "public"/.test(statement))).toBe(false);
+    expect(existsSync(backupsDir)).toBe(false);
+    expect(preview).toMatchObject({
+      migrations: { backup: current, upgrade: [] },
+      counts: { app_users: 1, local_users: 1, articles: 1, admin: 1 },
+      config: { included: true, content: 'server:\n  port: 3001\n', identical: false },
+      ignoredSettings: [],
+    });
+    expect(preview.config.diff).toEqual([
+      { kind: ' ', text: 'server:' },
+      { kind: '-', text: '  port: 4000' },
+      { kind: '+', text: '  port: 3001' },
+    ]);
   });
 
-  it('rejects restores by anyone who is not the active super administrator before changing data', async () => {
-    const client = fakeClient({ isSuperAdmin: false });
+  it('builds the staging schema with a search_path that excludes the live schema', async () => {
+    const client = fakeClient();
+    await service().preview(await archive());
+    const sql = statements(client);
+    const create = sql.find((statement) => statement.startsWith('CREATE SCHEMA'))!;
+    const staging = /"(kb_restore_[0-9a-f]{12})"/.exec(create)![1];
+    expect(sql).toContain(`SET LOCAL search_path TO "${staging}"`);
+    expect(sql.filter((statement) => statement.startsWith('SET LOCAL search_path')).every((statement) => !statement.includes('public'))).toBe(true);
+    // Every migration of the backup's level runs after the search_path change and before rows load.
+    const setPath = sql.indexOf(`SET LOCAL search_path TO "${staging}"`);
+    const firstInsert = sql.findIndex((statement) => statement.startsWith(`INSERT INTO "${staging}"`));
+    for (const migration of schemaMigrations.filter((candidate) => current.includes(candidate.id))) {
+      const index = sql.indexOf(migration.sql);
+      expect(index, migration.id).toBeGreaterThan(setPath);
+      expect(index, migration.id).toBeLessThan(firstInsert);
+    }
+  });
 
-    await expect(new BackupService().restore(backup(), superAdmin))
-      .rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
-    expect(statements(client).some((sql) => sql.startsWith('TRUNCATE'))).toBe(false);
+  it('fails, rather than reaching a live table, when a migration refers to a table missing from staging', async () => {
+    const last = schemaMigrations.find((migration) => migration.id === current.at(-1))!;
+    const client = fakeClient({
+      failOn: (sql) => (sql === last.sql ? { code: '42P01', message: 'relation "application_settings" does not exist' } : undefined),
+    });
+
+    await expect(service().preview(await archive())).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'INVALID_BACKUP',
+      message: expect.stringContaining(`migration ${last.id} failed`),
+    });
     expect(statements(client)).toContain('ROLLBACK');
+    expect(statements(client).some((statement) => statement.includes('"public"') && /TRUNCATE|INSERT/.test(statement))).toBe(false);
   });
 
-  it('rejects backups from a different schema version before changing data', async () => {
+  it('upgrades an older backup with the remaining migrations after loading its rows', async () => {
+    const client = fakeClient();
+    const older = current.slice(0, -2);
+
+    const preview = await service().preview(await archive({ migrations: older }));
+
+    expect(preview.migrations.upgrade).toEqual(current.slice(-2));
+    const sql = statements(client);
+    const lastInsert = sql.length - 1 - [...sql].reverse().findIndex((statement) => /^INSERT INTO "kb_restore_/.test(statement));
+    for (const id of current.slice(-2)) {
+      expect(sql.indexOf(schemaMigrations.find((migration) => migration.id === id)!.sql)).toBeGreaterThan(lastInsert);
+    }
+  });
+
+  it('refuses newer, unknown, and diverging backups', async () => {
+    expect(() => upgradePlan([...current, '999_future'], current)).toThrow(/newer or different version/);
+    expect(() => upgradePlan(current, current.slice(0, -1))).toThrow(/newer version/);
+    expect(() => upgradePlan(['001_initial', '003_article_pinning'], current)).toThrow(/diverges/);
+    expect(upgradePlan(current.slice(0, 3), current)).toEqual(current.slice(3));
+    expect(upgradePlan(current, current)).toEqual([]);
+
+    const client = fakeClient();
+    await expect(service().restore(await archive({ migrations: [...current, '999_future'] })))
+      .rejects.toMatchObject({ statusCode: 400, code: 'INVALID_BACKUP' });
+    expect(statements(client).some((statement) => statement.startsWith('TRUNCATE "public"'))).toBe(false);
+  });
+
+  it('writes a pre-restore backup, replaces every table, and signs everyone out', async () => {
     const client = fakeClient();
 
-    await expect(new BackupService().restore(backup({}, ['001_initial']), superAdmin))
-      .rejects.toMatchObject({ statusCode: 400, code: 'INVALID_BACKUP' });
-    expect(statements(client).some((sql) => sql.startsWith('TRUNCATE'))).toBe(false);
-    expect(statements(client)).toContain('ROLLBACK');
+    const report = await service().restore(await archive());
+
+    expect(report.preRestoreBackup).toMatch(/^pre-restore-backup-20261107-061500-123-[0-9a-f]{6}\.zip$/);
+    expect(readdirSync(backupsDir)).toEqual([report.preRestoreBackup]);
+    const sql = statements(client);
+    const truncate = sql.find((statement) => statement.startsWith('TRUNCATE "public"'))!;
+    for (const table of [...backupTables, 'admin_sessions']) expect(truncate).toContain(`"public"."${table}"`);
+    const copies = sql.filter((statement) => /^INSERT INTO "public"/.test(statement));
+    expect(copies.map((statement) => /INSERT INTO "public"\."([a-z_]+)"/.exec(statement)![1])).toEqual([...backupTables]);
+    expect(copies.find((statement) => statement.includes('"articles"'))).not.toContain('search_vector');
+    const bump = sql.indexOf('UPDATE "public"."local_users" SET session_version = session_version + 1');
+    expect(bump).toBeGreaterThan(sql.indexOf(truncate));
+    expect(sql.findIndex((statement) => statement.startsWith('DROP SCHEMA "kb_restore_'))).toBeGreaterThan(bump);
+    expect(sql.at(-1)).toBe('COMMIT');
   });
 
-  it('rejects rows whose columns do not match the table before changing data', async () => {
-    const client = fakeClient();
-    const tampered = backup({ tags: [{ id: 'x', name: 'Portal', color: '#FFFFFF', search_vector: 'x' }] });
-
-    await expect(new BackupService().restore(tampered, superAdmin))
-      .rejects.toMatchObject({ statusCode: 400, code: 'INVALID_BACKUP' });
-    expect(statements(client).some((sql) => sql.startsWith('TRUNCATE'))).toBe(false);
-  });
-
-  it('requires exactly one active super administrator in the backup', async () => {
+  it('never restores config.yaml', async () => {
     fakeClient();
-    const withoutSuperAdmin = backup({
-      local_users: [{ id: superAdmin.sub, username: 'atlas', role: 'Admin', is_active: true, is_super_admin: false, session_version: 1 }],
-    });
-    const inactiveSuperAdmin = backup({
-      local_users: [{ id: superAdmin.sub, username: 'atlas', role: 'Admin', is_active: false, is_super_admin: true, session_version: 1 }],
-    });
+    useConfig('server:\n  port: 4000\n');
+    await service().restore(await archive({ configText: 'server:\n  port: 1\n' }));
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync(join(configDir, 'config.yaml'), 'utf8')).toBe('server:\n  port: 4000\n');
+  });
 
-    await expect(new BackupService().restore(withoutSuperAdmin, superAdmin))
-      .rejects.toMatchObject({ statusCode: 400, code: 'INVALID_BACKUP' });
-    await expect(new BackupService().restore(inactiveSuperAdmin, superAdmin))
-      .rejects.toMatchObject({ statusCode: 400, code: 'INVALID_BACKUP' });
+  it('keeps settings that config.yaml defines and lists them in the report', async () => {
+    const client = fakeClient();
+    useConfig('site:\n  applicationName: File Archive\n');
+
+    const report = await service().restore(await archive());
+
+    expect(report.ignoredSettings).toEqual(['site.applicationName']);
+    const keep = client.query.mock.calls.find(([sql]) => String(sql).startsWith('UPDATE "public"."application_settings"'))!;
+    expect(keep[0]).toContain('SET ("application_name") = (');
+    expect(JSON.parse(String((keep[1] as unknown[])[0]))).toEqual({ application_name: 'Live Archive' });
+  });
+
+  it('aborts the restore when the pre-restore backup cannot be written', async () => {
+    const client = fakeClient();
+    writeFileSync(join(configDir, 'not-a-directory'), '');
+    backupsDir = join(configDir, 'not-a-directory');
+    useConfig('');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(service().restore(await archive())).rejects.toMatchObject({ statusCode: 500, code: 'PRE_RESTORE_BACKUP_FAILED' });
+    expect(statements(client).some((statement) => statement.startsWith('CREATE SCHEMA') || statement.startsWith('TRUNCATE'))).toBe(false);
+    consoleError.mockRestore();
+  });
+
+  it('requires exactly one Admin and one settings row before touching the database', async () => {
+    fakeClient();
+    await expect(service().preview(await archive({ tables: tables({ admin: [] }) }))).rejects.toMatchObject({ code: 'INVALID_BACKUP', message: expect.stringContaining('exactly one Admin') });
+    await expect(service().preview(await archive({ tables: tables({ application_settings: [] }) }))).rejects.toMatchObject({ code: 'INVALID_BACKUP' });
     expect(database.connect).not.toHaveBeenCalled();
   });
 
-  it('rolls back and reports constraint violations as an invalid backup', async () => {
-    const client = fakeClient({ failInsert: {
-      code: '23503',
-      message: 'insert or update violates foreign key constraint "articles_created_by_fkey" (secret value)',
-      table: 'articles',
-      constraint: 'articles_created_by_fkey',
-    } });
+  it('rejects rows or tables that do not match the backup\'s schema version', async () => {
+    fakeClient();
+    await expect(service().preview(await archive({ tables: tables({ tags: [{ id: 'x', name: 'Portal', color: '#FFFFFF', search_vector: 'x' }] }) })))
+      .rejects.toMatchObject({ code: 'INVALID_BACKUP', message: expect.stringContaining('a row in tags does not match') });
+    const { tags: _removed, ...withoutTags } = tables();
+    void _removed;
+    await expect(service().preview(await archive({ tables: withoutTags })))
+      .rejects.toMatchObject({ code: 'INVALID_BACKUP', message: expect.stringContaining('tables do not match') });
+  });
 
-    await expect(new BackupService().restore(backup(), superAdmin)).rejects.toMatchObject({
+  it('rolls back and reports constraint violations without echoing row values', async () => {
+    const client = fakeClient({
+      failOn: (sql) => (sql.startsWith('INSERT INTO "kb_restore_') && sql.includes('"articles"')
+        ? { code: '23503', message: 'violates foreign key constraint (secret value)', table: 'articles', constraint: 'articles_created_by_fkey' }
+        : undefined),
+    });
+    await expect(service().restore(await archive())).rejects.toMatchObject({
       statusCode: 400,
       code: 'INVALID_BACKUP',
       message: 'The backup cannot be restored: a row in articles violates the articles_created_by_fkey constraint.',
     });
-    expect(statements(client)).toContain('ROLLBACK');
-    expect(statements(client)).not.toContain('COMMIT');
+    // The pre-restore export commits its own read-only snapshot; the restore transaction does not commit.
+    const sql = statements(client);
+    const restoreTransaction = sql.slice(sql.lastIndexOf('BEGIN'));
+    expect(restoreTransaction).toContain('ROLLBACK');
+    expect(restoreTransaction).not.toContain('COMMIT');
+  });
+});
+
+describe('pre-restore backup retention', () => {
+  function seed(names: string[]) {
+    const directory = mkdtempSync(join(tmpdir(), 'agt-retention-'));
+    for (const name of names) writeFileSync(join(directory, name), '');
+    return directory;
+  }
+
+  const files = [
+    'pre-restore-backup-20261101-000000-000.zip',
+    'pre-restore-backup-20261102-000000-000.zip',
+    'pre-restore-backup-20261103-000000-000.zip',
+    'pre-restore-backup-20261104-000000-000.zip',
+  ];
+
+  it('keeps every pre-restore backup by default', async () => {
+    const directory = seed([...files, 'agt-kb-backup-20261101-000000.zip']);
+    await new BackupService(settings).prunePreRestoreBackups(directory, files[3], undefined);
+    expect(readdirSync(directory)).toHaveLength(5);
+  });
+
+  it('prunes the oldest pre-restore backups beyond the configured number, never the new one', async () => {
+    const directory = seed([...files, 'notes.txt']);
+    await new BackupService(settings).prunePreRestoreBackups(directory, files[3], 2);
+    expect(readdirSync(directory).sort()).toEqual([files[2], files[3], 'notes.txt'].sort());
+
+    // Even when the new file sorts first, it is kept.
+    const other = seed(files);
+    await new BackupService(settings).prunePreRestoreBackups(other, files[0], 1);
+    expect(readdirSync(other)).toEqual([files[0]]);
   });
 });

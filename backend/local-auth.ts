@@ -1,7 +1,8 @@
 import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
+import { getConfig } from './config.js';
 import { getPool } from './db.js';
-import type { Role } from './domain.js';
+import { roles, type Role } from './domain.js';
 
 const scrypt = promisify(scryptCallback);
 const keyLength = 64;
@@ -12,7 +13,6 @@ export interface LocalSessionUser {
   displayName: string;
   email?: string;
   role: Role;
-  isSuperAdmin: boolean;
   sessionVersion: number;
 }
 
@@ -23,7 +23,6 @@ interface LocalUserRow {
   display_name: string;
   email: string | null;
   role: Role;
-  is_super_admin: boolean;
   session_version: number;
 }
 
@@ -41,22 +40,27 @@ function authSecret() {
 }
 
 function sessionHours() {
-  const hours = Number(process.env.LOCAL_AUTH_SESSION_HOURS ?? 12);
-  if (!Number.isFinite(hours) || hours < 1 || hours > 168) {
-    throw new Error('LOCAL_AUTH_SESSION_HOURS must be between 1 and 168.');
-  }
-  return hours;
+  return getConfig().session.ttlHours;
 }
 
 export function assertLocalAuthConfigured() {
   authSecret();
-  sessionHours();
 }
 
 export async function hashPassword(password: string) {
   const salt = randomBytes(16);
   const derivedKey = await scrypt(password, salt, keyLength) as Buffer;
   return `scrypt$${salt.toString('base64url')}$${derivedKey.toString('base64url')}`;
+}
+
+/**
+ * A valid hash of a random password, verified when no account matches so a
+ * failed sign-in takes the same time whether or not the account exists.
+ */
+let dummyHash: Promise<string> | undefined;
+export function dummyPasswordHash() {
+  dummyHash ??= hashPassword(randomBytes(32).toString('base64url'));
+  return dummyHash;
 }
 
 export async function verifyPassword(password: string, encoded: string) {
@@ -78,7 +82,7 @@ export async function authenticateLocalUser(identifier: string, password: string
   if (!normalized || normalized.length > 254 || !password || password.length > 1024) return null;
   const pool = await getPool();
   const result = await pool.query<LocalUserRow>(
-    `SELECT id, username, password_hash, display_name, email, role, is_super_admin, session_version
+    `SELECT id, username, password_hash, display_name, email, role, session_version
      FROM local_users
      WHERE is_active = true AND (username = $1 OR email = $1)
      LIMIT 1`,
@@ -86,7 +90,7 @@ export async function authenticateLocalUser(identifier: string, password: string
   );
   const user = result.rows[0];
   if (!user) {
-    await scrypt(password, 'agt-invalid-local-user', keyLength);
+    await verifyPassword(password, await dummyPasswordHash());
     return null;
   }
   if (!await verifyPassword(password, user.password_hash)) return null;
@@ -96,7 +100,6 @@ export async function authenticateLocalUser(identifier: string, password: string
     displayName: user.display_name,
     email: user.email ?? undefined,
     role: user.role,
-    isSuperAdmin: user.is_super_admin,
     sessionVersion: user.session_version,
   };
 }
@@ -139,15 +142,14 @@ export async function verifyLocalToken(token: string): Promise<LocalSessionUser>
     || typeof payload.username !== 'string' || !payload.username
     || typeof payload.displayName !== 'string' || !payload.displayName
     || (payload.email !== undefined && typeof payload.email !== 'string')
-    || (payload.role !== 'Admin' && payload.role !== 'Standard')
-    || typeof payload.isSuperAdmin !== 'boolean'
+    || !roles.includes(payload.role as Role)
     || !Number.isSafeInteger(payload.sessionVersion) || payload.sessionVersion! < 1) {
     throw new Error('Invalid session token.');
   }
 
   const pool = await getPool();
   const result = await pool.query<LocalUserRow>(
-    `SELECT id, username, password_hash, display_name, email, role, is_super_admin, session_version
+    `SELECT id, username, password_hash, display_name, email, role, session_version
      FROM local_users
      WHERE id = $1 AND is_active = true AND session_version = $2`,
     [payload.sub, payload.sessionVersion],
@@ -160,7 +162,6 @@ export async function verifyLocalToken(token: string): Promise<LocalSessionUser>
     displayName: current.display_name,
     email: current.email ?? undefined,
     role: current.role,
-    isSuperAdmin: current.is_super_admin,
     sessionVersion: current.session_version,
   };
 }

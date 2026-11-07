@@ -7,14 +7,14 @@ import type {
   CanonicalTag,
   ListArticlesQuery,
   OrphanCleanupResult,
-  Role,
+  Viewer,
   TagOrphan,
   TagWrite,
 } from './domain.js';
 
 export interface ArticleRepository {
-  list(query: ListArticlesQuery, viewerRole: Role | null): Promise<ArticleListResult>;
-  get(id: string, viewerRole: Role | null): Promise<ArticleRecord | null>;
+  list(query: ListArticlesQuery, viewer: Viewer): Promise<ArticleListResult>;
+  get(id: string, viewer: Viewer): Promise<ArticleRecord | null>;
   listRevisions(id: string): Promise<ArticleRevisionRecord[]>;
   getRevision(id: string, version: number): Promise<ArticleRevisionRecord | null>;
   create(input: ArticleWrite, actor: Actor): Promise<ArticleRecord>;

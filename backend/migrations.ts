@@ -370,6 +370,64 @@ export const canonicalTagsContractSql = `
   ALTER TABLE article_revisions DROP COLUMN tags;
 `;
 
+// Moves the super administrator out of local_users into the single-row admin
+// table, adds Admin sessions, and renames member roles (Admin -> Moderator,
+// Standard -> Editor). Bumping every session_version signs every member out.
+// The super-admin row's credentials move to admin; its user_id stays in
+// app_users so authorship and revision history are kept. The now-unused
+// is_super_admin column is dropped by the explicit-only 014 contract.
+export const adminAccountSql = `
+  LOCK TABLE local_users IN ACCESS EXCLUSIVE MODE;
+
+  CREATE TABLE admin (
+    id boolean PRIMARY KEY DEFAULT true CHECK (id),
+    username varchar(64) NOT NULL
+      CHECK (username = lower(username) AND username ~ '^[a-z0-9_.-]{3,64}$'),
+    password_hash text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+
+  CREATE TABLE admin_sessions (
+    token_hash char(64) PRIMARY KEY CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+  );
+
+  CREATE INDEX admin_sessions_expires_idx ON admin_sessions (expires_at);
+
+  INSERT INTO admin (username, password_hash, created_at)
+  SELECT username, password_hash, created_at
+  FROM local_users
+  WHERE is_super_admin
+  LIMIT 1;
+
+  DELETE FROM local_users WHERE is_super_admin;
+
+  ALTER TABLE local_users DROP CONSTRAINT local_users_role_check;
+
+  UPDATE local_users
+  SET role = CASE role WHEN 'Admin' THEN 'Moderator' ELSE 'Editor' END,
+      session_version = session_version + 1,
+      updated_at = now();
+
+  ALTER TABLE local_users
+    ADD CONSTRAINT local_users_role_check CHECK (role IN ('Editor', 'Moderator'));
+`;
+
+// Dashboard values for the backup limits. NULL means "use the default".
+export const backupLimitSettingsSql = `
+  ALTER TABLE application_settings
+    ADD COLUMN backup_max_bytes bigint CHECK (backup_max_bytes > 0),
+    ADD COLUMN backup_max_entries integer CHECK (backup_max_entries > 0),
+    ADD COLUMN backup_max_uncompressed_bytes bigint CHECK (backup_max_uncompressed_bytes > 0);
+`;
+
+export const adminAccountContractSql = `
+  DROP INDEX local_users_single_super_admin;
+  ALTER TABLE local_users DROP COLUMN is_super_admin;
+`;
+
 export const migrations: Migration[] = [
   {
     id: '001_initial',
@@ -560,5 +618,18 @@ export const migrations: Migration[] = [
     sql: `
       ALTER TABLE app_users RENAME COLUMN cognito_sub TO user_id;
     `,
+  },
+  {
+    id: '012_admin_account',
+    sql: adminAccountSql,
+  },
+  {
+    id: '013_backup_limit_settings',
+    sql: backupLimitSettingsSql,
+  },
+  {
+    id: '014_admin_account_contract',
+    sql: adminAccountContractSql,
+    requiresExplicitTarget: true,
   },
 ];
