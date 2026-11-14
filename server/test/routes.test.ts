@@ -8,8 +8,9 @@ import { assertMatches, fakeDatabase, testContext } from './helpers.js';
 // Routes answered by the app (app.ts) itself rather than by a handler.
 const serverRoutes = [
   'GET /api/health',
-  'POST /api/auth/login',
-  'GET /api/auth/session',
+  'POST /api/member/login',
+  'POST /api/member/logout',
+  'GET /api/member/session',
   'GET /api/setup/status',
   'POST /api/setup',
   'POST /api/admin/login',
@@ -78,7 +79,7 @@ describe('route table', () => {
 
   it('keeps public reads public and requires authentication everywhere else', async () => {
     const publicRoutes = [
-      ['POST', '/api/auth/login'],
+      ['POST', '/api/member/login'],
       ['GET', '/api/settings/public'],
       ['GET', '/api/settings'],
       ['GET', '/api/articles'],
@@ -95,7 +96,8 @@ describe('route table', () => {
     }
 
     const memberRoutes = [
-      ['GET', '/api/auth/session'],
+      ['GET', '/api/member/session'],
+      ['POST', '/api/member/logout'],
       ['POST', '/api/articles'],
       ['PUT', `/api/articles/${articleId}`],
       ['DELETE', `/api/articles/${articleId}`],
@@ -108,7 +110,7 @@ describe('route table', () => {
       ['POST', '/api/tags'],
     ];
     for (const [method, path] of memberRoutes) {
-      assertMatches(await route(method, path), { status: 401, body: { error: 'unauthorized', code: 'UNAUTHENTICATED', message: 'Authentication is required.' } });
+      assertMatches(await route(method, path), { status: 401, body: { error: 'unauthorized', code: 'UNAUTHENTICATED', message: 'Sign-in is required.' } });
     }
   });
 
@@ -132,7 +134,7 @@ describe('route table', () => {
 
   it('rate-limits member sign-in, Admin sign-in, setup, Admin password changes and backup uploads', () => {
     const rateLimit = (key: string) => apiRoutes.find((entry) => entry.routeKey === key)?.rateLimit;
-    assert.equal(rateLimit('POST /api/auth/login'), 'login');
+    assert.equal(rateLimit('POST /api/member/login'), 'login');
     assert.equal(rateLimit('POST /api/admin/login'), 'adminLogin');
     assert.equal(rateLimit('POST /api/setup'), 'setup');
     assert.equal(rateLimit('POST /api/admin/password'), 'adminPassword');
@@ -147,7 +149,7 @@ describe('route table', () => {
       'POST /api/admin/login',
       'POST /api/admin/password',
       'POST /api/admin/setup',
-      'POST /api/auth/login',
+      'POST /api/member/login',
       'POST /api/setup',
       'PUT /api/admin/auth/password',
     ]);
@@ -177,7 +179,7 @@ describe('route table', () => {
 
   it('declares exactly the routes the handlers dispatch', () => {
     const member = handledRoutes('server/handler.ts');
-    const admin = handledRoutes('server/admin-handler.ts');
+    const admin = handledRoutes('server/adminRoutes.ts');
     const isAdmin = (key: string) => apiRoutes.find((entry) => entry.routeKey === key)?.admin;
     assert.equal(new Set(routeKeys).size, routeKeys.length);
     assert.equal(member.every((key) => isAdmin(key) === false), true);

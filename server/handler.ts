@@ -46,20 +46,20 @@ export function createRequestHandler(context: Pick<AppContext, 'config' | 'db'>)
   return async function handleRequest(request: ApiRequest): Promise<ApiResponse> {
     switch (request.routeKey) {
       case 'GET /api/settings/public':
-        return json(200, await settingsService.getPublic(), true);
+        return json(200, await settingsService.getPublic());
       case 'GET /api/settings':
-        return json(200, await settingsService.getLegacyPublic(), true);
+        return json(200, await settingsService.getLegacyPublic());
       case 'GET /api/articles': {
         if (!(await settingsService.values())['access.allowPublicBrowsing']) {
           throw new HttpError(403, 'public_browsing_closed', 'Public browsing is disabled.', { legacyCode: 'PUBLIC_BROWSING_DISABLED' });
         }
-        return json(200, await service.list(parseListQuery(request.query), null), true);
+        return json(200, await service.list(parseListQuery(request.query), null));
       }
       case 'GET /api/articles/{id}': {
         if (!(await settingsService.values())['access.allowPublicBrowsing']) {
           throw new HttpError(403, 'public_browsing_closed', 'Public browsing is disabled.', { legacyCode: 'PUBLIC_BROWSING_DISABLED' });
         }
-        return json(200, await service.get(articleId(request), null), true);
+        return json(200, await service.get(articleId(request), null));
       }
       case 'GET /api/tags': {
         if (!(await settingsService.values())['access.allowPublicBrowsing']) {

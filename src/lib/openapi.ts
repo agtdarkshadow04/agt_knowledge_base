@@ -199,7 +199,8 @@ export function parseOpenApi(source: unknown): ApiDocument {
       for (const name of Object.keys(requirement)) {
         const scheme = resolve(schemes[name]);
         if (scheme.type === 'http' && scheme.scheme === 'bearer') return 'member';
-        if (scheme.type === 'apiKey' && scheme.in === 'cookie') return 'admin';
+        // Two cookie sessions: the member one (AUTH-1 deviation) and the Admin's.
+        if (scheme.type === 'apiKey' && scheme.in === 'cookie') return /member/i.test(`${name} ${String(scheme.name)}`) ? 'member' : 'admin';
       }
     }
     return 'none';

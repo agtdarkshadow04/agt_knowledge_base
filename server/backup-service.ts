@@ -19,8 +19,8 @@ import { SettingsService } from './settings-service.js';
 
 /**
  * Every application table, in an order that satisfies foreign keys on insert.
- * `schema_migrations` is recorded in the manifest instead. `admin_sessions` is
- * never backed up and is cleared by every restore.
+ * `schema_migrations` is recorded in the manifest instead. Sessions (`sessions`,
+ * `member_sessions`) are never backed up and are cleared by every restore.
  */
 export const backupTables = [
   'app_users',
@@ -33,7 +33,10 @@ export const backupTables = [
 ] as const;
 
 /** Tables the migrations create that backups deliberately leave out. */
-export const unbackedTables = ['admin_sessions'] as const;
+export const unbackedTables = ['sessions', 'member_sessions'] as const;
+
+/** Earlier names of unbacked tables, which a backup's schema version may still have (017 renamed `admin_sessions`). */
+const formerUnbackedTables = ['admin_sessions'];
 
 /**
  * Tables that exist only until a contract migration drops them. They are
@@ -290,7 +293,7 @@ export class BackupService {
       await this.migrate(client, manifest.migrations, 'it could not be loaded at its own schema version');
 
       const staged = await schemaColumns(client, staging);
-      const expected = [...staged.keys()].filter((table) => !(unbackedTables as readonly string[]).includes(table));
+      const expected = [...staged.keys()].filter((table) => ![...unbackedTables, ...formerUnbackedTables].includes(table));
       if (!sameMembers(tableNames, expected)) invalidBackup('its tables do not match its schema version.');
       for (const table of tableNames) {
         const { stored } = staged.get(table)!;
@@ -386,9 +389,8 @@ export class BackupService {
     if (lockedSettings.length) {
       await client.query(`DELETE FROM ${qualified(live, 'settings')} WHERE key = ANY($1::text[])`, [lockedSettings]);
     }
-    // Restored session versions could match tokens issued before the backup
-    // was taken; bumping them signs every member out. Admin sessions were
-    // truncated above.
+    // Every session was truncated above, so everyone signs in again. The
+    // session_version bump is kept for the 1.x member tokens' column.
     await client.query(`UPDATE ${qualified(live, 'local_users')} SET session_version = session_version + 1`);
     await client.query(`DROP SCHEMA ${quoteIdentifier(staging)} CASCADE`);
   }

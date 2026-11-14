@@ -51,7 +51,6 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
 
    ```bash
    POSTGRES_USER=agt_knowledge_base POSTGRES_PASSWORD=local-development-db-password \
-     LOCAL_AUTH_SECRET=local-development-only-secret-32-chars \
      docker compose up -d postgres
    set -a && source .env.local && set +a && npm run db:migrate
    ```
@@ -63,7 +62,7 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
    npm run dev
    ```
 
-`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; rerun it after changing server code. The API listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Vite proxies `/api` to it, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base at `/login`. The API verifies signed member tokens and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
+`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; rerun it after changing server code. The API listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Vite proxies `/api` to it, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base at `/login`. The API checks the member and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
 
 ## Docker self-hosting
 
@@ -77,7 +76,7 @@ The Compose stack runs the web frontend, API, schema migrations, PostgreSQL, and
    cp config.example.yaml config.yaml
    ```
 
-   In `.env`, replace `POSTGRES_PASSWORD`, `LOCAL_AUTH_SECRET`, and `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` with independent random values. For example, `openssl rand -hex 32` generates a suitable value for any of them. These secrets must not be committed. `config.yaml` must exist before the stack starts: Compose mounts it into the API and migration containers.
+   In `.env`, replace `POSTGRES_PASSWORD` and `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` with independent random values. For example, `openssl rand -hex 32` generates a suitable value for any of them. These secrets must not be committed. `config.yaml` must exist before the stack starts: Compose mounts it into the API and migration containers.
 
 3. Build and start the stack:
 
@@ -101,7 +100,7 @@ The admin panel is a separate page reachable only by visiting `/admin` directly;
 - **Account** changes the Admin password. It requires the current password and signs out every other Admin session.
 - **API** renders the API reference from the server's OpenAPI document (`/api/openapi.json`). The header shows the app version.
 
-Admin sessions are random 32-byte tokens in an `HttpOnly`, `SameSite=Strict` cookie scoped to `/api/admin`; only their SHA-256 is stored, in `admin_sessions`, so signing out revokes them on the server. Every non-GET admin request must also carry an `x-agt-request: 1` header. The cookie is marked `Secure` when a trusted proxy reports HTTPS (or the deprecated `server.frontendOrigin` is an `https://` origin); set `session.secureCookie` to `true` or `false` to override this. Member bearer tokens are ignored on admin routes, and the Admin cookie is ignored on member routes.
+Members and the Admin sign in with cookie sessions: a random 32-byte token in an `HttpOnly`, `SameSite=Strict`, `Path=/` cookie (`agt_knowledge_base_member_session` for members, `agt_knowledge_base_session` for the Admin) that page scripts cannot read. Only its SHA-256 is stored (`member_sessions`, `sessions`), so signing out revokes it on the server, and sessions last `session.ttlHours`. Every state-changing request must also carry an `x-agt-request: 1` header. The cookies are marked `Secure` when a trusted proxy reports HTTPS (see [HTTPS](#https)); set `session.secureCookie` to `true` or `false` to override this. The member cookie is ignored on admin routes, and the Admin cookie on member routes. Changing a member's role, deactivating them, setting their password or deleting them ends all of their sessions.
 
 Moderators manage canonical tags and clean up orphaned tag references on the **Tags** page of the knowledge base, linked in the header for Moderators only. Personal accessibility, download, and search-view preferences remain browser-local in the Settings dialog.
 
@@ -126,7 +125,7 @@ Use the admin panel for routine account management.
 **Admin lockout.** If the Admin password is lost, delete the Admin account and its sessions, then run setup again:
 
 ```bash
-docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DELETE FROM admin_sessions; DELETE FROM admin;"'
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DELETE FROM sessions; DELETE FROM admin;"'
 ```
 
 Then set `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` in `.env`, run `docker compose up -d`, and complete setup at `/admin`. Member accounts and articles are not affected. Alternatively, restore a backup whose Admin password you know.
@@ -170,18 +169,17 @@ Environment variables are only for secrets and for values the launcher sets (CFG
 | --- | --- |
 | `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` | One-time password for creating the Admin at `/admin`; ignored once the Admin exists. Remove it after setup |
 | `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | Password of the database role. Compose sets it from `POSTGRES_PASSWORD` |
-| `LOCAL_AUTH_SECRET` | Signs member sessions; at least 32 characters |
 | `AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD` | Only for the member-recovery command (see [Account recovery](#account-recovery)) |
 
 Set by the Dockerfile or Compose file, or for development: `AGT_KNOWLEDGE_BASE_CONFIG_FILE` (path of `config.yaml`), `AGT_KNOWLEDGE_BASE_SERVER_HOST` (listen address when `server.host` is not set; the image sets `0.0.0.0`), `AGT_KNOWLEDGE_BASE_DATABASE_HOST` (database host when `database.host` is not set; Compose sets `postgres`), `AGT_KNOWLEDGE_BASE_STATIC_DIR` (path of the built client), and `NODE_ENV`.
 
-Compose itself also reads these variables from `.env`: `POSTGRES_PASSWORD` (required; the database container's password, passed to the API as `AGT_KNOWLEDGE_BASE_DB_PASSWORD`), `POSTGRES_DB` and `POSTGRES_USER` (defaults `agt_knowledge_base` and `postgres`, used when the database container is first created), `POSTGRES_BIND_ADDRESS` and `POSTGRES_PORT` (`127.0.0.1`, `5432`), and `APP_BIND_ADDRESS` and `APP_PORT` (`0.0.0.0`, `8080`, the web container's host port).
+Compose itself also reads these variables from `.env`: `POSTGRES_PASSWORD` (required; the database container's password, passed to the API as `AGT_KNOWLEDGE_BASE_DB_PASSWORD`), `POSTGRES_DB` and `POSTGRES_USER` (defaults `agt_knowledge_base` and `postgres`, used when the database container is first created), `POSTGRES_BIND_ADDRESS` and `POSTGRES_PORT` (`127.0.0.1`, `5432`), and `APP_BIND_ADDRESS` and `APP_PORT` (`127.0.0.1`, `8080`, the web container's host address and port).
 
 **Deprecated variables** (still read until 3.0.0, each with a startup warning): `AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_PASSWORD`, `DATABASE_URL`, `LOCAL_USER_PASSWORD` (use the `AGT_KNOWLEDGE_BASE_` names above), `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DATABASE_SSL` (use `database.*` in `config.yaml`), and `AUTH_MODE` (only `local` is accepted). Compose still passes `DB_USER` and `DB_NAME` from `POSTGRES_USER` and `POSTGRES_DB`; set `database.user` (and `database.name` if you changed it) in `config.yaml` to stop the warning.
 
 `API_HOST`, `API_PORT`, `APP_ORIGIN`, `LOCAL_FRONTEND_ORIGIN`, and `LOCAL_AUTH_SESSION_HOURS` are no longer read: use `server.*` and `session.ttlHours` in `config.yaml`.
 
-Changing `LOCAL_AUTH_SECRET` immediately invalidates every active session. Do not expose the PostgreSQL port beyond loopback.
+`LOCAL_AUTH_SECRET` is no longer used (members have cookie sessions); the server logs a reminder while it is still set. Do not expose the PostgreSQL port beyond loopback.
 
 Useful operations:
 
@@ -195,11 +193,14 @@ The `agt-postgres` volume contains the database. Do not run `docker compose down
 
 ### HTTPS
 
-For anything other than local use, put a TLS-terminating reverse proxy in front of `APP_PORT`; passwords and session tokens must not travel over plaintext HTTP. Bind the web container to loopback so only the proxy can reach it:
+The server speaks plain HTTP only (SEC-4), so a default installation is reachable only from the host it runs on: the server listens on `127.0.0.1` (`server.host`), and Compose publishes the web container on `127.0.0.1:8080` (`APP_BIND_ADDRESS`, `APP_PORT`). To serve other machines, put a TLS-terminating reverse proxy in front of it; passwords and session cookies must not travel over plaintext HTTP. The server logs one warning per process (source `security`) the first time a sign-in or setup request arrives over plain HTTP from another machine.
+
+With [Caddy](https://caddyserver.com/docs/), which obtains and renews certificates automatically, the whole proxy configuration is [`deploy/Caddyfile.example`](deploy/Caddyfile.example):
 
 ```text
-APP_BIND_ADDRESS=127.0.0.1
-APP_PORT=8080
+kb.example.org {
+  reverse_proxy 127.0.0.1:8080
+}
 ```
 
 and in `config.yaml`:
@@ -209,17 +210,7 @@ server:
   trustProxy: 2
 ```
 
-With [Caddy](https://caddyserver.com/docs/), which obtains and renews certificates automatically, the whole proxy configuration is:
-
-```text
-kb.example.org {
-  reverse_proxy 127.0.0.1:8080
-}
-```
-
-Any other proxy (Traefik, Nginx, HAProxy) works the same way.
-
-`server.trustProxy: 2` makes rate limits see the client address forwarded by both the TLS proxy and the bundled Nginx (the proxy must set `X-Forwarded-For`, as Caddy does), and lets the API see that the request arrived over HTTPS, which makes the Admin cookie `Secure`. The proxy must also accept request bodies of at least `backup.maxZipBytes` (100 MB by default) for backup uploads.
+Any other proxy (Traefik, Nginx, HAProxy) works the same way. `server.trustProxy: 2` trusts the TLS proxy and the bundled Nginx, so rate limits see the client address the proxy forwarded (it must set `X-Forwarded-For`, as Caddy does) and the API sees the `X-Forwarded-Proto: https` the proxy sends, which marks the session cookies `Secure` (keep `session.secureCookie: auto`). Only if the proxy runs on another machine, set `APP_BIND_ADDRESS` to an interface it can reach and restrict that port to the proxy's address with a firewall. The proxy must also accept request bodies of at least `backup.maxZipBytes` (100 MB by default) for backup uploads.
 
 ### Backups
 
@@ -314,8 +305,9 @@ Migrations marked as requiring an explicit target are destructive contract phase
 ## Data and content security
 
 - SQL values are parameterized; requested sort fields are mapped through a fixed allowlist.
-- Passwords are hashed with scrypt and random salts. Member sessions use expiring HMAC-signed tokens; Admin sessions use random tokens stored only as SHA-256 hashes, in `HttpOnly`, `SameSite=Strict` cookies, with a CSRF header required on every write. Sign-in, setup, and Admin password changes are rate-limited by the API.
-- Markdown is rendered by `react-markdown` with GFM and `rehype-sanitize`; raw HTML is not enabled.
+- Passwords are hashed with scrypt (`N = 2^15, r = 8, p = 1`, stored as `scrypt$N$r$p$salt$hash`); a stored hash in any other format can never verify. Member and Admin sessions use random tokens stored only as SHA-256 hashes, in `HttpOnly`, `SameSite=Strict` cookies, with a CSRF header required on every write. Sign-in, setup, Admin password changes and backup uploads are rate-limited by the API.
+- Every response carries a strict Content-Security-Policy (no inline scripts or styles, no external hosts except images in Markdown), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` and `Cross-Origin-Opener-Policy`, and API and HTML responses are never cached. The API sends no CORS headers.
+- Markdown is rendered by one component, `src/components/Markdown.tsx` (`react-markdown` with GFM): raw HTML is shown as text, only `http:`/`https:` and same-site links and images are kept, external links open in a new tab with `rel="noopener noreferrer"`, and external images load lazily without a referrer. Images that authors link in Markdown are loaded by visitors' browsers directly from their hosts; the server itself never makes outbound requests.
 - The API rejects raw HTML, JSX tags, and MDX `import` / `export` statements. MDXEditor is used as a Markdown authoring surface only; content is never executed as MDX.
 - Article writes are validated with Zod and capped at 250,000 characters and 12 tags.
 - API errors do not return database details; a rejected backup restore names only the table and constraint the file violated. The API logs unexpected failures, with their request ID, as JSON to standard output.

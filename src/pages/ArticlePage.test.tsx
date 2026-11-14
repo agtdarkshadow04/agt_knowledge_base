@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => {
   const pdfWorker = { set: vi.fn(), from: vi.fn(), save: vi.fn() };
   return {
     user: { sub: 'admin', username: 'atlas', displayName: 'Atlas', role: 'Moderator' } as SessionUser | null,
-    getToken: vi.fn(async () => 'token'),
     getArticle: vi.fn(),
     setArticlePinned: vi.fn(),
     setArticleVerified: vi.fn(),
@@ -22,7 +21,6 @@ const mocks = vi.hoisted(() => {
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
     user: mocks.user,
-    getToken: mocks.getToken,
   }),
 }));
 
@@ -209,7 +207,7 @@ describe('ArticlePage', () => {
     await user.click(await screen.findByRole('button', { name: 'Pin' }));
 
     expect(screen.getByText('Public')).toHaveClass('visibility-public');
-    expect(mocks.setArticlePinned).toHaveBeenCalledWith(article.id, true, article.version, 'token');
+    expect(mocks.setArticlePinned).toHaveBeenCalledWith(article.id, true, article.version);
     expect(await screen.findByText('Pinned')).toHaveClass('pinned');
     expect(await screen.findByRole('button', { name: 'Unpin' })).toBeInTheDocument();
   });
@@ -224,7 +222,7 @@ describe('ArticlePage', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Verify' }));
 
-    expect(mocks.setArticleVerified).toHaveBeenCalledWith(article.id, true, article.version, 'token');
+    expect(mocks.setArticleVerified).toHaveBeenCalledWith(article.id, true, article.version);
     expect(await screen.findByText('Verified')).toHaveClass('verified');
     expect(screen.getByRole('button', { name: 'Unverify' })).toBeInTheDocument();
   });

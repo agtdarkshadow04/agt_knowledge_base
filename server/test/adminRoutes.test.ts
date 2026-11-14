@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it, mock } from 'node:test';
-import { createAdminRequestHandler } from '../admin-handler.js';
+import { createAdminRequestHandler } from '../adminRoutes.js';
 import type { Actor } from '../domain.js';
 import type { ApiRequest } from '../routes.js';
 import { assertMatches, fakeDatabase, respond, testContext } from './helpers.js';

@@ -30,13 +30,17 @@ export function errorMessage(payload: unknown, status: number) {
     : `Request failed with status ${status}`;
 }
 
-async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
+/**
+ * Sends a request with the member session cookie (FE-3: no token is ever
+ * visible to JavaScript) and, on every write, the CSRF header (SEC-5).
+ */
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   if (init.body) headers.set('Content-Type', 'application/json');
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (init.method && init.method !== 'GET') headers.set('x-agt-request', '1');
 
-  const response = await fetch(`${appConfig.apiUrl}${path}`, { ...init, headers });
+  const response = await fetch(`${appConfig.apiUrl}${path}`, { ...init, headers, credentials: 'same-origin' });
   const payload = response.status === 204 ? undefined : await response.json().catch(() => undefined);
 
   if (!response.ok) throw new ApiError(errorMessage(payload, response.status), response.status, payload);
@@ -44,128 +48,125 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   return payload as T;
 }
 
+/** Signs a member in; the server sets the HttpOnly member session cookie. */
 export function createLocalSession(username: string, password: string) {
-  return request<{ token: string; user: SessionUser }>('/auth/login', {
+  return request<SessionUser>('/member/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   });
+}
+
+export function deleteLocalSession() {
+  return request<void>('/member/logout', { method: 'POST' });
 }
 
 export function getApplicationSettings(signal?: AbortSignal) {
   return request<ApplicationSettings>('/settings/public', { signal });
 }
 
-export function getLocalSession(token: string) {
-  return request<SessionUser>('/auth/session', {}, token);
+export function getLocalSession() {
+  return request<SessionUser>('/member/session');
 }
 
-export function listArticles(params: ArticleListParams, signal?: AbortSignal, token?: string) {
+/** `member` reads through the member routes, which also return restricted articles the member may see. */
+export function listArticles(params: ArticleListParams, signal?: AbortSignal, member = false) {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== '' && value !== 'all') query.set(key, String(value));
   });
-  const prefix = token ? '/member' : '';
-  return request<ArticleListResponse>(`${prefix}/articles?${query.toString()}`, { signal }, token);
+  const prefix = member ? '/member' : '';
+  return request<ArticleListResponse>(`${prefix}/articles?${query.toString()}`, { signal });
 }
 
-export function getArticle(id: string, signal?: AbortSignal, token?: string) {
-  const prefix = token ? '/member' : '';
-  return request<Article>(`${prefix}/articles/${encodeURIComponent(id)}`, { signal }, token);
+export function getArticle(id: string, signal?: AbortSignal, member = false) {
+  const prefix = member ? '/member' : '';
+  return request<Article>(`${prefix}/articles/${encodeURIComponent(id)}`, { signal });
 }
 
-export function listTags(search = '', signal?: AbortSignal, token?: string) {
+export function listTags(search = '', signal?: AbortSignal, member = false) {
   const query = new URLSearchParams();
   if (search.trim()) query.set('search', search.trim());
   const suffix = query.size ? `?${query.toString()}` : '';
-  const prefix = token ? '/member' : '';
-  return request<CanonicalTag[]>(`${prefix}/tags${suffix}`, { signal }, token);
+  const prefix = member ? '/member' : '';
+  return request<CanonicalTag[]>(`${prefix}/tags${suffix}`, { signal });
 }
 
-export function createTag(input: TagInput, token: string) {
-  return request<CanonicalTag>('/tags', { method: 'POST', body: JSON.stringify(input) }, token);
+export function createTag(input: TagInput) {
+  return request<CanonicalTag>('/tags', { method: 'POST', body: JSON.stringify(input) });
 }
 
-export function updateTag(id: string, input: TagInput, token: string) {
+export function updateTag(id: string, input: TagInput) {
   return request<CanonicalTag>(
     `/tags/${encodeURIComponent(id)}`,
     { method: 'PUT', body: JSON.stringify(input) },
-    token,
   );
 }
 
-export function deleteTag(id: string, token: string) {
-  return request<void>(`/tags/${encodeURIComponent(id)}`, { method: 'DELETE' }, token);
+export function deleteTag(id: string) {
+  return request<void>(`/tags/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-export function listOrphanTagReferences(token: string, signal?: AbortSignal) {
-  return request<OrphanTagReference[]>('/tags/orphans', { signal }, token);
+export function listOrphanTagReferences(signal?: AbortSignal) {
+  return request<OrphanTagReference[]>('/tags/orphans', { signal });
 }
 
 export function removeOrphanTagReference(
   articleId: string,
   tagId: string,
   version: number,
-  token: string,
 ) {
   return request<Article>(
     `/articles/${encodeURIComponent(articleId)}/orphan-tags/${encodeURIComponent(tagId)}?version=${version}`,
     { method: 'DELETE' },
-    token,
   );
 }
 
-export function listArticleRevisions(id: string, token: string, signal?: AbortSignal) {
-  return request<ArticleRevision[]>(`/articles/${encodeURIComponent(id)}/revisions`, { signal }, token);
+export function listArticleRevisions(id: string, signal?: AbortSignal) {
+  return request<ArticleRevision[]>(`/articles/${encodeURIComponent(id)}/revisions`, { signal });
 }
 
-export function createArticle(input: ArticleInput, token: string) {
-  return request<Article>('/articles', { method: 'POST', body: JSON.stringify(input) }, token);
+export function createArticle(input: ArticleInput) {
+  return request<Article>('/articles', { method: 'POST', body: JSON.stringify(input) });
 }
 
-export function updateArticle(id: string, input: ArticleInput, token: string) {
+export function updateArticle(id: string, input: ArticleInput) {
   return request<Article>(
     `/articles/${encodeURIComponent(id)}`,
     { method: 'PUT', body: JSON.stringify(input) },
-    token,
   );
 }
 
-export function deleteArticle(id: string, version: number, token: string) {
+export function deleteArticle(id: string, version: number) {
   return request<void>(
     `/articles/${encodeURIComponent(id)}?version=${version}`,
     { method: 'DELETE' },
-    token,
   );
 }
 
-export function setArticleProtection(id: string, isProtected: boolean, version: number, token: string) {
+export function setArticleProtection(id: string, isProtected: boolean, version: number) {
   return request<Article>(
     `/articles/${encodeURIComponent(id)}/protection`,
     { method: 'PATCH', body: JSON.stringify({ isProtected, version }) },
-    token,
   );
 }
 
-export function setArticlePinned(id: string, isPinned: boolean, version: number, token: string) {
+export function setArticlePinned(id: string, isPinned: boolean, version: number) {
   return request<Article>(
     `/articles/${encodeURIComponent(id)}/pinning`,
     { method: 'PATCH', body: JSON.stringify({ isPinned, version }) },
-    token,
   );
 }
 
-export function setArticleVerified(id: string, isVerified: boolean, version: number, token: string) {
+export function setArticleVerified(id: string, isVerified: boolean, version: number) {
   return request<Article>(
     `/articles/${encodeURIComponent(id)}/verification`,
     { method: 'PATCH', body: JSON.stringify({ isVerified, version }) },
-    token,
   );
 }
 
-export function restoreArticleRevision(id: string, revisionVersion: number, currentVersion: number, token: string) {
+export function restoreArticleRevision(id: string, revisionVersion: number, currentVersion: number) {
   return request<Article>(
     `/articles/${encodeURIComponent(id)}/revisions/${revisionVersion}/restore`,
     { method: 'POST', body: JSON.stringify({ currentVersion }) },
-    token,
   );
 }

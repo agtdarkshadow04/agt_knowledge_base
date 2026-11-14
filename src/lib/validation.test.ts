@@ -27,7 +27,13 @@ describe('request validation', () => {
   });
 
   it('validates Admin setup, sign-in, and password-change requests', () => {
-    assert.equal(parseAdminSetup({ setupPassword: 'one-time', username: 'Atlas', password: 'Permanent123!', passwordConfirmation: 'Permanent123!' }).username, 'atlas');
+    // AUTH-3: trimmed, then stored as entered (no case folding), 1-64 code points.
+    assert.equal(parseAdminSetup({ setupPassword: 'one-time', username: ' Atlas Prime ', password: 'Permanent123!', passwordConfirmation: 'Permanent123!' }).username, 'Atlas Prime');
+    assert.equal(parseAdminSetup({ setupPassword: 'one-time', username: '\u{1F680}'.repeat(64), password: 'Permanent123!' }).username.length, 128);
+    assert.throws(() => parseAdminSetup({ setupPassword: 'one-time', username: '\u{1F680}'.repeat(65), password: 'Permanent123!' }));
+    assert.throws(() => parseAdminSetup({ setupPassword: 'one-time', username: '   ', password: 'Permanent123!' }));
+    // AUTH-5: the confirmation is optional; when sent it must match.
+    assert.equal(parseAdminSetup({ setupPassword: 'one-time', username: 'atlas', password: 'Permanent123!' }).password, 'Permanent123!');
     assert.throws(() => parseAdminSetup({ setupPassword: 'one-time', username: 'atlas', password: 'Permanent123!', passwordConfirmation: 'Other123!' }));
     assert.throws(() => parseAdminSetup({ setupPassword: '', username: 'atlas', password: 'Permanent123!', passwordConfirmation: 'Permanent123!' }));
     assert.throws(() => parseAdminSetup({ setupPassword: 'x', username: 'atlas', password: 'short', passwordConfirmation: 'short' }));

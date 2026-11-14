@@ -2,7 +2,7 @@ import { Eye, EyeOff, FilePenLine, Save, X } from 'lucide-react';
 import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBlocker, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { MarkdownContent } from '../components/MarkdownContent';
+import { Markdown } from '../components/Markdown';
 import { ErrorState, LoadingState } from '../components/States';
 import { TagPicker } from '../components/TagPicker';
 import { ApiError, createArticle, getArticle, listTags, updateArticle } from '../services/api';
@@ -49,7 +49,7 @@ export function EditorPage() {
   const { id } = useParams();
   const isNew = !id;
   const navigate = useNavigate();
-  const { user, getToken } = useAuth();
+  const { user } = useAuth();
   const { settings } = useAppSettings();
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [baseline, setBaseline] = useState(serializeDraft(emptyDraft));
@@ -83,7 +83,7 @@ export function EditorPage() {
     setTagsReady(false);
     setTagsError('');
     try {
-      const nextTags = await listTags('', signal, await getToken());
+      const nextTags = await listTags('', signal, true);
       if (signal?.aborted) return null;
       setCatalogTags(nextTags);
       rememberTags(nextTags);
@@ -96,7 +96,7 @@ export function EditorPage() {
     } finally {
       if (!signal?.aborted) setTagsLoading(false);
     }
-  }, [getToken, rememberTags]);
+  }, [rememberTags]);
 
   useEffect(() => {
     if (!isNew || draft.title || draft.content || draft.tagIds.length || baseline !== serializeDraft(emptyDraft)) return;
@@ -123,7 +123,7 @@ export function EditorPage() {
     async function load() {
       setLoading(true);
       try {
-        const article = await getArticle(articleId, controller.signal, await getToken());
+        const article = await getArticle(articleId, controller.signal, true);
         if (article.isProtected && user?.role !== 'Moderator') {
           setLoadError('This protected article can only be edited by a Moderator.');
           return;
@@ -140,7 +140,7 @@ export function EditorPage() {
     }
     void load();
     return () => controller.abort();
-  }, [getToken, id, rememberTags, user?.role]);
+  }, [id, rememberTags, user?.role]);
 
   useEffect(() => {
     const listener = (event: BeforeUnloadEvent) => {
@@ -210,8 +210,8 @@ export function EditorPage() {
     try {
       const input = { title: draft.title.trim(), content: draft.content, tagIds: draft.tagIds, visibility: draft.visibility, version };
       const saved = isNew
-        ? await createArticle(input, await getToken())
-        : await updateArticle(id, input, await getToken());
+        ? await createArticle(input)
+        : await updateArticle(id, input);
       const savedDraft = { title: saved.title, tagIds: saved.tags.map((tag) => tag.id), content: saved.content, visibility: saved.visibility };
       setBaseline(serializeDraft(savedDraft));
       allowNavigation.current = true;
@@ -307,7 +307,7 @@ export function EditorPage() {
             <p id="content-help" className="field-help">Markdown only. Executable MDX and unsafe HTML are rejected by the API.</p>
             {errors.content && <p className="field-error" id="content-error">{errors.content}</p>}
           </section>
-          {preview && <section className="preview-panel" aria-labelledby="preview-label"><h2 id="preview-label">Preview</h2><MarkdownContent content={draft.content || '*Preview will appear here.*'} /></section>}
+          {preview && <section className="preview-panel" aria-labelledby="preview-label"><h2 id="preview-label">Preview</h2><Markdown content={draft.content || '*Preview will appear here.*'} /></section>}
         </div>
 
       </form>

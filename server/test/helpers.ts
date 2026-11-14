@@ -172,7 +172,6 @@ export function testContext(overrides: Partial<Omit<AppContext, 'config'>> & { c
     configFile: { path: '/app/config.yaml', text: null },
     db: untouchedDatabase,
     setupPassword: null,
-    localAuthSecret: 'test-local-auth-secret-with-at-least-32-characters',
     version: '1.0.0',
     ...rest,
   };

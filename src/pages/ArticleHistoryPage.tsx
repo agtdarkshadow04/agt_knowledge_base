@@ -30,7 +30,7 @@ function tagList(tags: ArticleRevision['tags']) {
 export function ArticleHistoryPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { user, getToken } = useAuth();
+  const { user } = useAuth();
   const [revisions, setRevisions] = useState<ArticleRevision[]>([]);
   const [leftVersion, setLeftVersion] = useState<number>();
   const [rightVersion, setRightVersion] = useState<number>();
@@ -44,7 +44,7 @@ export function ArticleHistoryPage() {
       setLoading(true);
       setError('');
       try {
-        const history = await listArticleRevisions(id, await getToken(), controller.signal);
+        const history = await listArticleRevisions(id, controller.signal);
         setRevisions(history);
         setLeftVersion(history[1]?.version ?? history[0]?.version);
         setRightVersion(history[0]?.version);
@@ -58,7 +58,7 @@ export function ArticleHistoryPage() {
     }
     void load();
     return () => controller.abort();
-  }, [getToken, id]);
+  }, [id]);
 
   const left = useMemo(
     () => revisions.find((revision) => revision.version === leftVersion),
@@ -76,7 +76,7 @@ export function ArticleHistoryPage() {
     setRestoring(true);
     setError('');
     try {
-      await restoreArticleRevision(id, left.version, latest.version, await getToken());
+      await restoreArticleRevision(id, left.version, latest.version);
       navigate(`/articles/${id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The revision could not be restored.');

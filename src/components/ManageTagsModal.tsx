@@ -23,7 +23,7 @@ interface TagForm {
 const emptyForm: TagForm = { name: '', color: '#FFB451' };
 
 export function ManageTagsModal({ onClose, embedded = false }: { onClose(): void; embedded?: boolean }) {
-  const { user, getToken } = useAuth();
+  const { user } = useAuth();
   const titleId = useId();
   const dialog = useRef<HTMLElement>(null);
   const [tags, setTags] = useState<CanonicalTag[]>([]);
@@ -39,10 +39,9 @@ export function ManageTagsModal({ onClose, embedded = false }: { onClose(): void
     setLoading(true);
     setError('');
     try {
-      const token = await getToken();
       const [nextTags, nextOrphans] = await Promise.all([
-        listTags('', signal, token),
-        listOrphanTagReferences(token, signal),
+        listTags('', signal, true),
+        listOrphanTagReferences(signal),
       ]);
       if (signal?.aborted) return;
       setTags(nextTags);
@@ -53,7 +52,7 @@ export function ManageTagsModal({ onClose, embedded = false }: { onClose(): void
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [getToken]);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -123,9 +122,8 @@ export function ManageTagsModal({ onClose, embedded = false }: { onClose(): void
     setError('');
     const input = { name: form.name.trim(), color: form.color.toUpperCase() };
     try {
-      const token = await getToken();
-      if (editingId) await updateTag(editingId, input, token);
-      else await createTag(input, token);
+      if (editingId) await updateTag(editingId, input);
+      else await createTag(input);
       resetForm();
       await load();
     } catch (cause) {
@@ -149,7 +147,7 @@ export function ManageTagsModal({ onClose, embedded = false }: { onClose(): void
     setBusy(true);
     setError('');
     try {
-      await deleteTag(tag.id, await getToken());
+      await deleteTag(tag.id);
       if (editingId === tag.id) resetForm();
       await load();
     } catch (cause) {
@@ -163,7 +161,7 @@ export function ManageTagsModal({ onClose, embedded = false }: { onClose(): void
     setBusy(true);
     setError('');
     try {
-      await removeOrphanTagReference(orphan.articleId, tagId, orphan.version, await getToken());
+      await removeOrphanTagReference(orphan.articleId, tagId, orphan.version);
       await load();
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {

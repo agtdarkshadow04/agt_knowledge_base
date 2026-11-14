@@ -80,12 +80,22 @@ const passwordSchema = z.string().min(12).max(1024)
   .regex(/[0-9]/, 'Password must include a number.')
   .regex(/[^A-Za-z0-9]/, 'Password must include a symbol.');
 
+/** AUTH-3: the Admin username is trimmed, then 1–64 Unicode code points, and stored as entered. */
+const adminUsernameSchema = z.string().trim()
+  .refine((value) => value.length > 0, 'Username is required.')
+  .refine((value) => [...value].length <= 64, 'Username must be at most 64 characters.');
+
+/** A confirmation is optional in the API (AUTH-5); when sent it must match. */
+const confirmed = <T extends { password: string; passwordConfirmation?: string }>(value: T) => (
+  value.passwordConfirmation === undefined || value.password === value.passwordConfirmation
+);
+
 const adminSetupSchema = z.object({
   setupPassword: z.string().min(1).max(1024),
-  username: usernameSchema,
+  username: adminUsernameSchema,
   password: passwordSchema,
-  passwordConfirmation: z.string(),
-}).strict().refine((value) => value.password === value.passwordConfirmation, {
+  passwordConfirmation: z.string().optional(),
+}).strict().refine(confirmed, {
   message: 'Passwords do not match.',
   path: ['passwordConfirmation'],
 });
@@ -98,8 +108,8 @@ const credentialsSchema = z.object({
 const adminAccountPasswordSchema = z.object({
   currentPassword: z.string().max(1024),
   password: passwordSchema,
-  passwordConfirmation: z.string(),
-}).strict().refine((value) => value.password === value.passwordConfirmation, {
+  passwordConfirmation: z.string().optional(),
+}).strict().refine(confirmed, {
   message: 'Passwords do not match.',
   path: ['passwordConfirmation'],
 });

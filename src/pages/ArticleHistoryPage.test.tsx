@@ -6,13 +6,12 @@ import { ArticleHistoryPage } from './ArticleHistoryPage';
 
 const mocks = vi.hoisted(() => ({
   user: { sub: 'author', username: 'apollo', displayName: 'Apollo', role: 'Editor' as 'Moderator' | 'Editor' },
-  getToken: vi.fn(async () => 'token'),
   listArticleRevisions: vi.fn(),
   restoreArticleRevision: vi.fn(),
 }));
 
 vi.mock('../auth/AuthContext', () => ({
-  useAuth: () => ({ user: mocks.user, getToken: mocks.getToken }),
+  useAuth: () => ({ user: mocks.user }),
 }));
 
 vi.mock('../services/api', async (importOriginal) => {
@@ -95,7 +94,6 @@ describe('ArticleHistoryPage', () => {
       '00000000-0000-4000-8000-000000000001',
       1,
       2,
-      'token',
     );
     expect(await screen.findByText('Current article')).toBeInTheDocument();
   });
