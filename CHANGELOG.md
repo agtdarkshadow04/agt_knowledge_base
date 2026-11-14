@@ -6,11 +6,38 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html), as described in §21 of the
 [AGT Web Application Specification](docs/agt-webapp-spec.md).
 
-## [1.0.0] - Unreleased
+## [2.0.0] - Unreleased
 
-The first version recorded in this file. It has not been tagged yet (VER-11), so the work to comply with the AGT Web
-Application Specification v6.0.0 ([#48](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/48)) is
-recorded here until the first release.
+### Upgrade notes
+
+- **Building from source needs Node.js 26 and npm 11.20 or newer within npm 11.** `npm ci` now stops with an engine
+  error on older versions. Docker Compose installations need no action beyond rebuilding the images
+  (`docker compose up -d --build`), which now use Node.js 26
+  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
+- **Development:** start the API with `npm run dev:server` instead of `npm run api:dev`, and run every check with
+  `npm run check` (lint is now `tsc -b`; `npm run typecheck` is gone)
+  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
+
+### Changed
+
+- The API now runs on Fastify 5 instead of a hand-written Node.js HTTP server, with the same routes, authentication,
+  CSRF checks, rate limits, body limits and error bodies. Unexpected errors are logged as JSON lines on standard
+  output and always answer `500 INTERNAL_ERROR` with the same message. The Docker images now use Node.js 26
+  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
+- Building or developing from source needs Node.js 26 and npm 11.20 or newer within npm 11; `npm ci` stops with an
+  engine error on older versions. The API is started for development with `npm run dev:server` instead of
+  `npm run api:dev`, and `npm run check` runs every check
+  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
+
+### Security
+
+- Updated `zod` and the `dompurify` dependency of `html2pdf.js` to versions without known vulnerabilities
+  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
+
+## [1.0.0] - 2026-11-14
+
+The first release recorded in this file: the self-hosted application before the work to comply with the AGT Web
+Application Specification v6.0.0 ([#48](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/48)).
 
 ### Added
 
@@ -29,19 +56,3 @@ recorded here until the first release.
   ([#45](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/45)).
 - API documentation: an OpenAPI description of the public, member and admin routes, an API guide, and in-app API
   pages ([#47](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/47)).
-
-### Changed
-
-- The API now runs on Fastify 5 instead of a hand-written Node.js HTTP server, with the same routes, authentication,
-  CSRF checks, rate limits, body limits and error bodies. Unexpected errors are logged as JSON lines on standard
-  output and always answer `500 INTERNAL_ERROR` with the same message. The Docker images now use Node.js 26
-  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
-- Building or developing from source needs Node.js 26 and npm 11.20 or newer within npm 11; `npm ci` stops with an
-  engine error on older versions. The API is started for development with `npm run dev:server` instead of
-  `npm run api:dev`, and `npm run check` runs every check
-  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
-
-### Security
-
-- Updated `zod` and the `dompurify` dependency of `html2pdf.js` to versions without known vulnerabilities
-  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
