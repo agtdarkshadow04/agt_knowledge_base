@@ -6,11 +6,10 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html), as described in §21 of the
 [AGT Web Application Specification](docs/agt-webapp-spec.md).
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-11-14
 
-The first version recorded in this file: the self-hosted application as it runs today, before the work to comply
-with the AGT Web Application Specification v6.0.0
-([#48](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/48)). It has not been tagged yet (VER-11).
+The first release recorded in this file: the self-hosted application before the work to comply with the AGT Web
+Application Specification v6.0.0 ([#48](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/48)).
 
 ### Added
 
