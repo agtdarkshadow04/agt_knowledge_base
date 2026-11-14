@@ -1,4 +1,5 @@
 import fastifyCookie from '@fastify/cookie';
+import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { Type } from '@sinclair/typebox';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
@@ -6,22 +7,14 @@ import Fastify, { LogController, type FastifyInstance, type FastifyReply, type F
 import { existsSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { Transform } from 'node:stream';
-import {
-  AdminAuthService,
-  adminSessionCookie,
-  clearedSessionCookie,
-  sessionCookie,
-  type AdminSessionResult,
-} from './admin-auth.js';
-import { createAdminRequestHandler, type AdminRequestHandler } from './admin-handler.js';
-import { authenticate, toActor, type AuthenticatedUser } from './auth.js';
+import { authenticationHook, createAdminRequestHandler, type AdminRequestHandler } from './adminRoutes.js';
+import { toActor, type AuthenticatedUser } from './auth.js';
 import type { AppConfig } from './config.js';
 import type { AppContext } from './context.js';
 import { createRequestHandler, type RequestHandler } from './handler.js';
-import { BodyTooLargeError, errorReply, HttpError, RateLimitedError } from './http.js';
-import { LocalAuthService } from './local-auth.js';
+import { BodyTooLargeError, errorReply, RateLimitedError } from './http.js';
 import { registerOpenApi, routeSecurity } from './openapi.js';
-import { RateLimiter } from './rate-limit.js';
+import { sharedRateLimitStore } from './rate-limit.js';
 import {
   apiRoutes,
   defaultMaxBodyBytes,
@@ -31,27 +24,60 @@ import {
   type CompiledRoute,
   type RateLimitName,
 } from './routes.js';
+import {
+  AdminAuthService,
+  adminSessionCookie,
+  clearedCookie,
+  legacyAdminSessionCookie,
+  MemberAuthService,
+  memberSessionCookie,
+  sessionCookie,
+  type AdminSessionResult,
+  type AuthLog,
+} from './session.js';
 import { SettingsService } from './settings-service.js';
 import { parseAdminAccountPassword, parseAdminSetup, parseCredentials } from '../src/lib/validation.js';
 
-/** Header every non-GET admin request must carry; with SameSite=Strict it blocks cross-site requests. */
-export const csrfHeader = 'x-agt-request';
+export { csrfHeader } from './adminRoutes.js';
 
 /** Member UI paths the React router still answers, until query-parameter deep links replace them (FE-4). */
 const memberPagePaths = ['/login', '/tags', '/articles/*'];
+
+/** The Content-Security-Policy of every response, exactly as SEC-1 gives it. */
+export const contentSecurityPolicy = [
+  "default-src 'self'", "script-src 'self'", "style-src 'self'", "img-src 'self' https: http: blob:",
+  "font-src 'self'", "connect-src 'self'", "media-src 'self'", "worker-src 'self'", "object-src 'none'",
+  "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'",
+].join('; ');
+
+/** SEC-1 and SEC-2: on every response. */
+const securityHeaders = {
+  'content-security-policy': contentSecurityPolicy,
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'cross-origin-opener-policy': 'same-origin',
+};
+
+/** SEC-3: API and HTML responses are never cached; only hashed `/assets/` files are. */
+export const noStoreHeaders = {
+  'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+  pragma: 'no-cache',
+  expires: '0',
+};
 
 export interface BuildAppOptions {
   /** Fastify's logger option; off by default so tests stay quiet. */
   logger?: FastifyServerOptions['logger'];
   /** The built client (`dist/`) to serve (SRV-9); nothing is served when it is missing. */
   staticDir?: string;
-  /** Replaces the in-memory rate limiter, for tests. */
-  rateLimiter?: RateLimiter;
+  /** The rate limiter's clock, for tests. */
+  rateLimitClock?: () => number;
   /** Replace the route dispatchers, for tests of the HTTP pipeline. */
   handlers?: { request?: RequestHandler; admin?: AdminRequestHandler };
   /** Replace the authentication and settings services, for tests of the HTTP pipeline. */
   services?: {
-    localAuth?: Pick<LocalAuthService, 'authenticate' | 'issueToken' | 'verifyToken'>;
+    memberAuth?: Pick<MemberAuthService, 'login' | 'session' | 'logout'>;
     adminAuth?: Pick<AdminAuthService, 'setupStatus' | 'setup' | 'login' | 'session' | 'logout' | 'changePassword'>;
     settings?: Pick<SettingsService, 'values'>;
   };
@@ -65,24 +91,21 @@ declare module 'fastify' {
   interface FastifyRequest {
     member: AuthenticatedUser | null;
     admin: AdminIdentity | null;
-    adminToken: string | undefined;
+    /** The session cookie the authentication hook read, for logout. */
+    sessionToken: string | undefined;
   }
 }
 
-const jsonHeaders = {
-  'content-type': 'application/json; charset=utf-8',
-  'cache-control': 'no-store',
-  'x-content-type-options': 'nosniff',
-};
+const jsonType = { 'content-type': 'application/json; charset=utf-8' };
 
 /** Sends an error body as is (the success response schemas do not apply to it). */
 function sendError(reply: FastifyReply, statusCode: number, body: unknown, headers: Record<string, string> = {}) {
-  return reply.code(statusCode).headers({ ...headers, ...jsonHeaders }).send(JSON.stringify(body));
+  return reply.code(statusCode).headers({ ...headers, ...jsonType }).send(JSON.stringify(body));
 }
 
 /** Sends a JSON success value through the route's response schema. */
-function sendJson(reply: FastifyReply, statusCode: number, body: unknown, headers: Record<string, string> = {}) {
-  return reply.code(statusCode).headers({ ...headers, ...jsonHeaders }).send(body);
+function sendJson(reply: FastifyReply, statusCode: number, body: unknown, headers: Record<string, string | string[]> = {}) {
+  return reply.code(statusCode).headers({ ...headers, ...jsonType }).send(body);
 }
 
 function sendApiResponse(reply: FastifyReply, result: ApiResponse) {
@@ -92,7 +115,8 @@ function sendApiResponse(reply: FastifyReply, result: ApiResponse) {
 
 /**
  * `server.trustProxy`: false uses the socket address, true trusts every
- * X-Forwarded-For hop, and a number trusts that many proxies nearest the API.
+ * X-Forwarded-For hop, a string or list names trusted proxy addresses, and a
+ * number trusts that many proxies nearest the server.
  */
 function trustProxyOption(trustProxy: AppConfig['server']['trustProxy']) {
   if (typeof trustProxy !== 'number') return trustProxy;
@@ -109,6 +133,10 @@ function rateLimitRule(config: AppConfig, name: RateLimitName) {
     case 'setup': return limits.setup;
     case 'adminUploads': return limits.adminUploads;
   }
+}
+
+function isLoopback(address: string) {
+  return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
 }
 
 /** Counts streamed request bytes and fails once they exceed `limit`. */
@@ -147,13 +175,19 @@ function registerStatic(app: FastifyInstance, staticDir: string) {
     root: assets,
     prefix: '/assets/',
     index: false,
-    // Hashed build files never change; the entry pages (also sent by this plugin) must never be cached.
+    // The plugin's own Cache-Control would replace the SEC-3 headers on the entry pages.
+    cacheControl: false,
+    // Hashed build files never change (SRV-9); the entry pages, also sent by this
+    // plugin, keep the SEC-3 headers the onRequest hook set.
     setHeaders: (reply, path) => {
-      reply.header('cache-control', path.startsWith(`${assets}${sep}`) ? 'public, max-age=31536000, immutable' : 'no-store');
+      if (!path.startsWith(`${assets}${sep}`)) return;
+      reply.removeHeader('pragma');
+      reply.removeHeader('expires');
+      reply.header('cache-control', 'public, max-age=31536000, immutable');
     },
   });
   const page = (file: string, extra: Record<string, string> = {}) => async (_request: FastifyRequest, reply: FastifyReply) => (
-    reply.headers({ 'cache-control': 'no-store', ...extra }).sendFile(file, root)
+    reply.headers(extra).sendFile(file, root)
   );
   const hidden = { schema: { hide: true } };
   app.get('/', hidden, page('index.html'));
@@ -182,41 +216,72 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false } },
   }).withTypeProvider<TypeBoxTypeProvider>();
 
-  const rateLimiter = options.rateLimiter ?? new RateLimiter();
-  const localAuth = options.services?.localAuth ?? new LocalAuthService(context);
-  const adminAuth = options.services?.adminAuth ?? new AdminAuthService(context);
+  const authLog: AuthLog = {
+    error: (message) => app.log.error({ source: 'auth' }, message),
+    info: (message) => app.log.info({ source: 'auth' }, message),
+  };
+  const memberAuth = options.services?.memberAuth ?? new MemberAuthService(context, undefined, authLog);
+  const adminAuth = options.services?.adminAuth ?? new AdminAuthService(context, undefined, authLog);
   const settingsService = options.services?.settings ?? new SettingsService(context);
   const handleRequest = options.handlers?.request ?? createRequestHandler(context);
   const handleAdminRequest = options.handlers?.admin ?? createAdminRequestHandler(context);
 
   /**
-   * Whether the admin cookie gets the Secure attribute. `auto` sets it when the
-   * site's configured origin is HTTPS, or when a trusted proxy reports HTTPS.
+   * Whether session cookies get the Secure attribute (AUTH-8). `auto` sets it
+   * when the request arrived over HTTPS, as a trusted proxy reports it, or when
+   * the deprecated `server.frontendOrigin` is an HTTPS origin.
    */
   function secureCookie(request: FastifyRequest) {
     const { session, server } = config;
     if (session.secureCookie !== 'auto') return session.secureCookie;
-    if (server.frontendOrigin?.startsWith('https:')) return true;
-    if (server.trustProxy === false || server.trustProxy === 0) return false;
-    return request.protocol === 'https';
+    return request.protocol === 'https' || Boolean(server.frontendOrigin?.startsWith('https:'));
   }
 
   function adminSessionBody(username: string) {
-    return { username, setupPasswordSet: context.setupPassword !== null, version: context.version };
+    const stillSet = context.setupPassword !== null;
+    return { username, setupPasswordStillSet: stillSet, setupPasswordSet: stillSet, version: context.version };
+  }
+
+  /** The new Admin cookie, and the 1.x one cleared so browsers drop it. */
+  function adminCookies(request: FastifyRequest, value: { token: string; expiresAt: Date } | null) {
+    const secure = secureCookie(request);
+    return [
+      value ? sessionCookie(adminSessionCookie, value.token, value.expiresAt, secure) : clearedCookie(adminSessionCookie, secure),
+      clearedCookie(legacyAdminSessionCookie.name, secure, legacyAdminSessionCookie.path),
+    ];
   }
 
   function startSession(request: FastifyRequest, reply: FastifyReply, statusCode: number, session: AdminSessionResult) {
-    return sendJson(reply, statusCode, adminSessionBody(session.admin.username), {
-      'set-cookie': sessionCookie(session.token, session.expiresAt, secureCookie(request)),
-    });
+    return sendJson(reply, statusCode, adminSessionBody(session.identity.username), { 'set-cookie': adminCookies(request, session) });
   }
+
+  /** SEC-4: one warning per process the first time credentials arrive over plain HTTP from another host. */
+  let plainHttpWarned = false;
+  function warnOnPlainHttp(request: FastifyRequest) {
+    if (plainHttpWarned || request.protocol !== 'http' || isLoopback(request.ip)) return;
+    plainHttpWarned = true;
+    app.log.warn({ source: 'security' }, `A sign-in or setup request arrived over plain HTTP from ${request.ip}: credentials were sent unencrypted. Put a TLS-terminating reverse proxy in front of the server (see README, HTTPS).`);
+  }
+
+  // SEC-1..SEC-3 on every response, errors and static files included. Hashed assets override the cache headers.
+  app.addHook('onRequest', async (_request, reply) => {
+    reply.headers({ ...securityHeaders, ...noStoreHeaders });
+  });
 
   // JSON bodies use Fastify's parser; any other body (backup uploads) arrives as a Buffer.
   app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => done(null, body));
   app.decorateRequest('member', null);
   app.decorateRequest('admin', null);
-  app.decorateRequest('adminToken', undefined);
+  app.decorateRequest('sessionToken', undefined);
   app.register(fastifyCookie);
+  // SEC-7: per-route limits only, keyed by request.ip (which honours server.trustProxy).
+  app.register(fastifyRateLimit, {
+    global: false,
+    store: sharedRateLimitStore(options.rateLimitClock),
+    addHeadersOnExceeding: { 'x-ratelimit-limit': false, 'x-ratelimit-remaining': false, 'x-ratelimit-reset': false },
+    addHeaders: { 'x-ratelimit-limit': false, 'x-ratelimit-remaining': false, 'x-ratelimit-reset': false, 'retry-after': true },
+    errorResponseBuilder: (_request, context) => new RateLimitedError(Math.max(1, Math.ceil(context.ttl / 1000))),
+  });
   registerOpenApi(app, context.version);
 
   app.setErrorHandler((error, request, reply) => {
@@ -225,62 +290,23 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   });
   app.setNotFoundHandler((_request, reply) => sendError(reply, 404, { error: 'not_found', message: 'Route not found.', code: 'NOT_FOUND' }));
 
-  // CORS for the deprecated server.frontendOrigin only; the site itself is same-origin.
-  if (config.server.frontendOrigin) app.addHook('onRequest', async (_request, reply) => {
-    reply.header('access-control-allow-origin', config.server.frontendOrigin!);
-    reply.header('access-control-allow-headers', 'authorization,content-type');
-    reply.header('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    reply.header('vary', 'origin');
-  });
+  app.addHook('onRequest', authenticationHook({ adminAuth, memberAuth, secureCookie }));
 
-  // The one authentication hook. Rate limits, the CSRF check and
-  // authentication all run before the body is read, so anonymous clients
-  // cannot make the server buffer large bodies.
-  app.addHook('onRequest', async (request, reply) => {
-    const route = request.routeOptions.config.apiRoute;
-    if (!route) return;
-    // The router lets a last path parameter be empty (`/articles/`); the route table does not.
-    if (Object.values(request.params as Record<string, string>).some((value) => value === '')) {
-      throw new HttpError(404, 'not_found', 'Route not found.');
-    }
-    if (route.rateLimit) {
-      const result = rateLimiter.hit(route.rateLimit, request.ip, rateLimitRule(config, route.rateLimit));
-      if (!result.allowed) throw new RateLimitedError(result.retryAfterSeconds);
-    }
-    if (route.csrf && request.headers[csrfHeader] !== '1') {
-      throw new HttpError(403, 'csrf', `Admin requests must include the ${csrfHeader} header.`, { legacyCode: 'CSRF_HEADER_REQUIRED' });
-    }
-    if (route.auth === 'member') {
-      const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
-      if (!token) throw new HttpError(401, 'unauthorized', 'Authentication is required.', { legacyCode: 'UNAUTHENTICATED' });
-      try {
-        request.member = await authenticate(localAuth, token);
-      } catch {
-        throw new HttpError(401, 'unauthorized', 'Invalid or expired authentication token.', { legacyCode: 'UNAUTHENTICATED' });
-      }
-    } else if (route.auth === 'admin') {
-      const token = request.cookies[adminSessionCookie];
-      request.adminToken = token;
-      request.admin = token ? await adminAuth.session(token) : null;
-      if (!request.admin) {
-        if (token) reply.header('set-cookie', clearedSessionCookie(secureCookie(request)));
-        throw new HttpError(401, 'unauthorized', 'Admin sign-in is required.', { legacyCode: 'UNAUTHENTICATED' });
-      }
-    }
-  });
-
-  app.options('/*', { schema: { hide: true } }, async (_request, reply) => reply.code(204).send());
-
-  // Routes are added in a plugin registered after @fastify/swagger, so the
-  // swagger plugin sees every one of them.
+  // Routes are added in a plugin registered after @fastify/swagger and
+  // @fastify/rate-limit, so both see every one of them.
   app.register(async (routes) => {
     routes.get('/api/openapi.json', { schema: { hide: true } }, async (_request, reply) => sendJson(reply, 200, app.swagger()));
 
     for (const route of apiRoutes) {
+      const limit = route.rateLimit ? rateLimitRule(config, route.rateLimit) : undefined;
       routes.route({
         method: route.method,
         url: route.path.replace(/\{([^}]+)\}/g, ':$1'),
-        config: { apiRoute: route },
+        config: {
+          apiRoute: route,
+          // A deprecated path shares its replacement's bucket (groupId), so it adds no attempts.
+          ...(limit ? { rateLimit: { max: limit.max, timeWindow: limit.windowMinutes * 60_000, groupId: route.rateLimit } } : {}),
+        },
         schema: routeSchema(route),
         // The restore upload is limited by the effective backup.maxZipBytes setting
         // in preParsing; Fastify's own limit there is only the hard ceiling.
@@ -308,37 +334,32 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
       case 'GET /api/health':
         await (await context.db.pool()).query('SELECT 1');
         return sendJson(reply, 200, { status: 'ok' });
-      case 'POST /api/auth/login': {
+      case 'POST /api/member/login': {
+        warnOnPlainHttp(request);
         const input = parseCredentials(body);
-        const signedIn = await localAuth.authenticate(input.username, input.password);
-        if (!signedIn) throw new HttpError(401, 'invalid_credentials', 'Invalid username or password.');
-        return sendJson(reply, 200, {
-          token: localAuth.issueToken(signedIn),
-          user: {
-            sub: signedIn.sub,
-            username: signedIn.username,
-            displayName: signedIn.displayName,
-            email: signedIn.email,
-            role: signedIn.role,
-          },
+        const session = await memberAuth.login(input.username, input.password);
+        return sendJson(reply, 200, session.identity, {
+          'set-cookie': sessionCookie(memberSessionCookie, session.token, session.expiresAt, secureCookie(request)),
         });
       }
-      case 'GET /api/auth/session':
+      case 'POST /api/member/logout':
+        await memberAuth.logout(request.sessionToken);
+        return reply.code(204).header('set-cookie', clearedCookie(memberSessionCookie, secureCookie(request))).send();
+      case 'GET /api/member/session':
         return sendJson(reply, 200, request.member);
       case 'GET /api/setup/status':
         return sendJson(reply, 200, await adminAuth.setupStatus());
       case 'POST /api/setup':
+        warnOnPlainHttp(request);
         return startSession(request, reply, 201, await adminAuth.setup(parseAdminSetup(body)));
       case 'POST /api/admin/login': {
+        warnOnPlainHttp(request);
         const input = parseCredentials(body);
         return startSession(request, reply, 200, await adminAuth.login(input.username, input.password));
       }
       case 'POST /api/admin/logout':
-        await adminAuth.logout(request.adminToken!);
-        return reply
-          .code(204)
-          .headers({ 'set-cookie': clearedSessionCookie(secureCookie(request)), 'cache-control': 'no-store' })
-          .send();
+        await adminAuth.logout(request.sessionToken);
+        return reply.code(204).header('set-cookie', adminCookies(request, null)).send();
       case 'GET /api/admin/session':
         return sendJson(reply, 200, adminSessionBody(request.admin!.username));
       case 'POST /api/admin/password': {

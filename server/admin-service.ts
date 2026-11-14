@@ -2,7 +2,7 @@ import type pg from 'pg';
 import type { AppContext } from './context.js';
 import { HttpError } from './http.js';
 import { type AdminStats, type LocalUserRecord, type Role } from './domain.js';
-import { hashPassword } from './local-auth.js';
+import { hashPassword } from './passwords.js';
 
 interface LocalUserRow {
   id: string;
@@ -151,6 +151,8 @@ export class AdminService {
          RETURNING ${userColumns}`,
         [id, input.username, input.displayName, input.email ?? null, input.role, input.isActive, securityChanged],
       );
+      // A role change or deactivation ends every session of that member (AUTH-4, AUTH-1 deviation).
+      if (securityChanged) await client.query('DELETE FROM member_sessions WHERE user_id = $1', [id]);
       await client.query('COMMIT');
       return toUser(result.rows[0]);
     } catch (error) {
@@ -174,6 +176,7 @@ export class AdminService {
          WHERE id = $1`,
         [id, passwordHash],
       );
+      await client.query('DELETE FROM member_sessions WHERE user_id = $1', [id]);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

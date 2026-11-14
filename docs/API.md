@@ -8,7 +8,7 @@ For contributors: the route table, with each route's TypeBox schemas, is `server
 
 - [Base URL and formats](#base-url-and-formats)
 - [Member authentication](#member-authentication)
-- [Admin authentication and CSRF](#admin-authentication-and-csrf)
+- [Admin authentication](#admin-authentication)
 - [Deprecated paths](#deprecated-paths)
 - [Roles and visibility](#roles-and-visibility)
 - [Optimistic concurrency](#optimistic-concurrency)
@@ -29,45 +29,43 @@ Every route has one of three authentication modes, declared once in `server/rout
 
 | Mode | Credential | Routes |
 | --- | --- | --- |
-| Public (`none`) | None | `GET /api/health`, `GET /api/settings`, `GET /api/articles`, `GET /api/articles/{id}`, `GET /api/tags`, `POST /api/auth/login`, `GET /api/setup/status`, `POST /api/setup`, `POST /api/admin/login` |
-| Member (`member`) | `Authorization: Bearer <token>` | Article and tag writes, revisions, `/api/tags/orphans`, `/api/member/*`, `GET /api/auth/session` |
-| Admin (`admin`) | The `agt_admin_session` cookie, plus `x-agt-request: 1` on non-GET requests | Every other `/api/admin/*` route |
+| Public (`none`) | None | `GET /api/health`, `GET /api/settings/public`, `GET /api/articles`, `GET /api/articles/{id}`, `GET /api/tags`, `GET /api/setup/status`, and sign-in: `POST /api/member/login`, `POST /api/setup`, `POST /api/admin/login` |
+| Member (`member`) | The `agt_knowledge_base_member_session` cookie | Article and tag writes, revisions, `/api/tags/orphans`, `/api/member/*` |
+| Admin (`admin`) | The `agt_knowledge_base_session` cookie | Every other `/api/admin/*` route |
 
-The two credentials never cross: bearer tokens are ignored on admin routes, and the Admin cookie is ignored on member routes (it is scoped to `/api/admin`, so browsers do not even send it there). A member account cannot use the admin API, and the Admin cannot write articles.
+Both are cookie sessions (AUTH-8): a random 32-byte token in an `HttpOnly`, `SameSite=Strict`, `Path=/` cookie, marked `Secure` on HTTPS (`session.secureCookie`). The server stores only the token's SHA-256, and a session lasts `session.ttlHours` (12 hours by default). Scripts in the page can never read a token (FE-3). The two cookies never cross: the member cookie is ignored on admin routes and the Admin cookie on member routes, so a member account cannot use the admin API, and the Admin cannot write articles. Bearer tokens are not accepted anywhere.
+
+**CSRF header.** Every state-changing request (anything but `GET`) to `/api/admin/*`, `/api/setup` and the member routes, sign-in and sign-out included, must carry `x-agt-request: 1` (SEC-5). A request without it is rejected with `403 csrf` before authentication, rate limits or body parsing. Together with `SameSite=Strict` cookies and no CORS (SEC-6), this stops other sites from making a signed-in browser send state-changing requests.
+
+A missing, unknown or expired session answers `401 unauthorized` and clears the stale cookie.
 
 ## Member authentication
 
-Members (Editors and Moderators) sign in with their username (or email address) and password, and receive a signed bearer token:
+Members (Editors and Moderators) sign in with their username (or email address) and password. A script can keep the cookie in a cookie jar:
 
 ```bash
-TOKEN=$(curl -sS -X POST "$SITE/api/auth/login" \
-  -H 'content-type: application/json' \
-  -d '{"username":"atlas","password":"Correct-horse-1"}' | jq -r .token)
+curl -sS -c member.cookies -X POST "$SITE/api/member/login" \
+  -H 'content-type: application/json' -H 'x-agt-request: 1' \
+  -d '{"username":"atlas","password":"Correct-horse-1"}'
+curl -sS -b member.cookies "$SITE/api/member/articles?search=portal"
+curl -sS -b member.cookies -X POST "$SITE/api/articles" -H 'x-agt-request: 1' -H 'content-type: application/json' -d @article.json
 ```
 
-The response is `{ "token": "...", "user": { "sub", "username", "displayName", "email", "role" } }`. Send the token on member routes:
+- `POST /api/member/login` answers `{ sub, username, displayName, email, role }` and sets the member cookie. Wrong credentials and inactive accounts both answer `401 invalid_credentials`. It is rate-limited per client address (`rateLimits.login`, see [Limits and caching](#limits-and-caching)).
+- `GET /api/member/session` returns the signed-in member.
+- `POST /api/member/logout` ends the session on the server and clears the cookie.
 
-```bash
-curl -sS "$SITE/api/member/articles?search=portal" -H "authorization: Bearer $TOKEN"
-```
+A member's sessions all end when the Admin changes the member's role, deactivates the account, sets a new password, or deletes it (AUTH-4).
 
-`GET /api/auth/session` returns the signed-in member and is a cheap way to check whether a stored token is still valid. Tokens expire after `session.ttlHours` (12 hours by default) and stop working as soon as an Admin changes the member's role, deactivates the account, or sets a new password. A missing, invalid, or expired token answers `401 unauthorized`; sign in again.
+The 1.x bearer-token routes `POST /api/auth/login` and `GET /api/auth/session` were removed in 2.0.0 without a deprecation period: keeping tokens in `localStorage` was the security problem the cookie sessions fix (VER-10's security exception).
 
-`POST /api/auth/login` is rate-limited per client address (see [Limits and caching](#limits-and-caching)). Wrong credentials and inactive accounts both answer `401 invalid_credentials`.
+## Admin authentication
 
-## Admin authentication and CSRF
-
-The installation Admin uses a cookie session instead of a bearer token, so the admin panel never stores a credential that page scripts can read.
-
-1. **Setup** (fresh installations only): `GET /api/setup/status` reports `{ required, setupPasswordConfigured }`. `POST /api/setup` with `{ setupPassword, username, password, passwordConfirmation }` creates the Admin and signs it in. It requires `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` on the server (`403 setup_disabled` otherwise) and answers `409 setup_already_completed` once an Admin exists.
-2. **Sign-in**: `POST /api/admin/login` with `{ username, password }`. The response sets `agt_admin_session`: a random token in an `HttpOnly`, `SameSite=Strict` cookie with `Path=/api/admin`, marked `Secure` on HTTPS. The server stores only its SHA-256 hash. Sessions last `adminSession.ttlHours` (12 hours by default).
-3. **Session**: `GET /api/admin/session` returns `{ username, setupPasswordSet, version }`; `version` is the app version.
-4. **Sign-out**: `POST /api/admin/logout` revokes the session on the server and clears the cookie.
-5. **Password change**: `POST /api/admin/password` with `{ currentPassword, password, passwordConfirmation }` revokes every Admin session and returns a new cookie.
-
-**CSRF header.** Every non-GET request to `/api/admin/*` and `POST /api/setup`, sign-in included, must carry `x-agt-request: 1` (SEC-5). Requests without it are rejected with `403 csrf` before authentication or body parsing. Together with `SameSite=Strict`, this stops other sites from making the Admin's browser send state-changing requests.
-
-A script can hold the cookie in a cookie jar:
+1. **Setup** (fresh installations only, AUTH-5): `GET /api/setup/status` reports `{ adminExists, setupPasswordConfigured }`. `POST /api/setup` with `{ setupPassword, username, password }` (`passwordConfirmation` is optional and must match when sent) creates the Admin and signs it in, answering `201` with the session body. It answers `503 setup_password_missing` when `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` is not set, `401 invalid_setup_password` for a wrong setup password, `400 validation_failed` when the new password is too weak or equals the setup password, and `410 setup_complete` once an Admin exists, even while the variable is still set. The setup password is never stored and never becomes the Admin password.
+2. **Sign-in**: `POST /api/admin/login` with `{ username, password }` sets the `agt_knowledge_base_session` cookie. The username is compared exactly as stored, after trimming surrounding whitespace (AUTH-3).
+3. **Session**: `GET /api/admin/session` returns `{ username, setupPasswordStillSet, version }`; `setupPasswordStillSet` means `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` should be removed (AUTH-6), and `version` is the app version.
+4. **Sign-out**: `POST /api/admin/logout` ends the session on the server and clears the cookie.
+5. **Password change**: `POST /api/admin/password` with `{ currentPassword, password }` ends every Admin session and returns a new cookie (AUTH-4). A wrong current password answers `401 invalid_credentials`.
 
 ```bash
 curl -sS -c admin.cookies -X POST "$SITE/api/admin/login" \
@@ -76,7 +74,8 @@ curl -sS -c admin.cookies -X POST "$SITE/api/admin/login" \
 curl -sS -b admin.cookies "$SITE/api/admin/stats"
 ```
 
-A missing or expired session answers `401 unauthorized` (and clears an expired cookie).
+**Passwords** (AUTH-2) are hashed with scrypt (`N = 2^15, r = 8, p = 1`) and stored as `scrypt$N$r$p$<salt>$<hash>`. Hashes from 1.x are verified with their old parameters and rehashed at the next successful sign-in.
+
 
 ## Deprecated paths
 
@@ -92,7 +91,7 @@ These 1.x paths still work, with the same request and response as in 1.x, and ar
 | `PUT /api/admin/auth/password` | `POST /api/admin/password` |
 | `GET /api/settings` (1.x body) | `GET /api/settings/public` (see [Settings](#settings)) |
 
-The `page` and `pageSize` list parameters and the `page`, `pageSize` and `totalPages` list fields (see [pagination](#lists-filters-and-pagination)), and the `code` and `issues` error properties (see [Errors](#errors)), are deprecated the same way, as are the 1.x fields of `/api/admin/settings` (see [Settings](#settings)).
+The `page` and `pageSize` list parameters and the `page`, `pageSize` and `totalPages` list fields (see [pagination](#lists-filters-and-pagination)), and the `code` and `issues` error properties (see [Errors](#errors)), are deprecated the same way, as are the 1.x fields of `/api/admin/settings` (see [Settings](#settings)), the `required` field of `GET /api/setup/status` (use `adminExists`) and the `setupPasswordSet` field of the Admin session (use `setupPasswordStillSet`).
 
 ## Roles and visibility
 
@@ -190,21 +189,20 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 | 400 | `unknown_setting` | — | A settings update names a key (`params.key`) that is not a dashboard setting. |
 | 400 | `invalid_setting` | `INVALID_SETTING` | A settings update gives a key (`params.key`) a value its schema does not allow. |
 | 400 | `invalid_backup` | `INVALID_BACKUP` | The backup archive cannot be restored; the message says why. |
-| 401 | `unauthorized` | `UNAUTHENTICATED` | The member token or Admin session is missing, invalid, or expired. |
-| 401 | `invalid_credentials` | `INVALID_CREDENTIALS` | Wrong username or password (or an inactive member). |
+| 401 | `unauthorized` | `UNAUTHENTICATED` | The member or Admin session cookie is missing, unknown, or expired. |
+| 401 | `invalid_credentials` | `INVALID_CREDENTIALS`, `INVALID_CURRENT_PASSWORD` | Wrong username or password (or an inactive member), or a wrong current password on the Admin password change. |
 | 401 | `invalid_setup_password` | `INVALID_SETUP_PASSWORD` | The setup password is wrong. |
 | 403 | `forbidden` | `FORBIDDEN` | The member's role does not allow the action. |
 | 403 | `public_browsing_closed` | `PUBLIC_BROWSING_DISABLED` | Anonymous reads are turned off. |
 | 403 | `csrf` | `CSRF_HEADER_REQUIRED` | The request lacks `x-agt-request: 1`. |
-| 403 | `setup_disabled` | `SETUP_DISABLED` | `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` is not set on the server. |
-| 403 | `invalid_current_password` | `INVALID_CURRENT_PASSWORD` | The current Admin password is wrong. |
 | 404 | `not_found` | `NOT_FOUND`, `INVALID_ID`, `INVALID_TAG_ID`, `INVALID_USER_ID`, `TAG_NOT_FOUND`, `USER_NOT_FOUND` | The route, article, revision, tag or member account does not exist, the ID is malformed, or the caller may not see the article. |
 | 409 | `conflict` | `VERSION_CONFLICT`, `TAG_NAME_CONFLICT`, `USER_CONFLICT` | The article changed since it was read, or a name, username or email is taken. |
 | 409 | `defined_in_config` | `SETTING_DEFINED_IN_FILE` | The setting (`params.key`) is defined in `config.yaml` and cannot be changed through the API. |
-| 409 | `setup_already_completed` | `SETUP_ALREADY_COMPLETED` | An Admin already exists. |
+| 410 | `setup_complete` | `SETUP_ALREADY_COMPLETED` | An Admin already exists, so setup is closed (even while the setup password is still set). |
 | 413 | `file_too_large` | `BODY_TOO_LARGE` | A backup upload exceeds `backup.maxZipBytes` (`params.maxBytes`). |
 | 413 | `body_too_large` | `BODY_TOO_LARGE` | A JSON body exceeds 1 MB. |
 | 429 | `rate_limited` | `RATE_LIMITED` | Too many attempts; wait `params.retryAfterSeconds` (also sent as `Retry-After`). |
+| 503 | `setup_password_missing` | `SETUP_DISABLED` | `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` is not set on the server, so setup is unavailable. |
 | 500 | `pre_restore_backup_failed` | `PRE_RESTORE_BACKUP_FAILED` | The pre-restore backup could not be written, so nothing was restored. |
 | 500 | `internal` | `INTERNAL_ERROR` | An unexpected failure. |
 
@@ -212,11 +210,11 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 
 **Body size.** JSON bodies are limited to 1 MB (`413 body_too_large`), except backup restore uploads, which may be up to the effective `backup.maxZipBytes` (100 MB by default; `413 file_too_large`). The limit is checked against `Content-Length` and while reading, after authentication, so anonymous clients cannot make the server buffer large bodies.
 
-**Rate limits.** These routes are limited per client address, before authentication and before the body is read. An exceeded limit answers `429 rate_limited` with a `Retry-After` header (seconds). Limits are configured under `rateLimits.*` in `config.yaml`, are kept in memory, and reset when the API restarts. A deprecated path shares its replacement's limit.
+**Rate limits** (SEC-7, `@fastify/rate-limit`). These routes are limited per client address, right after the CSRF and session checks and before the body is read. An exceeded limit answers `429 rate_limited` with a `Retry-After` header (seconds). Limits are configured under `rateLimits.*` in `config.yaml`, are kept in memory, and reset when the API restarts. A deprecated path shares its replacement's limit.
 
 | Route | `config.yaml` key | Default |
 | --- | --- | --- |
-| `POST /api/auth/login` | `rateLimits.login` | 10 per 15 minutes |
+| `POST /api/member/login` | `rateLimits.login` | 10 per 15 minutes |
 | `POST /api/admin/login` | `rateLimits.login` (deprecated `rateLimits.adminLogin` overrides it) | 10 per 15 minutes |
 | `POST /api/admin/password` | `rateLimits.login` (deprecated `rateLimits.adminPassword` overrides it) | 10 per 15 minutes |
 | `POST /api/setup` | `rateLimits.setup` | 10 per 15 minutes |
@@ -226,7 +224,7 @@ Each route has its own counter, so member sign-in attempts never use up the Admi
 
 Client addresses come from `X-Forwarded-For` only when `server.trustProxy` allows it.
 
-**Caching.** Successful public reads of `GET /api/settings/public` (and the deprecated `GET /api/settings`), `GET /api/articles`, and `GET /api/articles/{id}` send `Cache-Control: public, max-age=30`, so a public change can take up to 30 seconds to appear for anonymous visitors. Every other response, including all member and admin responses and all errors, sends `Cache-Control: no-store`.
+**Security headers and caching** (SEC-1..SEC-3). Every response carries the spec's Content-Security-Policy, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` and `Cross-Origin-Opener-Policy: same-origin`. Every API and HTML response sends `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`, `Pragma: no-cache` and `Expires: 0`; only the hashed files under `/assets/` are cached. The API sends no CORS headers and answers no preflight requests (SEC-6).
 
 ## Settings
 
@@ -237,7 +235,7 @@ The dashboard settings (CFG-6) are `site.title`, `site.subtitle`, `site.supportU
 - `PUT /api/admin/settings` takes `{ "values": { "<key>": <value> | null } }`. `null` resets a key to its default. The whole request is refused, and nothing changes, if any key is not a dashboard setting (`400 unknown_setting`), is set in `config.yaml` (`409 defined_in_config`, message "`<key>` is defined in the configuration file and cannot be changed from the dashboard.") or has a value its schema does not allow (`400 invalid_setting`). It answers like `GET`.
 
 ```bash
-curl -sS -X PUT "$SITE/api/admin/settings" -b "agt_admin_session=$ADMIN_COOKIE" \
+curl -sS -X PUT "$SITE/api/admin/settings" -b admin.cookies \
   -H 'x-agt-request: 1' -H 'content-type: application/json' \
   -d '{"values":{"site.title":"Field Archive","backup.maxEntries":null}}'
 ```

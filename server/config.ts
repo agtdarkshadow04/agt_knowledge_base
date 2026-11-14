@@ -129,7 +129,7 @@ export const ConfigSchema = Type.Object({
     port: Type.Integer({ minimum: 1, maximum: 65_535, default: defaultPort }),
     trustProxy: Type.Union(TrustProxy.anyOf, { default: false }),
     logLevel: Type.Union(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'].map((level) => Type.Literal(level)), { default: 'info' }),
-    /** Deprecated: only used for CORS and the `auto` Secure cookie until 3.0.0. */
+    /** Deprecated: an https:// value still marks session cookies Secure under `auto` until 3.0.0. */
     frontendOrigin: optional(Type.String({ pattern: '^https?://[^/\\s]+$' })),
   }),
   storage: group({
@@ -205,7 +205,7 @@ const renamedKeys: ReadonlyArray<readonly [string, string]> = [
 
 /** Deprecated keys that keep their own meaning until 3.0.0. */
 const deprecatedKeys: Record<string, string> = {
-  'server.frontendOrigin': 'it is only used for CORS and the `auto` Secure cookie, both of which change in a later 2.x release',
+  'server.frontendOrigin': 'it no longer enables CORS (SEC-6); an https:// value only still marks session cookies Secure under `auto`, which a trusted proxy reporting HTTPS does too',
   'adminSession.ttlHours': 'use session.ttlHours, which sets the Admin session lifetime when this key is absent',
   'rateLimits.adminLogin': 'use rateLimits.login, which applies to Admin sign-in when this key is absent',
   'rateLimits.adminPassword': 'use rateLimits.login, which applies to the Admin password change when this key is absent',

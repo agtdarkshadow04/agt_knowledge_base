@@ -36,13 +36,13 @@ function operations() {
     .map((method) => ({ key: `${method.toUpperCase()} ${path}`, path, method, operation: item[method] as Node })));
 }
 
-/** The security a route must declare, from the API-11 table (and the member row of the AUTH-1 deviation). */
+/** The security a route must declare, from the API-11 table and the member rows of the AUTH-1 deviation. */
 function expectedSecurity(key: string) {
   const route = apiRoutes.find((candidate) => candidate.routeKey === key)!;
-  if (route.auth === 'member') return SECURITY.member;
-  if (route.auth === 'admin') return route.method === 'GET' ? SECURITY.adminRead : SECURITY.adminWrite;
-  if (['POST /api/setup', 'POST /api/admin/login', 'POST /api/admin/setup', 'POST /api/admin/auth/login'].includes(key)) return SECURITY.csrfOnly;
-  return SECURITY.none;
+  if (route.auth === 'member') return route.method === 'GET' ? [{ memberSessionCookie: [] }] : [{ memberSessionCookie: [], csrfHeader: [] }];
+  if (route.auth === 'admin') return route.method === 'GET' ? [{ sessionCookie: [] }] : [{ sessionCookie: [], csrfHeader: [] }];
+  if (['POST /api/setup', 'POST /api/admin/login', 'POST /api/admin/setup', 'POST /api/admin/auth/login', 'POST /api/member/login'].includes(key)) return [{ csrfHeader: [] }];
+  return [];
 }
 
 /** Error codes the server can send, found in HttpError calls and literal error bodies. */
@@ -99,8 +99,11 @@ describe('OpenAPI document', () => {
       assert.deepEqual(operation.security, expectedSecurity(key), key);
     }
     const schemes = (document.components as Node).securitySchemes as Node;
-    assert.deepEqual(Object.keys(schemes).sort(), ['csrfHeader', 'memberBearer', 'sessionCookie']);
+    assert.deepEqual(Object.keys(schemes).sort(), ['csrfHeader', 'memberSessionCookie', 'sessionCookie']);
     assert.deepEqual(schemes.csrfHeader, { type: 'apiKey', in: 'header', name: 'x-agt-request', description: 'Must be "1".' });
+    assertMatches(schemes.sessionCookie, { type: 'apiKey', in: 'cookie', name: 'agt_knowledge_base_session' });
+    assertMatches(schemes.memberSessionCookie, { type: 'apiKey', in: 'cookie', name: 'agt_knowledge_base_member_session' });
+    assert.deepEqual(SECURITY.memberWrite, [{ memberSessionCookie: [], csrfHeader: [] }]);
   });
 
   it('marks the 1.x paths deprecated and names their replacements', () => {
@@ -141,7 +144,7 @@ describe('the admin panel\'s API reference', () => {
     assertMatches(find('PUT', '/api/admin/settings'), { auth: 'admin', csrfHeader: true, deprecated: false });
     assertMatches(find('POST', '/api/admin/login'), { auth: 'none', csrfHeader: true });
     assertMatches(find('GET', '/api/articles'), { auth: 'none', csrfHeader: false });
-    assertMatches(find('POST', '/api/articles'), { auth: 'member', csrfHeader: false });
+    assertMatches(find('POST', '/api/articles'), { auth: 'member', csrfHeader: true });
     assertMatches(find('POST', '/api/admin/auth/login'), { deprecated: true });
     const body = find('POST', '/api/articles').requestBody!;
     assert.deepEqual(body.fields.map((field) => field.name), ['title', 'content', 'tagIds', 'visibility', 'version']);

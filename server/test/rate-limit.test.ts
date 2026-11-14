@@ -1,29 +1,35 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { RateLimiter } from '../rate-limit.js';
+import { sharedRateLimitStore } from '../rate-limit.js';
 
+type Result = { current: number; ttl: number };
+interface Store { incr(key: string, callback: (error: Error | null, result: Result) => void, timeWindow?: number): void }
 
-describe('rate limiter', () => {
-  it('allows the configured number of attempts per window, then reports when to retry', () => {
-    let now = 0;
-    const limiter = new RateLimiter(() => now);
-    const rule = { max: 2, windowMinutes: 1 };
-    assert.deepEqual(limiter.hit('login', '10.0.0.1', rule), { allowed: true });
-    assert.deepEqual(limiter.hit('login', '10.0.0.1', rule), { allowed: true });
-    now = 15_000;
-    assert.deepEqual(limiter.hit('login', '10.0.0.1', rule), { allowed: false, retryAfterSeconds: 45 });
-    // Other clients and other buckets are counted separately.
-    assert.deepEqual(limiter.hit('login', '10.0.0.2', rule), { allowed: true });
-    assert.deepEqual(limiter.hit('adminLogin', '10.0.0.1', rule), { allowed: true });
+function incr(store: Store, key: string, timeWindow: number) {
+  let result: Result | undefined;
+  store.incr(key, (_error, value) => { result = value; }, timeWindow);
+  return result!;
+}
+
+describe('shared rate-limit store (SEC-7)', () => {
+  it('counts per key in a fixed window and resets when it ends', () => {
+    let now = 1_000;
+    const Store = sharedRateLimitStore(() => now);
+    const store = new Store();
+    assert.deepEqual(incr(store, '10.0.0.1login', 60_000), { current: 1, ttl: 60_000 });
+    now += 15_000;
+    assert.deepEqual(incr(store, '10.0.0.1login', 60_000), { current: 2, ttl: 45_000 });
+    assert.deepEqual(incr(store, '10.0.0.2login', 60_000), { current: 1, ttl: 60_000 });
+    assert.deepEqual(incr(store, '10.0.0.1setup', 60_000), { current: 1, ttl: 60_000 });
+    now += 45_000;
+    assert.deepEqual(incr(store, '10.0.0.1login', 60_000), { current: 1, ttl: 60_000 });
   });
 
-  it('resets when the window ends', () => {
-    let now = 0;
-    const limiter = new RateLimiter(() => now);
-    const rule = { max: 1, windowMinutes: 1 };
-    limiter.hit('setup', 'client', rule);
-    assert.equal(limiter.hit('setup', 'client', rule).allowed, false);
-    now = 60_000;
-    assert.equal(limiter.hit('setup', 'client', rule).allowed, true);
+  it('shares one map between routes, so a bucket counts across them', () => {
+    const Store = sharedRateLimitStore(() => 0);
+    const store = new Store();
+    assert.equal(store.child(), store);
+    incr(store, 'ipadminLogin', 60_000);
+    assert.equal(incr(store.child(), 'ipadminLogin', 60_000).current, 2);
   });
 });

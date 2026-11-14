@@ -7,7 +7,6 @@ import { stringToPastelHex } from './TagChip';
 const mocks = vi.hoisted(() => ({
   createTag: vi.fn(),
   deleteTag: vi.fn(),
-  getToken: vi.fn(async () => 'token'),
   listOrphanTagReferences: vi.fn(),
   listTags: vi.fn(),
   removeOrphanTagReference: vi.fn(),
@@ -17,7 +16,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
     user: { sub: 'admin', username: 'atlas', displayName: 'Atlas', role: 'Moderator' },
-    getToken: mocks.getToken,
   }),
 }));
 
@@ -48,7 +46,6 @@ describe('ManageTagsModal', () => {
     mocks.createTag.mockResolvedValue(portalTag);
     mocks.deleteTag.mockReset();
     mocks.deleteTag.mockResolvedValue(undefined);
-    mocks.getToken.mockClear();
     mocks.listTags.mockReset();
     mocks.listTags.mockResolvedValue([portalTag]);
     mocks.listOrphanTagReferences.mockReset();
@@ -108,7 +105,6 @@ describe('ManageTagsModal', () => {
     await user.click(screen.getByRole('button', { name: 'Create tag' }));
     await waitFor(() => expect(mocks.createTag).toHaveBeenCalledWith(
       { name: 'Expedition', color: '#ABCDEF' },
-      'token',
     ));
 
     await user.click(screen.getByRole('button', { name: 'Edit Portal' }));
@@ -118,7 +114,6 @@ describe('ManageTagsModal', () => {
     await waitFor(() => expect(mocks.updateTag).toHaveBeenCalledWith(
       portalTag.id,
       { name: 'Gateway', color: stringToPastelHex('Gateway').toUpperCase() },
-      'token',
     ));
   });
 
@@ -133,7 +128,7 @@ describe('ManageTagsModal', () => {
     expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/references will be retained and may become unresolved/i));
 
     await user.click(screen.getByRole('button', { name: 'Delete Portal' }));
-    await waitFor(() => expect(mocks.deleteTag).toHaveBeenCalledWith(portalTag.id, 'token'));
+    await waitFor(() => expect(mocks.deleteTag).toHaveBeenCalledWith(portalTag.id));
   });
 
   it('removes one orphan using the current article version', async () => {
@@ -146,7 +141,6 @@ describe('ManageTagsModal', () => {
       orphan.articleId,
       orphan.missingTagIds[0],
       orphan.version,
-      'token',
     ));
   });
 

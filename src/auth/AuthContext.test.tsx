@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionUser } from '../types';
@@ -7,22 +7,22 @@ import { AuthProvider, useAuth } from './AuthContext';
 const mocks = vi.hoisted(() => ({
   getLocalSession: vi.fn(),
   createLocalSession: vi.fn(),
+  deleteLocalSession: vi.fn(),
 }));
 
 vi.mock('../services/api', () => mocks);
 
-const tokenKey = 'agt-local-auth-token';
+const legacyTokenKey = 'agt-local-auth-token';
 const traveller: SessionUser = { sub: 'user-1', username: 'traveller', displayName: 'Traveller', role: 'Editor' };
 
 function Probe() {
-  const { user, loading, signIn, signOut, getToken } = useAuth();
+  const { user, loading, signIn, signOut } = useAuth();
   return (
     <div>
       <p>{loading ? 'loading' : 'ready'}</p>
       <p>user:{user?.username ?? 'none'}</p>
       <button type="button" onClick={() => void signIn('traveller', 'Correct-Horse-9')}>sign in</button>
-      <button type="button" onClick={() => void signOut()}>sign out</button>
-      <button type="button" onClick={() => void getToken().catch((error: Error) => { document.title = error.message; })}>token</button>
+      <button type="button" onClick={() => void signOut().catch(() => undefined)}>sign out</button>
     </div>
   );
 }
@@ -34,51 +34,53 @@ function renderProvider() {
 describe('AuthProvider', () => {
   beforeEach(() => {
     localStorage.clear();
-    document.title = '';
     Object.values(mocks).forEach((mock) => mock.mockReset());
   });
 
-  it('restores the session from a stored token', async () => {
-    localStorage.setItem(tokenKey, 'stored-token');
+  it('restores the session from the session cookie', async () => {
     mocks.getLocalSession.mockResolvedValue(traveller);
     renderProvider();
 
     expect(await screen.findByText('user:traveller')).toBeInTheDocument();
-    expect(mocks.getLocalSession).toHaveBeenCalledWith('stored-token');
+    expect(mocks.getLocalSession).toHaveBeenCalledWith();
   });
 
-  it('discards a stored token the API rejects', async () => {
-    localStorage.setItem(tokenKey, 'expired-token');
-    mocks.getLocalSession.mockRejectedValue(new Error('Invalid or expired authentication token.'));
+  it('starts signed out when the API has no session, and drops a 1.x stored token (FE-3)', async () => {
+    localStorage.setItem(legacyTokenKey, 'old-token');
+    mocks.getLocalSession.mockRejectedValue(new Error('Sign-in is required.'));
     renderProvider();
 
     expect(await screen.findByText('ready')).toBeInTheDocument();
     expect(screen.getByText('user:none')).toBeInTheDocument();
-    expect(localStorage.getItem(tokenKey)).toBeNull();
+    expect(localStorage.getItem(legacyTokenKey)).toBeNull();
   });
 
-  it('stores the token on sign-in and removes it on sign-out', async () => {
+  it('signs in and out through the API, keeping nothing in localStorage', async () => {
     const user = userEvent.setup();
-    mocks.createLocalSession.mockResolvedValue({ token: 'new-token', user: traveller });
+    mocks.getLocalSession.mockRejectedValue(new Error('Sign-in is required.'));
+    mocks.createLocalSession.mockResolvedValue(traveller);
+    mocks.deleteLocalSession.mockResolvedValue(undefined);
     renderProvider();
     await screen.findByText('ready');
 
     await user.click(screen.getByRole('button', { name: 'sign in' }));
     expect(await screen.findByText('user:traveller')).toBeInTheDocument();
     expect(mocks.createLocalSession).toHaveBeenCalledWith('traveller', 'Correct-Horse-9');
-    expect(localStorage.getItem(tokenKey)).toBe('new-token');
+    expect(localStorage.length).toBe(0);
 
     await user.click(screen.getByRole('button', { name: 'sign out' }));
     expect(await screen.findByText('user:none')).toBeInTheDocument();
-    expect(localStorage.getItem(tokenKey)).toBeNull();
+    expect(mocks.deleteLocalSession).toHaveBeenCalledOnce();
   });
 
-  it('reports an expired session when no token is stored', async () => {
+  it('signs out locally even when the logout request fails', async () => {
     const user = userEvent.setup();
+    mocks.getLocalSession.mockResolvedValue(traveller);
+    mocks.deleteLocalSession.mockRejectedValue(new Error('offline'));
     renderProvider();
-    await screen.findByText('ready');
+    await screen.findByText('user:traveller');
 
-    await user.click(screen.getByRole('button', { name: 'token' }));
-    await waitFor(() => expect(document.title).toBe('Your session has expired. Sign in again.'));
+    await user.click(screen.getByRole('button', { name: 'sign out' }));
+    expect(await screen.findByText('user:none')).toBeInTheDocument();
   });
 });

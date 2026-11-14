@@ -8,6 +8,8 @@ import { PostgresArticleRepository } from './postgres-article-repository.js';
 import type { AppContext } from './context.js';
 import type { ApiRequest, ApiResponse } from './routes.js';
 import { SettingsService, type SettingsWrite } from './settings-service.js';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { adminSessionCookie, clearedCookie, memberSessionCookie, type AdminAuthService, type MemberAuthService } from './session.js';
 import {
   parseAdminPasswordWrite,
   parseAdminUserCreate,
@@ -16,11 +18,56 @@ import {
   parseUserListQuery,
 } from '../src/lib/validation.js';
 
+/** Header every state-changing request to the admin, setup and member API must carry (SEC-5, NAME-3). */
+export const csrfHeader = 'x-agt-request';
+
+export interface AuthenticationHookOptions {
+  adminAuth: Pick<AdminAuthService, 'session'>;
+  memberAuth: Pick<MemberAuthService, 'session'>;
+  /** Whether cookies get the Secure attribute for this request (`session.secureCookie`). */
+  secureCookie(request: FastifyRequest): boolean;
+}
+
 /**
- * Routes of the admin panel. The HTTP server has already verified the Admin
- * session cookie and CSRF header; `requireAdminSession` re-checks that a
- * session is attached so these routes never run without one. Member bearer
- * tokens play no part here, and no member `Actor` is ever set.
+ * The one `onRequest` hook that authenticates API requests (AUTH-9). It runs
+ * before the body is read, so anonymous clients cannot make the server buffer
+ * large bodies:
+ * - a state-changing request to `/api/admin/*`, `/api/setup` or a member route
+ *   without `x-agt-request: 1` gets `403 csrf` (SEC-5);
+ * - every `/api/admin/*` route except login needs the Admin session cookie, and
+ *   every member route the member session cookie (`401 unauthorized`). Neither
+ *   cookie is ever accepted in place of the other (AUTH-1 deviation).
+ * Rate limits (SEC-7) run right after it, as route hooks of `@fastify/rate-limit`.
+ */
+export function authenticationHook(options: AuthenticationHookOptions) {
+  return async function authenticate(request: FastifyRequest, reply: FastifyReply) {
+    const route = request.routeOptions.config.apiRoute;
+    if (!route) return;
+    // The router lets a last path parameter be empty (`/articles/`); the route table does not.
+    if (Object.values(request.params as Record<string, string>).some((value) => value === '')) {
+      throw new HttpError(404, 'not_found', 'Route not found.');
+    }
+    if (route.csrf && request.headers[csrfHeader] !== '1') {
+      throw new HttpError(403, 'csrf', `Requests that change data must include the ${csrfHeader}: 1 header.`, { legacyCode: 'CSRF_HEADER_REQUIRED' });
+    }
+    if (route.auth === 'none') return;
+    const cookie = route.auth === 'admin' ? adminSessionCookie : memberSessionCookie;
+    const token = request.cookies[cookie];
+    request.sessionToken = token;
+    if (route.auth === 'admin') request.admin = await options.adminAuth.session(token);
+    else request.member = await options.memberAuth.session(token);
+    if (route.auth === 'admin' ? request.admin : request.member) return;
+    // An unknown or expired session cookie is cleared so the browser stops sending it.
+    if (token) reply.header('set-cookie', clearedCookie(cookie, options.secureCookie(request)));
+    throw new HttpError(401, 'unauthorized', route.auth === 'admin' ? 'Admin sign-in is required.' : 'Sign-in is required.', { legacyCode: 'UNAUTHENTICATED' });
+  };
+}
+
+/**
+ * Routes of the admin panel. `authenticationHook` has already verified the
+ * Admin session cookie and CSRF header; `requireAdminSession` re-checks that a
+ * session is attached so these routes never run without one. Member sessions
+ * play no part here, and no member `Actor` is ever set.
  */
 
 const userId = (request: ApiRequest) => pathId(request, 'userId', 'user', 'INVALID_USER_ID');

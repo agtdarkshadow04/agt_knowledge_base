@@ -19,10 +19,8 @@ export interface AppContext {
   /** The configuration file as read at startup; backups copy its text, restores never write it. */
   readonly configFile: { readonly path: string; readonly text: string | null };
   readonly db: Database;
-  /** `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD`, or null when it is unset or empty. */
+  /** `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD`, or null when it is unset or empty (AUTH-5). */
   readonly setupPassword: string | null;
-  /** `LOCAL_AUTH_SECRET`, which signs member tokens. */
-  readonly localAuthSecret: string;
   /** The app version from `package.json`. */
   readonly version: string;
 }

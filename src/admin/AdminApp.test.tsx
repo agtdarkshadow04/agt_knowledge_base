@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./api', async (importOriginal) => ({ ...await importOriginal<typeof import('./api')>(), ...mocks }));
 
-const session = { username: 'atlas', setupPasswordSet: false, version: '2.0.0' };
+const session = { username: 'atlas', setupPasswordStillSet: false, version: '2.0.0' };
 
 /** A small document in the shape the server generates (GET /api/openapi.json). */
 const apiDocument = {
@@ -56,7 +56,7 @@ describe('AdminApp', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     localStorage.clear();
-    mocks.getSetupStatus.mockResolvedValue({ required: false, setupPasswordConfigured: false });
+    mocks.getSetupStatus.mockResolvedValue({ adminExists: true, setupPasswordConfigured: false });
     mocks.getSession.mockResolvedValue(null);
     mocks.listUsers.mockResolvedValue({ items: [], page: 1, pageSize: 25, total: 0, totalPages: 1 });
     mocks.signOut.mockResolvedValue(undefined);
@@ -64,8 +64,8 @@ describe('AdminApp', () => {
 
   it('shows first-run setup on a fresh installation and opens the dashboard afterwards', async () => {
     const user = userEvent.setup();
-    mocks.getSetupStatus.mockResolvedValue({ required: true, setupPasswordConfigured: true });
-    mocks.completeSetup.mockResolvedValue({ username: 'atlas', setupPasswordSet: true, version: '2.0.0' });
+    mocks.getSetupStatus.mockResolvedValue({ adminExists: false, setupPasswordConfigured: true });
+    mocks.completeSetup.mockResolvedValue({ username: 'atlas', setupPasswordStillSet: true, version: '2.0.0' });
     render(<AdminApp />);
 
     expect(await screen.findByRole('heading', { name: 'Create the Admin account' })).toBeInTheDocument();
@@ -87,9 +87,9 @@ describe('AdminApp', () => {
   });
 
   it('explains how to enable setup when AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is unset', async () => {
-    mocks.getSetupStatus.mockResolvedValue({ required: true, setupPasswordConfigured: false });
+    mocks.getSetupStatus.mockResolvedValue({ adminExists: false, setupPasswordConfigured: false });
     render(<AdminApp />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Setup is disabled');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Setup is unavailable: AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is not set. Set it in .env and restart.');
     expect(screen.queryByLabelText('Setup password')).not.toBeInTheDocument();
   });
 
@@ -124,7 +124,6 @@ describe('AdminApp', () => {
 
   it('resumes an existing session, and signs out to the login screen', async () => {
     const user = userEvent.setup();
-    localStorage.setItem('agt-local-auth-token', 'member-token');
     mocks.getSession.mockResolvedValue(session);
     render(<AdminApp />);
 
@@ -132,7 +131,6 @@ describe('AdminApp', () => {
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('heading', { name: 'Admin sign-in' })).toBeInTheDocument();
     expect(mocks.signOut).toHaveBeenCalledOnce();
-    expect(localStorage.getItem('agt-local-auth-token')).toBe('member-token');
   });
 
   it('shows the version in the header and renders the generated API document in the API tab (API-14)', async () => {

@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../auth/AuthContext', () => ({
-  useAuth: () => ({ user: mocks.user, loading: false, getToken: async () => 'token' }),
+  useAuth: () => ({ user: mocks.user, loading: false }),
 }));
 
 vi.mock('../services/api', async (importOriginal) => ({
@@ -43,7 +43,7 @@ describe('tag management page', () => {
     expect(await screen.findByRole('region', { name: 'Manage Tags' })).toBeInTheDocument();
     expect(await screen.findByText('Portal')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Orphaned references' })).toBeInTheDocument();
-    expect(mocks.listOrphanTagReferences).toHaveBeenCalledWith('token', expect.anything());
+    expect(mocks.listOrphanTagReferences).toHaveBeenCalledWith(expect.anything());
   });
 
   it('sends Editors home and signed-out visitors to sign-in', async () => {
