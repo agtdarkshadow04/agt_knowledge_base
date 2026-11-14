@@ -6,6 +6,15 @@ afterEach(() => {
   if (typeof document !== 'undefined') cleanup();
 });
 
+// Node.js 25+ has its own `localStorage` global, which is undefined without
+// --localstorage-file and hides jsdom's. Use jsdom's Web Storage instead.
+const dom = (globalThis as { jsdom?: { window: Window } }).jsdom;
+if (dom) {
+  for (const name of ['localStorage', 'sessionStorage'] as const) {
+    Object.defineProperty(globalThis, name, { configurable: true, value: dom.window[name] });
+  }
+}
+
 if (typeof window !== 'undefined') {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,

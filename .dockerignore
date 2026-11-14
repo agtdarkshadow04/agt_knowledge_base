@@ -7,3 +7,8 @@ dist
 coverage
 *.log
 config.yaml
+dist-server
+.test-build
+test-results
+playwright-report
+data
