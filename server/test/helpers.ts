@@ -187,6 +187,6 @@ export async function respond(handler: (request: ApiRequest) => Promise<ApiRespo
     return await handler(request);
   } catch (error) {
     const reply = errorReply(error);
-    return { statusCode: reply.statusCode, headers: reply.headers, body: JSON.stringify(reply.body) };
+    return { statusCode: reply.statusCode, headers: reply.headers, body: reply.body };
   }
 }

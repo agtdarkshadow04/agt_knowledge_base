@@ -69,7 +69,7 @@ describe('AdminService', () => {
 
   it('reports a missing user without changing anything', async () => {
     const query = fakeClient([]);
-    await rejectsMatching(service().deleteUser(editorRow.id), { statusCode: 404, code: 'USER_NOT_FOUND' });
+    await rejectsMatching(service().deleteUser(editorRow.id), { statusCode: 404, error: 'not_found', legacyCode: 'USER_NOT_FOUND' });
     assert.ok(!query.mock.calls.some(({ arguments: [sql] }) => sql === 'DELETE FROM local_users WHERE id = $1'));
     assertCalledWith(query, 'ROLLBACK');
   });
@@ -86,6 +86,6 @@ describe('AdminService', () => {
       displayName: 'Apollo',
       role: 'Editor',
       password: 'Permanent123!',
-    }), { statusCode: 409, code: 'USER_CONFLICT' });
+    }), { statusCode: 409, error: 'conflict', legacyCode: 'USER_CONFLICT' });
   });
 });

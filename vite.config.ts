@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Connect, type Plugin } from 'vite';
 
-/** Serves admin.html for /admin and /admin/, as Nginx does in production. */
+/** Serves admin.html for /admin and /admin/, as the API does in production. */
 const adminEntryRewrite: Connect.NextHandleFunction = (request, _response, next) => {
   const [path, query] = (request.url ?? '').split('?');
   if (path === '/admin' || path === '/admin/') request.url = `/admin.html${query ? `?${query}` : ''}`;
@@ -16,14 +16,10 @@ function adminEntry(): Plugin {
   };
 }
 
-// The API is proxied under /api so the browser sees one origin, as behind
-// Nginx: the Admin session cookie is scoped to /api/admin and same-origin only.
-// The key ends in a slash so app pages such as /api-docs are not proxied.
+// The API is proxied so the browser sees one origin, as in production: the
+// Admin session cookie is scoped to /api/admin and same-origin only.
 const apiProxy = {
-  '/api/': {
-    target: 'http://localhost:3001',
-    rewrite: (path: string) => path.replace(/^\/api/, ''),
-  },
+  '/api/': { target: 'http://localhost:3001' },
 };
 
 export default defineConfig({

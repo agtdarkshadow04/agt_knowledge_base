@@ -23,6 +23,7 @@ WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=server-build --chown=node:node /app/dist-server ./dist-server
+COPY --from=frontend-build --chown=node:node /app/dist ./dist
 COPY --from=server-build --chown=node:node /app/server-scripts ./server/scripts
 # The backups volume inherits this ownership on first use.
 RUN mkdir -p /app/data/backups && chown -R node:node /app/data
@@ -30,7 +31,7 @@ USER node
 EXPOSE 3001
 CMD ["node", "dist-server/index.mjs"]
 
+# Nginx only forwards to the API, which serves the client too (SRV-9).
 FROM nginx:alpine AS web
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=frontend-build /app/dist /usr/share/nginx/html
 EXPOSE 80

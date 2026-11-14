@@ -57,7 +57,7 @@ export interface BackupContents {
 }
 
 export function invalidBackup(message: string): never {
-  throw new HttpError(400, 'INVALID_BACKUP', `The backup cannot be restored: ${message}`);
+  throw new HttpError(400, 'invalid_backup', `The backup cannot be restored: ${message}`);
 }
 
 function sha256(data: Buffer) {

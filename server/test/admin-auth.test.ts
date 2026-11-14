@@ -44,24 +44,24 @@ describe('Admin setup', () => {
   const input = { setupPassword: setupSecret, username: 'atlas', password: 'Permanent123!' };
 
   it('is refused when AGT_SETUP_PASSWORD is unset', async () => {
-    await rejectsMatching(service(null).setup(input), { statusCode: 403, code: 'SETUP_DISABLED' });
+    await rejectsMatching(service(null).setup(input), { statusCode: 403, error: 'setup_disabled', legacyCode: 'SETUP_DISABLED' });
     assert.equal((database.query).mock.callCount(), 0);
   });
 
   it('requires the setup password', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
-    await rejectsMatching(service(setupSecret).setup({ ...input, setupPassword: 'guess' }), { statusCode: 401, code: 'INVALID_SETUP_PASSWORD' });
+    await rejectsMatching(service(setupSecret).setup({ ...input, setupPassword: 'guess' }), { statusCode: 401, error: 'invalid_setup_password', legacyCode: 'INVALID_SETUP_PASSWORD' });
     assert.equal((database.connect).mock.callCount(), 0);
   });
 
   it('rejects a new password equal to the setup password', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
-    await rejectsMatching(service(setupSecret).setup({ ...input, password: setupSecret }), { statusCode: 400, code: 'PASSWORD_REUSED' });
+    await rejectsMatching(service(setupSecret).setup({ ...input, password: setupSecret }), { statusCode: 400, error: 'validation_failed', legacyCode: 'PASSWORD_REUSED' });
   });
 
   it('fails once an Admin exists, even with the setup password', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 1, rows: [{}] }));
-    await rejectsMatching(service(setupSecret).setup(input), { statusCode: 409, code: 'SETUP_ALREADY_COMPLETED' });
+    await rejectsMatching(service(setupSecret).setup(input), { statusCode: 409, error: 'setup_already_completed', legacyCode: 'SETUP_ALREADY_COMPLETED' });
     assert.equal((database.connect).mock.callCount(), 0);
   });
 
@@ -97,7 +97,7 @@ describe('Admin sign-in and sessions', () => {
 
   it('verifies against a dummy hash when no Admin exists', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
-    await rejectsMatching(service().login('atlas', 'Permanent123!'), { statusCode: 401, code: 'INVALID_CREDENTIALS' });
+    await rejectsMatching(service().login('atlas', 'Permanent123!'), { statusCode: 401, error: 'invalid_credentials', legacyCode: 'INVALID_CREDENTIALS' });
     assertCalledWith(auth.verifyPassword, 'Permanent123!', await dummyPasswordHash());
   });
 
@@ -139,7 +139,7 @@ describe('Admin sign-in and sessions', () => {
       ? { rowCount: 1, rows: [{ username: 'atlas', password_hash: passwordHash }] }
       : undefined));
 
-    await rejectsMatching(service().changePassword('Wrong123!', 'Replacement123!'), { statusCode: 403, code: 'INVALID_CURRENT_PASSWORD' });
+    await rejectsMatching(service().changePassword('Wrong123!', 'Replacement123!'), { statusCode: 403, error: 'invalid_current_password', legacyCode: 'INVALID_CURRENT_PASSWORD' });
     assert.ok(!(statements(query)).includes('DELETE FROM admin_sessions'));
 
     query.mock.resetCalls();

@@ -59,7 +59,7 @@ describe('settings precedence', () => {
   });
 
   it('refuses to change a file-defined key before touching the database', async () => {
-    await rejectsMatching(service('articles:\n  defaultVisibility: 0\n').update({ version: 4, applicationName: 'Renamed', defaultVisibility: 2 }), { statusCode: 409, code: 'SETTING_DEFINED_IN_FILE', message: match.stringContaining('articles.defaultVisibility') });
+    await rejectsMatching(service('articles:\n  defaultVisibility: 0\n').update({ version: 4, applicationName: 'Renamed', defaultVisibility: 2 }), { statusCode: 409, error: 'defined_in_config', legacyCode: 'SETTING_DEFINED_IN_FILE', message: match.stringContaining('articles.defaultVisibility') });
     assert.equal((database.connect).mock.callCount(), 0);
   });
 
@@ -84,7 +84,7 @@ describe('settings precedence', () => {
   it('returns a version conflict for stale settings', async () => {
     const query = mock.fn<Query>(async (sql) => (sql.includes('FOR UPDATE') ? { rows: [row] } : { rows: [] }));
     database.connect.mock.mockImplementation(async () => ({ query, release: mock.fn() }));
-    await rejectsMatching(service('').update({ version: 3, applicationName: 'Renamed' }), { statusCode: 409, code: 'VERSION_CONFLICT' });
+    await rejectsMatching(service('').update({ version: 3, applicationName: 'Renamed' }), { statusCode: 409, error: 'conflict', legacyCode: 'VERSION_CONFLICT' });
     assertCalledWith(query, 'ROLLBACK');
   });
 });

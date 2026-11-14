@@ -11,7 +11,7 @@ export function json(statusCode: number, body: unknown, publiclyCacheable = fals
       'cache-control': statusCode === 200 && publiclyCacheable ? 'public, max-age=30' : 'no-store',
       'x-content-type-options': 'nosniff',
     },
-    body: JSON.stringify(body),
+    body,
   };
 }
 
@@ -19,17 +19,17 @@ export function noContent(): ApiResponse {
   return { statusCode: 204, headers: { 'cache-control': 'no-store' } };
 }
 
+/** The parsed JSON body; Fastify has already parsed it and checked it against the route schema. */
 export function parseBody(request: Pick<ApiRequest, 'body'>) {
-  if (!request.body) throw new HttpError(400, 'INVALID_REQUEST', 'A JSON request body is required.');
-  try {
-    return JSON.parse(request.body) as unknown;
-  } catch {
-    throw new HttpError(400, 'INVALID_JSON', 'The request body must contain valid JSON.');
+  if (request.body === undefined || request.body === null) {
+    throw new HttpError(400, 'invalid_request', 'A JSON request body is required.');
   }
+  return request.body;
 }
 
-export function pathId(request: ApiRequest, name: string, label: string, code: string) {
+export function pathId(request: ApiRequest, name: string, label: string, legacyCode: string) {
   const id = request.pathParameters[name];
-  if (!id || !uuidPattern.test(id)) throw new HttpError(400, code, `A valid ${label} id is required.`);
+  // A malformed ID names no resource: 404, like an unknown one (API-5).
+  if (!id || !uuidPattern.test(id)) throw new HttpError(404, 'not_found', `No ${label} has the id ${JSON.stringify(id ?? '')}.`, { legacyCode });
   return id;
 }

@@ -52,9 +52,10 @@ describe('Layout settings', () => {
     }
   });
 
-  it('links to the API reference from the footer for everyone', () => {
+  it('does not link to an API reference, which only the Admin sees (API-14)', () => {
     renderLayout();
-    expect(screen.getByRole('link', { name: 'API reference' })).toHaveAttribute('href', '/api-docs');
+    expect(screen.queryByRole('link', { name: /API reference/ })).not.toBeInTheDocument();
+    expect(document.querySelector('a[href^="/api"]')).toBeNull();
   });
 
   it('shows the Tags link and Moderator badge only to Moderators', () => {

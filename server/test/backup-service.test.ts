@@ -193,7 +193,7 @@ describe('BackupService', () => {
 
     await rejectsMatching(service().preview(await archive()), {
       statusCode: 400,
-      code: 'INVALID_BACKUP',
+      error: 'invalid_backup', legacyCode: 'INVALID_BACKUP',
       message: match.stringContaining(`migration ${last.id} failed`),
     });
     assert.ok((statements(client)).includes('ROLLBACK'));
@@ -222,7 +222,7 @@ describe('BackupService', () => {
     assert.deepEqual(upgradePlan(current, current), []);
 
     const client = fakeClient();
-    await rejectsMatching(service().restore(await archive({ migrations: [...current, '999_future'] })), { statusCode: 400, code: 'INVALID_BACKUP' });
+    await rejectsMatching(service().restore(await archive({ migrations: [...current, '999_future'] })), { statusCode: 400, error: 'invalid_backup', legacyCode: 'INVALID_BACKUP' });
     assert.equal(statements(client).some((statement) => statement.startsWith('TRUNCATE "public"')), false);
   });
 
@@ -272,24 +272,24 @@ describe('BackupService', () => {
     useConfig('');
     const consoleError = mock.method(console, 'error', () => undefined);
 
-    await rejectsMatching(service().restore(await archive()), { statusCode: 500, code: 'PRE_RESTORE_BACKUP_FAILED' });
+    await rejectsMatching(service().restore(await archive()), { statusCode: 500, error: 'pre_restore_backup_failed', legacyCode: 'PRE_RESTORE_BACKUP_FAILED' });
     assert.equal(statements(client).some((statement) => statement.startsWith('CREATE SCHEMA') || statement.startsWith('TRUNCATE')), false);
     consoleError.mock.restore();
   });
 
   it('requires exactly one Admin and one settings row before touching the database', async () => {
     fakeClient();
-    await rejectsMatching(service().preview(await archive({ tables: tables({ admin: [] }) })), { code: 'INVALID_BACKUP', message: match.stringContaining('exactly one Admin') });
-    await rejectsMatching(service().preview(await archive({ tables: tables({ application_settings: [] }) })), { code: 'INVALID_BACKUP' });
+    await rejectsMatching(service().preview(await archive({ tables: tables({ admin: [] }) })), { error: 'invalid_backup', legacyCode: 'INVALID_BACKUP', message: match.stringContaining('exactly one Admin') });
+    await rejectsMatching(service().preview(await archive({ tables: tables({ application_settings: [] }) })), { error: 'invalid_backup', legacyCode: 'INVALID_BACKUP' });
     assert.equal((database.connect).mock.callCount(), 0);
   });
 
   it('rejects rows or tables that do not match the backup\'s schema version', async () => {
     fakeClient();
-    await rejectsMatching(service().preview(await archive({ tables: tables({ tags: [{ id: 'x', name: 'Portal', color: '#FFFFFF', search_vector: 'x' }] }) })), { code: 'INVALID_BACKUP', message: match.stringContaining('a row in tags does not match') });
+    await rejectsMatching(service().preview(await archive({ tables: tables({ tags: [{ id: 'x', name: 'Portal', color: '#FFFFFF', search_vector: 'x' }] }) })), { error: 'invalid_backup', legacyCode: 'INVALID_BACKUP', message: match.stringContaining('a row in tags does not match') });
     const { tags: _removed, ...withoutTags } = tables();
     void _removed;
-    await rejectsMatching(service().preview(await archive({ tables: withoutTags })), { code: 'INVALID_BACKUP', message: match.stringContaining('tables do not match') });
+    await rejectsMatching(service().preview(await archive({ tables: withoutTags })), { error: 'invalid_backup', legacyCode: 'INVALID_BACKUP', message: match.stringContaining('tables do not match') });
   });
 
   it('rolls back and reports constraint violations without echoing row values', async () => {
@@ -300,7 +300,7 @@ describe('BackupService', () => {
     });
     await rejectsMatching(service().restore(await archive()), {
       statusCode: 400,
-      code: 'INVALID_BACKUP',
+      error: 'invalid_backup', legacyCode: 'INVALID_BACKUP',
       message: 'The backup cannot be restored: a row in articles violates the articles_created_by_fkey constraint.',
     });
     // The pre-restore export commits its own read-only snapshot; the restore transaction does not commit.

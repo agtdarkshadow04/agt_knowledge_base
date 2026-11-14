@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { LoadingState } from '../components/States';
 import type { ArticleListResponse, ArticleVisibilityFilter } from '../types';
 import { agtVisibilityOptions, legacyVisibilityOptions, visibilityFilterValue, visibilityLabel } from '../visibility';
@@ -13,17 +13,29 @@ export function DataPanel() {
   const [visibility, setVisibility] = useState<ArticleVisibilityFilter>('all');
   const [protection, setProtection] = useState<'all' | 'protected' | 'unprotected'>('all');
   const [verification, setVerification] = useState<'all' | 'verified' | 'unverified'>('all');
-  const [page, setPage] = useState(1);
   const [error, setError] = useState('');
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const filters = useMemo(() => ({ search, visibility, protection, verification, limit: 50 }), [protection, search, verification, visibility]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
-    const [nextStats, nextArticles] = await Promise.all([
-      getStats(signal),
-      listArticles({ search, visibility, protection, verification, page, pageSize: 50 }, signal),
-    ]);
+    const [nextStats, nextArticles] = await Promise.all([getStats(signal), listArticles(filters, signal)]);
     setStats(nextStats);
     setArticles(nextArticles);
-  }, [page, protection, search, verification, visibility]);
+  }, [filters]);
+
+  async function loadMore() {
+    if (!articles?.nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const next = await listArticles({ ...filters, cursor: articles.nextCursor });
+      setArticles((current) => current && { ...next, items: [...current.items, ...next.items] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'More articles could not be loaded.');
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -48,17 +60,18 @@ export function DataPanel() {
         </dl>
       </section>
       <section className="admin-panel" aria-labelledby="inventory-title">
-        <div className="admin-panel-heading"><h2 id="inventory-title">Article inventory</h2><input aria-label="Search article inventory" placeholder="Search articles" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} /></div>
+        <div className="admin-panel-heading"><h2 id="inventory-title">Article inventory</h2><input aria-label="Search article inventory" placeholder="Search articles" value={search} onChange={(event) => { setSearch(event.target.value); }} /></div>
         <div className="admin-filters">
-          <label className="field"><span>Visibility</span><select value={visibility} onChange={(event) => { setVisibility(event.target.value as ArticleVisibilityFilter); setPage(1); }}><option value="all">All</option><optgroup label="AGT standard">{agtVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}</optgroup><optgroup label="Legacy">{legacyVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}</optgroup></select></label>
-          <label className="field"><span>Protection</span><select value={protection} onChange={(event) => { setProtection(event.target.value as typeof protection); setPage(1); }}><option value="all">All</option><option value="protected">Protected</option><option value="unprotected">Unprotected</option></select></label>
-          <label className="field"><span>Verification</span><select value={verification} onChange={(event) => { setVerification(event.target.value as typeof verification); setPage(1); }}><option value="all">All</option><option value="verified">Verified</option><option value="unverified">Unverified</option></select></label>
+          <label className="field"><span>Visibility</span><select value={visibility} onChange={(event) => { setVisibility(event.target.value as ArticleVisibilityFilter); }}><option value="all">All</option><optgroup label="AGT standard">{agtVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}</optgroup><optgroup label="Legacy">{legacyVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}</optgroup></select></label>
+          <label className="field"><span>Protection</span><select value={protection} onChange={(event) => { setProtection(event.target.value as typeof protection); }}><option value="all">All</option><option value="protected">Protected</option><option value="unprotected">Unprotected</option></select></label>
+          <label className="field"><span>Verification</span><select value={verification} onChange={(event) => { setVerification(event.target.value as typeof verification); }}><option value="all">All</option><option value="verified">Verified</option><option value="unverified">Unverified</option></select></label>
         </div>
         <div className="table-scroll"><table className="admin-table"><thead><tr><th>Title</th><th>Visibility</th><th>Version</th><th>Last modified by</th></tr></thead><tbody>
           {articles.items.map((article) => <tr key={article.id}><td>{article.title}</td><td>{visibilityLabel(article.visibility)}</td><td>{article.version}</td><td>{article.modifiedByName}</td></tr>)}
         </tbody></table></div>
         <p className="field-help">Editing articles needs a member account: the Admin account cannot sign in to the knowledge base itself.</p>
-        {articles.totalPages > 1 && <nav className="pagination" aria-label="Article inventory pages"><button className="button button-secondary" disabled={articles.page <= 1} onClick={() => setPage((current) => current - 1)}>Previous</button><span>Page {articles.page} of {articles.totalPages}</span><button className="button button-secondary" disabled={articles.page >= articles.totalPages} onClick={() => setPage((current) => current + 1)}>Next</button></nav>}
+        <p className="field-help">{articles.items.length.toLocaleString()} of {articles.total.toLocaleString()} articles shown.</p>
+        {articles.nextCursor && <nav className="pagination" aria-label="More articles"><button className="button button-secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Loading…' : 'Load more'}</button></nav>}
       </section>
     </div>
   );

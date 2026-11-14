@@ -26,8 +26,12 @@ export interface ListArticlesQuery {
   verification: 'all' | 'verified' | 'unverified';
   sort: 'createdAt' | 'modifiedAt' | 'title';
   direction: 'asc' | 'desc';
-  page: number;
-  pageSize: number;
+  /** Items per page: 1–200, default 50 (API-8). */
+  limit: number;
+  /** The opaque `nextCursor` of the previous page, or '' for the first page. */
+  cursor: string;
+  /** Deprecated 1.x offset paging (removed in 3.0.0): when set, `limit` is the page size. */
+  page?: number;
 }
 
 export interface ArticleWrite {

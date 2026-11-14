@@ -4,6 +4,8 @@ export interface AdminSession {
   username: string;
   /** AGT_SETUP_PASSWORD is still set on the server and should be removed. */
   setupPasswordSet: boolean;
+  /** The app version, shown in the dashboard header (VER-2). */
+  version: string;
 }
 
 export interface SetupStatus {

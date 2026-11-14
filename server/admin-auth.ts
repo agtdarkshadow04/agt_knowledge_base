@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type pg from 'pg';
 import type { AppContext } from './context.js';
+import { fieldError } from '../src/lib/errors.js';
 import { HttpError } from './http.js';
 import { dummyPasswordHash, hashPassword, verifyPassword } from './local-auth.js';
 import type { AdminIdentity } from './routes.js';
@@ -51,8 +52,16 @@ async function createSession(client: pg.Pool | pg.PoolClient, username: string, 
   return { token, expiresAt, admin: { username } };
 }
 
+function passwordReused() {
+  const message = 'The new password must differ from the setup password.';
+  return new HttpError(400, 'validation_failed', message, {
+    fields: [fieldError('password', 'same_as_setup_password', message)],
+    legacyCode: 'PASSWORD_REUSED',
+  });
+}
+
 function invalidCredentials(): never {
-  throw new HttpError(401, 'INVALID_CREDENTIALS', 'Invalid username or password.');
+  throw new HttpError(401, 'invalid_credentials', 'Invalid username or password.');
 }
 
 /** Password hashing, replaceable in tests. */
@@ -92,16 +101,16 @@ export class AdminAuthService {
   async setup(input: { setupPassword: string; username: string; password: string }): Promise<AdminSessionResult> {
     const expected = this.setupPassword();
     if (!expected) {
-      throw new HttpError(403, 'SETUP_DISABLED', `Setup is disabled. Set ${setupPasswordVariable} on the server and restart it.`);
+      throw new HttpError(403, 'setup_disabled', `Setup is disabled. Set ${setupPasswordVariable} on the server and restart it.`);
     }
     const pool = await this.context.db.pool();
     const existing = await pool.query('SELECT 1 FROM admin LIMIT 1');
-    if (existing.rowCount) throw new HttpError(409, 'SETUP_ALREADY_COMPLETED', 'Setup has already been completed.');
+    if (existing.rowCount) throw new HttpError(409, 'setup_already_completed', 'Setup has already been completed.');
     if (!constantTimeEqual(input.setupPassword, expected)) {
-      throw new HttpError(401, 'INVALID_SETUP_PASSWORD', 'The setup password is incorrect.');
+      throw new HttpError(401, 'invalid_setup_password', 'The setup password is incorrect.');
     }
     if (constantTimeEqual(input.password, expected)) {
-      throw new HttpError(400, 'PASSWORD_REUSED', 'The new password must differ from the setup password.');
+      throw passwordReused();
     }
     const passwordHash = await this.passwords.hashPassword(input.password);
     const client = await pool.connect();
@@ -112,7 +121,7 @@ export class AdminAuthService {
          ON CONFLICT (id) DO NOTHING`,
         [input.username, passwordHash],
       );
-      if (!inserted.rowCount) throw new HttpError(409, 'SETUP_ALREADY_COMPLETED', 'Setup has already been completed.');
+      if (!inserted.rowCount) throw new HttpError(409, 'setup_already_completed', 'Setup has already been completed.');
       const session = await this.createSession(client, input.username);
       await client.query('COMMIT');
       return session;
@@ -168,11 +177,11 @@ export class AdminAuthService {
       const result = await client.query<AdminRow>('SELECT username, password_hash FROM admin FOR UPDATE');
       const admin = result.rows[0];
       if (!admin || !await this.passwords.verifyPassword(currentPassword, admin.password_hash)) {
-        throw new HttpError(403, 'INVALID_CURRENT_PASSWORD', 'The current password is incorrect.');
+        throw new HttpError(403, 'invalid_current_password', 'The current password is incorrect.');
       }
       const expected = this.setupPassword();
       if (expected && constantTimeEqual(password, expected)) {
-        throw new HttpError(400, 'PASSWORD_REUSED', 'The new password must differ from the setup password.');
+        throw passwordReused();
       }
       await client.query(
         'UPDATE admin SET password_hash = $1, updated_at = now()',

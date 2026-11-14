@@ -81,10 +81,9 @@ export type SortDirection = 'asc' | 'desc';
 
 export interface ArticleListResponse {
   items: ArticleSummary[];
-  page: number;
-  pageSize: number;
+  /** Pass as `cursor` for the next page; null on the last page (API-8). */
+  nextCursor: string | null;
   total: number;
-  totalPages: number;
 }
 
 export interface ArticleListParams {
@@ -96,8 +95,10 @@ export interface ArticleListParams {
   verification?: 'all' | 'verified' | 'unverified';
   sort?: ArticleSort;
   direction?: SortDirection;
-  page?: number;
-  pageSize?: number;
+  /** Articles per page, 1–200. */
+  limit?: number;
+  /** The `nextCursor` of the previous page. */
+  cursor?: string;
 }
 
 export interface ArticleInput {

@@ -6,14 +6,13 @@ A production-oriented knowledge base for the Alliance of Galactic Travellers com
 
 ```text
                     Docker Compose
-Browser --HTTP(S)--> web: Nginx --+-- built React/Vite frontend
-                                  |
-                                  +-- /api/* --> api: Node.js API --> postgres: PostgreSQL 16
-                                                                       (volume agt-postgres)
+Browser --HTTP(S)--> web: Nginx --> api: Node.js (Fastify) --> postgres: PostgreSQL 16
+                                     serves the React/Vite UI      (volume agt-postgres)
+                                     and /api/*
                     migrate: one-shot job that applies schema migrations before the API starts
 ```
 
-The browser never connects to PostgreSQL and contains no database credential. Nginx serves the member app (`index.html`), the admin panel (`admin.html`, only at `/admin`), and proxies `/api` to the Node.js API. Member accounts and their scrypt password hashes are stored in `local_users`, and the API issues and verifies signed member session tokens. The installation Admin is stored separately, in the single-row `admin` table, and signs in with a cookie session that works only for the admin API. The API is the authorization boundary: it checks the session, role, visibility, and protection before reading or changing data. `created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, and version fields are server-owned. PostgreSQL is reachable only through the private Compose network and an optional loopback-only port.
+The browser never connects to PostgreSQL and contains no database credential. The Node.js server serves the member app (`index.html`), the admin panel (`admin.html`, only at `/admin`), and the API under `/api/`; Nginx only forwards requests to it. Member accounts and their scrypt password hashes are stored in `local_users`, and the API issues and verifies signed member session tokens. The installation Admin is stored separately, in the single-row `admin` table, and signs in with a cookie session that works only for the admin API. The API is the authorization boundary: it checks the session, role, visibility, and protection before reading or changing data. `created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, and version fields are server-owned. PostgreSQL is reachable only through the private Compose network and an optional loopback-only port.
 
 The project is fully self-hosted and needs no cloud account or external service.
 
@@ -100,6 +99,7 @@ The admin panel is a separate page reachable only by visiting `/admin` directly;
 - **Settings** edits branding, default article visibility, public browsing, and backup limits. Settings defined in `config.yaml` are shown read-only, marked "Set in the configuration file" (see [Configuration](#configuration)).
 - **Backup & restore** downloads and restores backups (see [Backups](#backups)).
 - **Account** changes the Admin password. It requires the current password and signs out every other Admin session.
+- **API** renders the API reference from the server's OpenAPI document (`/api/openapi.json`). The header shows the app version.
 
 Admin sessions are random 32-byte tokens in an `HttpOnly`, `SameSite=Strict` cookie scoped to `/api/admin`; only their SHA-256 is stored, in `admin_sessions`, so signing out revokes them on the server. Every non-GET admin request must also carry an `x-agt-request: 1` header. The cookie is marked `Secure` when `server.frontendOrigin` is an `https://` origin (or a trusted proxy reports HTTPS); set `adminSession.secureCookie` to override this. Member bearer tokens are ignored on admin routes, and the Admin cookie is ignored on member routes.
 
@@ -290,7 +290,7 @@ References: [Install Docker Engine](https://docs.docker.com/engine/install/) and
 
 ## API
 
-The API is documented in [`docs/API.md`](docs/API.md), which covers member and Admin authentication, the CSRF header, optimistic concurrency, roles and visibility, pagination, error codes, and limits, with `curl` examples. Per-route detail is in the hand-written OpenAPI 3.1 descriptions [`docs/openapi.yaml`](docs/openapi.yaml) (public and member routes) and [`docs/openapi-admin.yaml`](docs/openapi-admin.yaml) (Admin routes). The member app renders the first at `/api-docs` (linked from the footer, readable without signing in), and the admin panel renders the second in its **API** tab. `server/test/openapi.test.ts` fails if the spec and the route table in `server/routes.ts` disagree.
+The API is documented in [`docs/API.md`](docs/API.md), which covers member and Admin authentication, the CSRF header, optimistic concurrency, roles and visibility, pagination, error codes, deprecated paths, and limits, with `curl` examples. Per-route detail is in the OpenAPI 3.1 document the server generates from its route schemas, served at `GET /api/openapi.json`; the admin panel renders it in its **API** tab. `GET /api/health` answers `{ "status": "ok" }` while the API and its database are up.
 
 ## Checks
 
@@ -326,7 +326,7 @@ server/           Fastify API: entry point, app, route table, domain services, a
 server/test/      Server tests (node:test)
 src/lib/          Validation and API types shared by the server and the browser
 migrations/       Reviewable SQL schema
-docs/             API guide (API.md) and OpenAPI descriptions
+docs/             API guide (API.md) and the pinned AGT web app spec
 scripts/          migration and local-user recovery
 .github/          CI workflow
 ```

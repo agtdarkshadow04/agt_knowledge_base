@@ -1,13 +1,13 @@
 import type pg from 'pg';
 import type {
   Actor,
-  ArticleListResult,
+  ArticlePage,
+  ArticlePageQuery,
   ArticleRecord,
   ArticleRevisionRecord,
   ArticleVisibility,
   ArticleWrite,
   CanonicalTag,
-  ListArticlesQuery,
   OrphanCleanupResult,
   Viewer,
   TagOrphan,
@@ -186,7 +186,7 @@ function isUniqueViolation(error: unknown) {
 export class PostgresArticleRepository implements ArticleRepository, TagRepository {
   constructor(private readonly db: Database) {}
 
-  async list(query: ListArticlesQuery, viewer: Viewer): Promise<ArticleListResult> {
+  async list(query: ArticlePageQuery, viewer: Viewer): Promise<ArticlePage> {
     const pool = await this.db.pool();
     const visibilityFilter = articleVisibilityFromFilter(query.visibility);
     const conditions = [
@@ -201,10 +201,16 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
         OR ($7::text = 'Editor' AND a.visibility IN ('"Internal"'::jsonb, '1'::jsonb)))`,
     ];
     const where = conditions.join(' AND ');
+    // The sort column, and its value as exact text for the cursor (timestamps keep their microseconds).
     const sortColumns = { createdAt: 'a.created_at', modifiedAt: 'a.modified_at', title: 'lower(a.title)' } as const;
+    const sortKeys = {
+      createdAt: `to_char(a.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+      modifiedAt: `to_char(a.modified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+      title: 'lower(a.title)',
+    } as const;
+    const column = sortColumns[query.sort];
     const direction = query.direction === 'asc' ? 'ASC' : 'DESC';
-    const offset = (query.page - 1) * query.pageSize;
-    const params = [
+    const params: unknown[] = [
       query.search,
       query.tagId,
       query.pinned,
@@ -214,51 +220,62 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       viewer,
     ];
 
+    // Keyset paging: the order is pinned first, then the sort column, then the
+    // ID as a unique tie-breaker, so pages never overlap or skip items (API-8).
+    const pageParams: unknown[] = [];
+    let after = '';
+    if (query.after) {
+      const later = query.direction === 'asc' ? '>' : '<';
+      const cast = query.sort === 'title' ? 'text' : 'timestamptz';
+      pageParams.push(query.after.isPinned, query.after.value, query.after.id);
+      after = ` AND (a.is_pinned < $8 OR (a.is_pinned = $8 AND (${column} ${later} $9::${cast}
+        OR (${column} = $9::${cast} AND a.id ${later} $10::uuid))))`;
+    }
+    const offset = query.page === undefined ? 0 : (query.page - 1) * query.limit;
+    const limitIndex = params.length + pageParams.length + 1;
+
     const [countResult, dataResult] = await Promise.all([
       pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM articles a WHERE ${where}`, params),
-      pool.query<ArticleRow>(
+      pool.query<ArticleRow & { sort_key: string }>(
         `SELECT
            a.id, a.title, left(a.content, 1000) AS content_preview,
            a.tag_ids, ${resolvedTags('a')} AS tags,
            a.visibility, a.is_pinned, a.is_protected, a.is_verified,
            a.created_at, a.created_by, creator.display_name AS created_by_name,
            a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
-           a.version
+           a.version, ${sortKeys[query.sort]} AS sort_key
          FROM articles a
          JOIN app_users creator ON creator.user_id = a.created_by
          JOIN app_users editor ON editor.user_id = a.modified_by
-         WHERE ${where}
-         ORDER BY a.is_pinned DESC, ${sortColumns[query.sort]} ${direction}, a.id ${direction}
-         LIMIT $8 OFFSET $9`,
-        [...params, query.pageSize, offset],
+         WHERE ${where}${after}
+         ORDER BY a.is_pinned DESC, ${column} ${direction}, a.id ${direction}
+         LIMIT $${limitIndex} OFFSET $${limitIndex + 1}`,
+        [...params, ...pageParams, query.limit + 1, offset],
       ),
     ]);
 
-    const total = Number(countResult.rows[0]?.count ?? 0);
+    const rows = dataResult.rows.slice(0, query.limit);
+    const last = rows.at(-1);
     return {
-      items: dataResult.rows.map((row) => {
-        return {
-          id: row.id,
-          title: row.title,
-          excerpt: excerpt(row.content_preview ?? ''),
-          tags: row.tags,
-          visibility: row.visibility,
-          isPinned: row.is_pinned,
-          isProtected: row.is_protected,
-          isVerified: row.is_verified,
-          createdAt: iso(row.created_at),
-          createdBy: row.created_by,
-          createdByName: row.created_by_name,
-          modifiedAt: iso(row.modified_at),
-          modifiedBy: row.modified_by,
-          modifiedByName: row.modified_by_name,
-          version: row.version,
-        };
-      }),
-      page: query.page,
-      pageSize: query.pageSize,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
+      items: rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        excerpt: excerpt(row.content_preview ?? ''),
+        tags: row.tags,
+        visibility: row.visibility,
+        isPinned: row.is_pinned,
+        isProtected: row.is_protected,
+        isVerified: row.is_verified,
+        createdAt: iso(row.created_at),
+        createdBy: row.created_by,
+        createdByName: row.created_by_name,
+        modifiedAt: iso(row.modified_at),
+        modifiedBy: row.modified_by,
+        modifiedByName: row.modified_by_name,
+        version: row.version,
+      })),
+      next: dataResult.rows.length > query.limit && last ? { isPinned: last.is_pinned, value: last.sort_key, id: last.id } : null,
+      total: Number(countResult.rows[0]?.count ?? 0),
     };
   }
 

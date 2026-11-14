@@ -7,20 +7,41 @@ import {
   NotFoundError,
   type Actor,
   type ArticleWrite,
+  type ArticleListResult,
   type ListArticlesQuery,
+  type Viewer,
 } from './domain.js';
+import { decodeCursor, encodeCursor } from './pagination.js';
 import type { ArticleRepository } from './repository.js';
 
 export class ArticleService {
   constructor(private readonly repository: ArticleRepository) {}
 
   list(query: ListArticlesQuery, actor: Actor | null) {
-    return this.repository.list(query, actor?.role ?? null);
+    return this.page(query, actor?.role ?? null);
   }
 
   /** Every article at every visibility level, for the admin panel's inventory. */
   listAll(query: ListArticlesQuery) {
-    return this.repository.list(query, 'System');
+    return this.page(query, 'System');
+  }
+
+  private async page({ cursor, ...query }: ListArticlesQuery, viewer: Viewer): Promise<ArticleListResult> {
+    // Deprecated offset paging ignores the cursor.
+    const after = query.page === undefined ? decodeCursor(query, cursor) : null;
+    const page = await this.repository.list({ ...query, after }, viewer);
+    const result: ArticleListResult = {
+      items: page.items,
+      nextCursor: page.next ? encodeCursor(query, page.next) : null,
+      total: page.total,
+    };
+    if (query.page === undefined) return result;
+    return {
+      ...result,
+      page: query.page,
+      pageSize: query.limit,
+      totalPages: Math.max(1, Math.ceil(page.total / query.limit)),
+    };
   }
 
   async get(id: string, actor: Actor | null) {

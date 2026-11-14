@@ -245,7 +245,7 @@ export class BackupService {
       await writeFile(join(directory, filename), archive, { flag: 'wx', mode: 0o600 });
     } catch (error) {
       console.error('Pre-restore backup failed', { directory, error });
-      throw new HttpError(500, 'PRE_RESTORE_BACKUP_FAILED', 'The pre-restore backup could not be written, so nothing was restored. Check storage.backupsDir.');
+      throw new HttpError(500, 'pre_restore_backup_failed', 'The pre-restore backup could not be written, so nothing was restored. Check storage.backupsDir.');
     }
     await this.prunePreRestoreBackups(directory, filename, config.backup.preRestore.keep);
     return filename;

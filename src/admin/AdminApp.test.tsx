@@ -15,7 +15,42 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./api', async (importOriginal) => ({ ...await importOriginal<typeof import('./api')>(), ...mocks }));
 
-const session = { username: 'atlas', setupPasswordSet: false };
+const session = { username: 'atlas', setupPasswordSet: false, version: '2.0.0' };
+
+/** A small document in the shape the server generates (GET /api/openapi.json). */
+const apiDocument = {
+  openapi: '3.1.0',
+  info: { title: 'AGT Knowledge Base API', version: '2.0.0' },
+  components: {
+    securitySchemes: {
+      sessionCookie: { type: 'apiKey', in: 'cookie', name: 'agt_admin_session' },
+      csrfHeader: { type: 'apiKey', in: 'header', name: 'x-agt-request' },
+    },
+  },
+  tags: [{ name: 'admin' }, { name: 'auth' }],
+  paths: {
+    '/api/admin/settings': {
+      put: {
+        operationId: 'updateSettings',
+        tags: ['admin'],
+        summary: 'Change dashboard settings.',
+        security: [{ sessionCookie: [], csrfHeader: [] }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { version: { type: 'integer' } }, required: ['version'] } } } },
+        responses: { 200: { description: 'Default Response' } },
+      },
+    },
+    '/api/admin/auth/login': {
+      post: {
+        operationId: 'createAdminSessionDeprecated',
+        tags: ['auth'],
+        summary: 'Deprecated: use POST /api/admin/login.',
+        deprecated: true,
+        security: [{ csrfHeader: [] }],
+        responses: { 200: { description: 'Default Response' } },
+      },
+    },
+  },
+};
 
 describe('AdminApp', () => {
   beforeEach(() => {
@@ -30,7 +65,7 @@ describe('AdminApp', () => {
   it('shows first-run setup on a fresh installation and opens the dashboard afterwards', async () => {
     const user = userEvent.setup();
     mocks.getSetupStatus.mockResolvedValue({ required: true, setupPasswordConfigured: true });
-    mocks.completeSetup.mockResolvedValue({ username: 'atlas', setupPasswordSet: true });
+    mocks.completeSetup.mockResolvedValue({ username: 'atlas', setupPasswordSet: true, version: '2.0.0' });
     render(<AdminApp />);
 
     expect(await screen.findByRole('heading', { name: 'Create the Admin account' })).toBeInTheDocument();
@@ -100,26 +135,29 @@ describe('AdminApp', () => {
     expect(localStorage.getItem('agt-local-auth-token')).toBe('member-token');
   });
 
-  it('documents the Admin routes in the API tab', async () => {
+  it('shows the version in the header and renders the generated API document in the API tab (API-14)', async () => {
     const user = userEvent.setup();
-    mocks.getSession.mockResolvedValue(session);
-    render(<AdminApp />);
-    await screen.findByRole('heading', { name: 'Administration' });
-    await user.click(screen.getByRole('button', { name: 'API' }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(apiDocument), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      mocks.getSession.mockResolvedValue(session);
+      render(<AdminApp />);
+      await screen.findByRole('heading', { name: 'Administration' });
+      expect(screen.getByText('Version 2.0.0')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'API' }));
 
-    expect(await screen.findByRole('heading', { name: 'AGT Knowledge Base Admin API' })).toBeInTheDocument();
-    const settings = screen.getByRole('article', { name: 'Change dashboard settings' });
-    expect(within(settings).getByText('/admin/settings')).toBeInTheDocument();
-    expect(within(settings).getByText('Admin session')).toBeInTheDocument();
-    expect(within(settings).getByText('x-agt-request: 1', { selector: '.api-badge' })).toBeInTheDocument();
-    expect(within(settings).getByText('SETTING_DEFINED_IN_FILE', { selector: '.api-error-codes code' })).toBeInTheDocument();
-
-    const setup = screen.getByRole('article', { name: 'Create the Admin account' });
-    expect(within(setup).getByText('Public')).toBeInTheDocument();
-    expect(within(setup).getByText('CSRF_HEADER_REQUIRED', { selector: '.api-error-codes code' })).toBeInTheDocument();
-    // Member routes are documented in the member app, not here.
-    expect(screen.queryByText('/member/articles')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Member API reference' })).toHaveAttribute('href', '/api-docs');
+      expect(await screen.findByRole('heading', { name: 'AGT Knowledge Base API' })).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledWith('/api/openapi.json', expect.anything());
+      const settings = screen.getByRole('article', { name: 'Change dashboard settings.' });
+      expect(within(settings).getByText('/api/admin/settings')).toBeInTheDocument();
+      expect(within(settings).getByText('Admin session')).toBeInTheDocument();
+      expect(within(settings).getByText('x-agt-request: 1', { selector: '.api-badge' })).toBeInTheDocument();
+      const legacy = screen.getByRole('article', { name: 'Deprecated: use POST /api/admin/login.' });
+      expect(within(legacy).getByText('Deprecated', { selector: '.api-badge' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'OpenAPI document' })).toHaveAttribute('href', '/api/openapi.json');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('returns to sign-in when the session ends mid-use', async () => {

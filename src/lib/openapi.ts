@@ -1,11 +1,10 @@
-import { parse } from 'yaml';
-
 /**
- * A small reader for the hand-written OpenAPI 3.1 files in docs/. It turns a
- * spec into a flat model the API reference pages render, resolving local
- * `#/components/...` references. It supports the subset of OpenAPI those
- * files use, plus two extensions: `x-error-codes` on responses and
- * `x-required-role` / `x-rate-limit` on operations.
+ * A small reader for the OpenAPI 3.1 document the server generates from its
+ * route schemas (`GET /api/openapi.json`, API-11). It turns the document into
+ * a flat model the admin panel's API tab renders, resolving local
+ * `#/components/...` references. It also reads the optional extensions
+ * `x-error-codes` on responses and `x-required-role` / `x-rate-limit` on
+ * operations.
  */
 
 export type AuthMode = 'none' | 'member' | 'admin';
@@ -46,6 +45,8 @@ export interface ApiOperation {
   requiredRole?: string;
   rateLimit?: string;
   csrfHeader: boolean;
+  /** A 1.x path kept until its replacement's major version removes it (VER-10). */
+  deprecated: boolean;
   parameters: ApiParameter[];
   requestBody?: ApiRequestBody;
   responses: ApiResponse[];
@@ -101,8 +102,9 @@ function literal(value: unknown) {
   return typeof value === 'string' ? `'${value}'` : String(value);
 }
 
-export function parseOpenApi(source: string): ApiDocument {
-  const spec: unknown = parse(source);
+/** Reads a parsed OpenAPI document, or its JSON text. */
+export function parseOpenApi(source: unknown): ApiDocument {
+  const spec: unknown = typeof source === 'string' ? JSON.parse(source) : source;
   if (!isNode(spec) || typeof spec.openapi !== 'string' || !isNode(spec.paths)) {
     throw new Error('The API description is not an OpenAPI document.');
   }
@@ -125,6 +127,7 @@ export function parseOpenApi(source: string): ApiDocument {
     if (!isNode(schema)) return 'any';
     if (typeof schema.$ref === 'string') return refName(schema.$ref);
     if (Array.isArray(schema.oneOf)) return schema.oneOf.map(describeType).join(' | ');
+    if (Array.isArray(schema.anyOf)) return schema.anyOf.map(describeType).join(' | ');
     if (schema.const !== undefined) return literal(schema.const);
     if (Array.isArray(schema.enum)) return schema.enum.map(literal).join(' | ');
     const types = Array.isArray(schema.type) ? schema.type.map(String) : schema.type ? [String(schema.type)] : [];
@@ -164,7 +167,7 @@ export function parseOpenApi(source: string): ApiDocument {
       // constraints and description, so shared types such as Password read well.
       const isRef = isNode(property) && typeof property.$ref === 'string';
       const target = isRef ? resolve(property) : property;
-      const simpleRef = isRef && isNode(target) && !isNode(target.properties) && !Array.isArray(target.oneOf);
+      const simpleRef = isRef && isNode(target) && !isNode(target.properties) && !Array.isArray(target.oneOf) && !Array.isArray(target.anyOf);
       return {
         name,
         type: describeType(simpleRef ? target : property),
@@ -182,6 +185,14 @@ export function parseOpenApi(source: string): ApiDocument {
   }
 
   const schemes = isNode(root.components) && isNode(root.components.securitySchemes) ? root.components.securitySchemes : {};
+  /** Whether the security requirements include the CSRF header scheme. */
+  function needsCsrfHeader(security: unknown) {
+    return list(security).some((requirement) => isNode(requirement) && Object.keys(requirement).some((name) => {
+      const scheme = resolve(schemes[name]);
+      return scheme.type === 'apiKey' && scheme.in === 'header' && String(scheme.name).toLowerCase() === 'x-agt-request';
+    }));
+  }
+
   function authMode(security: unknown): AuthMode {
     for (const requirement of list(security)) {
       if (!isNode(requirement)) continue;
@@ -238,7 +249,9 @@ export function parseOpenApi(source: string): ApiDocument {
         auth: authMode(operation.security ?? root.security),
         requiredRole: text(operation['x-required-role']),
         rateLimit: text(operation['x-rate-limit']),
-        csrfHeader: parameters.some((parameter) => parameter.location === 'header' && parameter.name.toLowerCase() === 'x-agt-request'),
+        csrfHeader: needsCsrfHeader(operation.security ?? root.security)
+          || parameters.some((parameter) => parameter.location === 'header' && parameter.name.toLowerCase() === 'x-agt-request'),
+        deprecated: operation.deprecated === true,
         parameters,
         requestBody: body ? { contentType: body.contentType, type: describeType(body.schema), fields: fields(body.schema) } : undefined,
         responses,

@@ -44,7 +44,7 @@ function isUniqueViolation(error: unknown) {
 
 function conflictFrom(error: unknown): never {
   if (isUniqueViolation(error)) {
-    throw new HttpError(409, 'USER_CONFLICT', 'That username or email address is already in use.');
+    throw new HttpError(409, 'conflict', 'That username or email address is already in use.', { legacyCode: 'USER_CONFLICT' });
   }
   throw error;
 }
@@ -54,7 +54,7 @@ async function lockedUser(client: pg.PoolClient, id: string) {
     `SELECT ${userColumns} FROM local_users WHERE id = $1 FOR UPDATE`,
     [id],
   );
-  if (!result.rows[0]) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found.');
+  if (!result.rows[0]) throw new HttpError(404, 'not_found', 'User not found.', { legacyCode: 'USER_NOT_FOUND' });
   return result.rows[0];
 }
 
