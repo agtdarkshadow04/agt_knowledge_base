@@ -1,5 +1,10 @@
 node_modules/
 dist/
+dist-server/
+.test-build/
+test-results/
+playwright-report/
+data/
 coverage/
 .env
 .env.*

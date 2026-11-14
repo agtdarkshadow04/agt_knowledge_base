@@ -7,7 +7,7 @@ This guide explains how to use the AGT Knowledge Base HTTP API: authentication, 
 
 The same descriptions are rendered in the apps: the member app's **API reference** page at `/api-docs` (linked from the footer) and the admin panel's **API** tab.
 
-For contributors, the route table is `backend/routes.ts`; request validation is in `backend/validation.ts`; domain types, roles, and visibility rules are in `backend/domain.ts`; and error responses are built in `backend/api-response.ts` and `backend/server.ts`. `backend/openapi.test.ts` fails when the route table and the spec files disagree, and when an error code the backend returns is missing from this guide.
+For contributors, the route table is `server/routes.ts`; request validation is in `src/lib/validation.ts`; domain types, roles, and visibility rules are in `server/domain.ts`; and error responses are built in `backend/api-response.ts` and `backend/server.ts`. `backend/openapi.test.ts` fails when the route table and the spec files disagree, and when an error code the backend returns is missing from this guide.
 
 ## Contents
 
@@ -28,7 +28,7 @@ Behind Nginx the API is served under `/api` on the site's origin: the route `/ar
 
 Requests and responses are JSON (`application/json; charset=utf-8`), except the backup download and restore upload, which are ZIP archives. Timestamps are ISO 8601 strings in UTC, and IDs are UUIDs. Successful deletes and a few other writes answer `204 No Content` with no body.
 
-Every route has one of three authentication modes, declared once in `backend/routes.ts`:
+Every route has one of three authentication modes, declared once in `server/routes.ts`:
 
 | Mode | Credential | Routes |
 | --- | --- | --- |
@@ -82,7 +82,7 @@ The cookie's `Path=/api/admin` means it is only sent for admin routes, so the co
 
 ## Roles and visibility
 
-Members have one of two roles (`backend/domain.ts`):
+Members have one of two roles (`server/domain.ts`):
 
 - **Editor**: reads `Public`, `Internal`, `0`, and `1` articles; creates articles; edits unprotected articles; assigns only those four visibility levels.
 - **Moderator**: everything an Editor can do, plus every visibility level (including `2`–`5` and legacy `Admin`), editing protected articles, protection, pinning, verification, restoring revisions, deleting articles, managing tags, and cleaning up unresolved tag references. The spec marks these operations with `x-required-role: Moderator`; an Editor receives `403 FORBIDDEN`.
@@ -145,7 +145,7 @@ Pinned articles always sort first. Items are summaries with an `excerpt` instead
 
 ## Request validation
 
-Request bodies are parsed with strict Zod schemas (`backend/validation.ts`): unknown fields are rejected, and a failure answers `400 VALIDATION_ERROR` with the issues. The main constraints:
+Request bodies are parsed with strict Zod schemas (`src/lib/validation.ts`): unknown fields are rejected, and a failure answers `400 VALIDATION_ERROR` with the issues. The main constraints:
 
 - **Articles**: `title` 3–180 characters (trimmed); `content` 20–250,000 characters of Markdown, with no raw HTML or JSX tags and no MDX `import`/`export` lines; `tagIds` up to 12 unique tag UUIDs that exist (`400 INVALID_TAG_IDS` otherwise).
 - **Tags**: `name` 1–40 characters (trimmed, unique: `409 TAG_NAME_CONFLICT`); `color` canonical `#RRGGBB` with uppercase hex digits.

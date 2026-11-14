@@ -1,6 +1,6 @@
-import { getPool } from '../backend/db.js';
-import { hashPassword } from '../backend/local-auth.js';
-import { roles, type Role } from '../backend/domain.js';
+import { createDatabase, databaseSettingsFromEnv } from '../server/db.js';
+import { hashPassword } from '../server/local-auth.js';
+import { roles, type Role } from '../server/domain.js';
 
 function arg(name: string) {
   const index = process.argv.indexOf(`--${name}`);
@@ -35,7 +35,8 @@ if (!password || password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.tes
 }
 
 const passwordHash = await hashPassword(password);
-const pool = await getPool();
+const db = createDatabase(databaseSettingsFromEnv(process.env));
+const pool = await db.pool();
 try {
   await pool.query(
     `INSERT INTO local_users (username, password_hash, display_name, email, role)
@@ -51,5 +52,5 @@ try {
   );
   console.log(`Member ${role} account ${username} is ready.`);
 } finally {
-  await pool.end();
+  await db.close();
 }

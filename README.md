@@ -33,7 +33,7 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
 
 ## Prerequisites
 
-- Node.js 22 or newer and npm
+- Node.js 26 and npm 11.20 or newer within npm 11 (only to build or develop from source; the Docker images include Node.js)
 - For local data: Docker Compose or PostgreSQL 16
 
 ## Local development
@@ -60,11 +60,11 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
 3. Start the API and Vite in separate terminals:
 
    ```bash
-   set -a && source .env.local && set +a && npm run api:dev
+   set -a && source .env.local && set +a && npm run dev:server
    npm run dev
    ```
 
-Vite proxies `/api` to the API on port 3001, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base at `/login`. The API verifies signed member tokens and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
+`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; rerun it after changing server code. Vite proxies `/api` to the API on port 3001, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base at `/login`. The API verifies signed member tokens and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
 
 ## Docker self-hosting
 
@@ -290,18 +290,15 @@ References: [Install Docker Engine](https://docs.docker.com/engine/install/) and
 
 ## API
 
-The API is documented in [`docs/API.md`](docs/API.md), which covers member and Admin authentication, the CSRF header, optimistic concurrency, roles and visibility, pagination, error codes, and limits, with `curl` examples. Per-route detail is in the hand-written OpenAPI 3.1 descriptions [`docs/openapi.yaml`](docs/openapi.yaml) (public and member routes) and [`docs/openapi-admin.yaml`](docs/openapi-admin.yaml) (Admin routes). The member app renders the first at `/api-docs` (linked from the footer, readable without signing in), and the admin panel renders the second in its **API** tab. `backend/openapi.test.ts` fails if the spec and the route table in `backend/routes.ts` disagree.
+The API is documented in [`docs/API.md`](docs/API.md), which covers member and Admin authentication, the CSRF header, optimistic concurrency, roles and visibility, pagination, error codes, and limits, with `curl` examples. Per-route detail is in the hand-written OpenAPI 3.1 descriptions [`docs/openapi.yaml`](docs/openapi.yaml) (public and member routes) and [`docs/openapi-admin.yaml`](docs/openapi-admin.yaml) (Admin routes). The member app renders the first at `/api-docs` (linked from the footer, readable without signing in), and the admin panel renders the second in its **API** tab. `server/test/openapi.test.ts` fails if the spec and the route table in `server/routes.ts` disagree.
 
 ## Checks
 
 ```bash
-npm run lint
-npm run typecheck
-npm test
-npm run build
+npm run check   # lint (tsc -b), all tests, and the production build
 ```
 
-GitHub Actions runs these checks and builds both Docker images for every pull request and every push to `main` (`.github/workflows/ci.yml`). See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+`npm test` runs the server and shared-library tests with Node's built-in test runner and the React component tests with Vitest. GitHub Actions runs `npm run check` and builds both Docker images for every pull request and every push to `main` (`.github/workflows/ci.yml`). See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 ## Database migrations
 
@@ -316,7 +313,7 @@ Migrations marked as requiring an explicit target are destructive contract phase
 - Markdown is rendered by `react-markdown` with GFM and `rehype-sanitize`; raw HTML is not enabled.
 - The API rejects raw HTML, JSX tags, and MDX `import` / `export` statements. MDXEditor is used as a Markdown authoring surface only; content is never executed as MDX.
 - Article writes are validated with Zod and capped at 250,000 characters and 12 tags.
-- API errors do not return database details; a rejected backup restore names only the table and constraint the file violated. API logs include a request ID for unexpected failures.
+- API errors do not return database details; a rejected backup restore names only the table and constraint the file violated. The API logs unexpected failures, with their request ID, as JSON to standard output.
 - Backups are available only to the Admin. Archives are checksummed, size- and path-checked, previewed before restoring, upgraded in an isolated staging schema, and restored in a single transaction after a pre-restore backup, signing everyone out.
 - PostgreSQL timestamps are `timestamptz` values generated by the server and serialized as UTC ISO 8601.
 
@@ -325,7 +322,9 @@ Migrations marked as requiring an explicit target are destructive contract phase
 ```text
 src/              React member UI, authentication session, safe Markdown, editors
 src/admin/        Admin panel (separate entry: admin.html)
-backend/          HTTP server, route table, domain services, authorization, PostgreSQL adapter
+server/           Fastify API: entry point, app, route table, domain services, authorization, PostgreSQL adapter
+server/test/      Server tests (node:test)
+src/lib/          Validation and API types shared by the server and the browser
 migrations/       Reviewable SQL schema
 docs/             API guide (API.md) and OpenAPI descriptions
 scripts/          migration and local-user recovery

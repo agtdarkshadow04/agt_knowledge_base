@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AGT Knowledge Base Admin API
-  version: 1.0.0
+  version: 2.0.0
   summary: The installation Admin's routes (`/admin/*`).
   description: |
     Routes of the installation Admin: first-run setup, Admin sign-in, member

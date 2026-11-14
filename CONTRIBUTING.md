@@ -4,7 +4,7 @@ Thanks for helping improve the AGT Knowledge Base.
 
 ## Getting started
 
-1. Install Node.js 22 or newer and Docker (for PostgreSQL).
+1. Install Node.js 26 (with npm 11.20 or newer) and Docker (for PostgreSQL).
 2. Follow **Local development** in [README.md](README.md) to install dependencies, start PostgreSQL, and run the API and frontend.
 
 ## Making a change
@@ -20,10 +20,7 @@ Thanks for helping improve the AGT Knowledge Base.
 Run these before opening a pull request. CI runs the same checks and also builds the Docker images.
 
 ```bash
-npm run lint
-npm run typecheck
-npm test
-npm run build
+npm run check
 ```
 
 Changes to authentication, roles, article visibility or protection, Markdown rendering, SQL, or version conflict handling must include regression tests.
