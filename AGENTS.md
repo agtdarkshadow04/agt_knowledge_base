@@ -1,8 +1,9 @@
 # Agent guide — AGT Knowledge Base
 
 AGT Knowledge Base is a TypeScript knowledge base for the Alliance of Galactic Travellers: a React 19 + Vite member
-UI (`index.html` → `src/`) and a separate admin panel entry (`admin.html` → `src/admin/`), served by Nginx, with a
-**Fastify 5** API (`server/`, Node.js 26, TypeScript) in front of PostgreSQL. There are two kinds of account. **Members**
+UI (`index.html` → `src/`) and a separate admin panel entry (`admin.html` → `src/admin/`), both served, with the REST
+API under `/api/`, by a **Fastify 5** server (`server/`, Node.js 26, TypeScript) in front of PostgreSQL. The API is
+described by an OpenAPI 3.1 document generated from its TypeBox route schemas (`GET /api/openapi.json`). There are two kinds of account. **Members**
 (`local_users`, roles `Editor` and `Moderator`) sign in at `/login`. The single installation **Admin** (the one-row
 `admin` table) signs in only at `/admin` with an HttpOnly cookie session (`admin_sessions`), manages members,
 settings and backups, and is never a member `Actor`. Moderators hold every content-moderation power (protection,
@@ -65,8 +66,11 @@ the install-script check (STACK-7) and `npm run check`, and builds both Docker i
 | `server/index.ts` | Entry point and the only reader of `process.env`: loads `config.yaml` (`CONFIG_FILE`), builds the `AppContext`, listens, shuts down on SIGTERM/SIGINT |
 | `server/app.ts` | `buildApp(context, options)`: the Fastify app without `listen()` — route registration, the one authentication `onRequest` hook (rate limits, CSRF, member token, Admin cookie), body limits, the single error handler, and the sign-in/setup/session/logout/password routes it serves itself |
 | `server/context.ts` | `AppContext`: config, config file text, database, setup password, member-token secret, version |
-| `server/http.ts` | `HttpError(statusCode, code, message)` and `errorReply()`, the one mapping from errors to error bodies |
-| `server/routes.ts` | Route table (`auth: 'none' \| 'member' \| 'admin'`, `rateLimit`) and the `ApiRequest`/`ApiResponse` types |
+| `server/http.ts` | `HttpError(statusCode, error, message, { fields, params, legacyCode })` and `errorReply()`, the one mapping from errors to the API-6 error body |
+| `server/routes.ts` | Route table: path under `/api/`, auth mode, `operationId`, tag, summary, TypeBox schemas, rate limit, and `replacedBy` for deprecated 1.x paths; the `ApiRequest`/`ApiResponse` types |
+| `server/schemas.ts` | TypeBox request and response schemas of every route, `ErrorBody`/`FieldError`, and `errorCodes` (every code the server sends) |
+| `server/openapi.ts` | `@fastify/swagger` registration and the `SECURITY` values each route declares (API-11) |
+| `server/pagination.ts` | Opaque article-list cursors (API-8) |
 | `server/config.ts` | `config.yaml` loading and its Zod schema (unknown keys are errors) |
 | `server/auth.ts` | `authenticate()`, the only place a member bearer token becomes a user; `requireActor` / `requireAdminSession` |
 | `server/admin-auth.ts` | Admin setup (`AGT_SETUP_PASSWORD`), sign-in and SHA-256-hashed cookie sessions |
@@ -79,12 +83,11 @@ the install-script check (STACK-7) and `npm run check`, and builds both Docker i
 | `server/migrations.ts`, `server/migrations-runner.ts`, `migrations/*.sql` | Inline migration SQL that actually runs, its runner, and reviewable SQL copies |
 | `server/rate-limit.ts`, `server/line-diff.ts` | Rate limiter (keyed by Fastify's `request.ip`, which honours `server.trustProxy`), revision diff |
 | `server/test/` | `node:test` server tests; `helpers.ts` has `testContext()`, `fakeDatabase()`, `assertMatches()`, `rejectsMatching()`, `match.*`, `respond()` |
-| `src/lib/` | Code shared by server and browser (REPO-3): `validation.ts` (Zod request parsing; change rules here only), `api.ts` (shared request types and roles), with `node:test` tests in `*.test.ts` |
+| `src/lib/` | Code shared by server and browser (REPO-3): `validation.ts` (Zod request parsing; change rules here only), `api.ts` (shared request types and roles), `errors.ts` (`FieldError`, field codes, Zod issues → field errors), `openapi.ts` (reads the OpenAPI document for the admin API tab), with `node:test` tests in `*.test.ts` |
 | `scripts/` | `migrate.ts` and the member-account recovery CLI `manage-local-user.ts`, bundled by `npm run build:scripts` (and the Dockerfile) |
 | `src/` | Member UI: `pages/`, `components/` (`MarkdownContent.tsx`, `RichMarkdownEditor.tsx`), `auth/`, `settings/`, `services/api.ts` (member API client), `types.ts`, `visibility.ts` (display options and colours); component tests (`*.test.tsx`) run in Vitest + jsdom with `src/test/setup.ts` |
-| `src/components/api-docs/` | OpenAPI renderer shared by both bundles |
-| `src/admin/` | Admin panel: `AdminApp` (setup/login/dashboard), `*Panel.tsx` tabs, `api.ts`, `types.ts`. The member bundle must never import from `src/admin/` |
-| `docs/API.md`, `docs/openapi.yaml`, `docs/openapi-admin.yaml` | API guide and the hand-written OpenAPI documents (public/member and `/admin/*`), rendered at `/api-docs` and in the admin API tab |
+| `src/admin/` | Admin panel: `AdminApp` (setup/login/dashboard), `*Panel.tsx` tabs (`ApiPanel.tsx` + `api-docs/` render `/api/openapi.json`, API-14), `api.ts`, `types.ts`. The member bundle must never import from `src/admin/` |
+| `docs/API.md` | API guide: authentication, deprecated paths, pagination, error codes (every code in `errorCodes` must be listed) |
 | `config.example.yaml` | Every `config.yaml` key with its default |
 | `Dockerfile`, `docker-compose.yml`, `nginx.conf`, `.env.example`, `docker.env.example` | Docker deployment and its environment templates |
 | `.github/workflows/ci.yml` | CI |
@@ -108,9 +111,15 @@ the install-script check (STACK-7) and `npm run check`, and builds both Docker i
 - **Server structure (SRV-1..SRV-3):** only `server/index.ts` reads `process.env` or decides where the config file
   lives. Everything else gets what it needs from the `AppContext` passed to `buildApp()` (services take the context, or
   the parts of it they use, in their constructor); never add a module-level pool, config cache or `process.env` read.
-- Validate request input with the Zod parsers in `src/lib/validation.ts` (shared with the browser; never duplicate a
-  rule). Signal failures by throwing `HttpError` (`server/http.ts`) or a domain subclass from `server/domain.ts`;
-  handlers never build error responses themselves, and `errorReply()` is the only place that maps errors to bodies.
+- Request input is checked twice: the route's TypeBox schema (types, required properties, no undeclared properties;
+  `removeAdditional` and `coerceTypes` are off, so nothing is silently dropped or converted), then the semantic Zod
+  parsers in `src/lib/validation.ts` (shared with the browser; never duplicate a rule). Signal failures by throwing
+  `HttpError` (`server/http.ts`) or a domain subclass from `server/domain.ts`, with a snake_case `error` code (API-6)
+  that is listed in `errorCodes` and `docs/API.md`, and `fields` for field errors; a code that replaces a 1.x code
+  passes it as `legacyCode` until 3.0.0. Handlers never build error responses themselves, and `errorReply()` is the
+  only place that maps errors to bodies.
+- **Response schemas list every field** a route returns: Fastify's serializer drops undeclared ones, so a field added
+  to a service result must be added to its schema in `server/schemas.ts` too.
 - Keep SQL in `postgres-article-repository.ts` (or `admin-service.ts` for local users), always parameterized; map
   user-supplied sort fields through the existing allowlist.
 - Keep changes minimal and consistent with existing patterns; a new runtime dependency needs a reason in the PR
@@ -126,17 +135,20 @@ the install-script check (STACK-7) and `npm run check`, and builds both Docker i
   protected-article rules, visibility, Markdown rendering, SQL construction or optimistic concurrency need regression
   tests (`SECURITY.md`). Never skip or weaken a test to make a change pass (TEST-5).
 - **Adding or changing an API route:**
-  1. `server/routes.ts`: add it with `auth: 'member'`, `auth: 'admin'` (path must start with `/admin/`) or
-     `auth: 'none'`; `buildApp()` registers every table entry on Fastify. Every non-GET `/admin/*` request must carry
-     `x-agt-request: 1` (the `onRequest` hook in `app.ts` enforces it). Add `rateLimit` for credential-checking routes.
+  1. `server/routes.ts`: add it under `/api/` with `auth: 'member'`, `auth: 'admin'` (path must start with
+     `/api/admin/`) or `auth: 'none'`, a unique camelCase `operationId`, a tag, a one-sentence summary, and TypeBox
+     schemas (`server/schemas.ts`) for its params, query string, body and success response. `buildApp()` registers
+     every table entry on Fastify with the matching `security` (API-11). Every non-GET `/api/admin/*` request and
+     `POST /api/setup` must carry `x-agt-request: 1` (the `onRequest` hook in `app.ts` enforces it). Add `rateLimit`
+     for credential-checking routes. Renaming a route keeps the old path as an entry with `replacedBy` until the next
+     major version (VER-10).
   2. Member/public routes go in `server/handler.ts` (roles via `requireActor` and the services); admin routes in
      `server/admin-handler.ts`. `server/test/routes.test.ts` fails if the table and the switches disagree. Routes that
      `app.ts` serves itself (sign-in, session, setup, logout, password) are listed in `serverRoutes` there.
   3. Client: `src/services/api.ts` + `src/types.ts` (member), `src/admin/api.ts` + `src/admin/types.ts` (admin).
-  4. Docs: `docs/openapi.yaml` or `docs/openapi-admin.yaml` (security, parameters, body constraints from
-     `validation.ts`, responses, `x-error-codes`, `x-required-role: Moderator`); `docs/API.md` for new concepts or
-     error codes. `server/test/openapi.test.ts` fails if routes, auth modes, rate limits or error codes and the docs
-     disagree.
+  4. Docs: the OpenAPI document is generated; `server/test/openapi.test.ts` (API-13) fails if a route is missing or
+     incomplete, its security is wrong, or an error code is missing from `errorCodes` or `docs/API.md`. Update
+     `docs/API.md` for new concepts.
   5. Tests in `server/test/`: `handler.test.ts` / `admin-handler.test.ts` (authorization), `server.test.ts` (session
      separation, CSRF, cookies, body and rate limits), `routes.test.ts` (routing and auth modes).
 - **Adding a database migration:** append the next `NNN_snake_case` entry to `migrations` in `server/migrations.ts`
@@ -174,7 +186,7 @@ the install-script check (STACK-7) and `npm run check`, and builds both Docker i
 ## Deviations from the AGT web app spec
 
 Rule IDs refer to the pinned v6.0.0 copy. The first two rows are permanent and agreed in issue #48. Every row
-marked **To fix** names the #48 phase that removes it; delete the row in that phase's PR.
+marked **To fix** names the #48 phase, or the major release, that removes it; delete the row in that PR.
 
 | Rule | What differs | Why |
 | --- | --- | --- |
@@ -182,25 +194,22 @@ marked **To fix** names the #48 phase that removes it; delete the row in that ph
 | STACK-3, UI-9, A11Y-2 | `@mdxeditor/editor` brings its own toolbar, select and link-dialog components (Radix-based) instead of `.button`/`.modal-*` classes and `useDialog` | Rich Markdown editing is a core feature, and no reasonable plain-React replacement exists. Limits: used only inside the article editor; styled with AGT tokens through its own CSS variables, never by overriding UI-9 classes; its popovers must still pass the TEST-6 checks (keyboard opening, Escape closes, focus returns, axe WCAG 2.2 AA) |
 | NAME-1, §2.1 | **To fix (Phase 0):** the slug `knowledge-base` (AGT Knowledge Base, `agtdarkshadow04/agt_knowledge_base`, default port **8081**, PostgreSQL) is not in the spec's app registry yet | Needs a registry PR in the spec repository (SPEC-4) |
 | STACK-1, TEST-1, TEST-3 | **To fix (Phase 10):** the React component tests (`src/**/*.test.tsx`) run in Vitest + jsdom + Testing Library (`npm run test:components`, part of `npm test`), with the dev dependencies `vitest`, `jsdom` and `@testing-library/*`; `package.json` also has the scripts `test:components`, `build:scripts` and `db:migrate` | The spec's client tests run in plain Node without a DOM. Phase 10's Playwright suite (TEST-6) replaces these tests; removing them earlier would lose coverage (TEST-5) |
-| STACK-1, API-10 | **To fix (Phases 2–3):** request bodies and `config.yaml` are validated with Zod (`src/lib/validation.ts`, `server/config.ts`) rather than TypeBox, and Fastify routes declare no schemas yet | Predates the spec; route schemas come with the generated OpenAPI document (Phase 2), the config schema with Phase 3 |
 | SRV-4 | **To fix (Phase 5):** SQL also lives in `admin-auth.ts`, `local-auth.ts`, `admin-service.ts`, `settings-service.ts`, `backup-service.ts` and `migrations-runner.ts`, not only in the repository | Predates the spec |
-| REPO-1, FE-6, FE-8 | **To fix (Phases 2–10):** the layout still has `scripts/`, `migrations/*.sql` mirrored into `server/migrations.ts` (Phase 5), `src/services/`, `src/pages/` and logic outside `src/lib/` such as `src/visibility.ts` (Phase 8), `nginx.conf` and `docker.env.example` (Phase 10); server files are named after the current pipeline (`handler.ts`, `admin-handler.ts`, `admin-auth.ts`, `local-auth.ts`) rather than `adminRoutes.ts`, `session.ts`, `passwords.ts`, `openapi.ts` (Phases 2 and 4); forms do not validate with `src/lib/validation.ts` yet (Phase 8) | Predates the spec |
-| API-1, API-2, SRV-2, SRV-9, SRV-11 | **To fix (Phase 2):** routes have no `/api` prefix (Nginx strips it) and use `/admin/auth/login`, `/admin/backup/restore` and similar paths; Nginx, not the app, serves `dist/` (`buildApp()` has no `staticDir` option); no `GET /api/health` | Predates the spec |
-| API-5, API-6, API-8, SRV-5 | **To fix (Phase 2):** the error handler's bodies are `{ code: 'VALIDATION_ERROR', message, issues }` rather than snake_case `error` with `fields` and `params`; malformed IDs return `400`, not `404`; collections that can grow without bound use page/pageSize, not cursors | Predates the spec |
-| API-3, API-10..API-14, VER-2 | **To fix (Phase 2):** OpenAPI is hand-written (`docs/openapi*.yaml`), not generated from TypeBox route schemas and served at `/api/openapi.json`; no `operationId`/`tags`/`security` per route or API-13 test; the in-app API docs are shown to members and visitors, not only to the signed-in Admin; `info.version` is not read from `package.json` | Predates the spec |
-| CFG-1, CFG-3..CFG-10 | **To fix (Phase 3):** Zod config schema with non-standard keys (`server.frontendOrigin`, `adminSession.*`, `backup.maxBytes`, `rateLimits.adminLogin`/`adminPassword`, `site.applicationName`, …); `server.port` defaults to `3001`, not 8081; settings in `application_settings`, not `settings`; no `EDITABLE_SETTINGS`/`settingStates()`, `unknown_setting`/`invalid_setting`/`defined_in_config` codes or `GET /api/settings/public` | Predates the spec |
+| REPO-1, FE-6, FE-8 | **To fix (Phases 4–10):** the layout still has `scripts/`, `migrations/*.sql` mirrored into `server/migrations.ts` (Phase 5), `src/services/`, `src/pages/` and logic outside `src/lib/` such as `src/visibility.ts` (Phase 8), `nginx.conf` and `docker.env.example` (Phase 10); server files are named after the current pipeline (`handler.ts`, `admin-handler.ts`, `admin-auth.ts`, `local-auth.ts`) rather than `adminRoutes.ts`, `session.ts`, `passwords.ts` (Phase 4); forms do not validate with `src/lib/validation.ts` yet (Phase 8) | Predates the spec |
+| API-1, API-2, API-3, API-6, API-8 | **To fix (3.0.0):** the 1.x paths `/api/admin/setup/status`, `/api/admin/setup`, `/api/admin/auth/login`, `/logout`, `/session` and `PUT /api/admin/auth/password` still work next to their API-1 replacements; error bodies still carry the 1.x `code` and `issues` beside `error`/`fields`; article lists still accept `page`/`pageSize` and then return `page`, `pageSize`, `totalPages`; admin user create/replace return the user, not `{ user, notices }`, a member's password is set with `PUT …/password`, not an action `POST`, and article flags change with `PATCH …/protection`, `/pinning`, `/verification`; public article responses use the member schema, which includes the `createdBy`/`modifiedBy` user IDs | Each is a rename or removal that VER-10 lets a major version make only after a deprecation period; all are deprecated in 2.0.0 (`deprecated: true` in OpenAPI, `CHANGELOG.md`) |
+| CFG-1, CFG-3..CFG-10 | **To fix (Phase 3):** a Zod config schema (not TypeBox) with non-standard keys (`server.frontendOrigin`, `adminSession.*`, `backup.maxBytes`, `rateLimits.adminLogin`/`adminPassword`, `site.applicationName`, …); `server.port` defaults to `3001`, not 8081; settings in `application_settings`, not `settings`; no `EDITABLE_SETTINGS`/`settingStates()`, `unknown_setting`/`invalid_setting`/`defined_in_config` codes or `GET /api/settings/public` | Predates the spec |
 | CFG-2, NAME-2, DEP-4 | **To fix (Phase 3):** environment variables `LOCAL_AUTH_SECRET`, `AGT_SETUP_PASSWORD`, `DB_*`, `DATABASE_URL`, `DATABASE_SSL`, `POSTGRES_*`, `CONFIG_FILE`, `AUTH_MODE`, `MIGRATION_TARGET_ID`, `APP_*` instead of the CFG-2 set with the `AGT_KNOWLEDGE_BASE_` prefix; `docker.env.example` beside `.env.example`; npm package, volumes (`agt-postgres`, `agt-backups`), images, backup file name (`agt-kb-backup-…`) and `localStorage` keys (`agt-*`) do not follow NAME-2 | Predates the spec |
 | AUTH-2, AUTH-3 | **To fix (Phase 4):** scrypt runs with default parameters and stores `scrypt$salt$hash`, not the fixed options and `scrypt$N$r$p$salt$hash` with a format check before any scrypt call; usernames are lower-cased and limited to 3–64 of `[a-z0-9_.-]` instead of stored as entered after trimming (1–64 code points) | Predates the spec; existing hashes need a rehash path. Passwords are already 12–1024 characters (the extra character-class rules tighten AUTH-3) |
 | AUTH-5, AUTH-6, AUTH-8, AUTH-9 | **To fix (Phase 4):** setup is not at `/api/setup`, has no startup length check (SRV-8), and answers `403 SETUP_DISABLED` instead of `503 setup_password_missing`; the AUTH-6 reminders are incomplete; the Admin cookie is not `agt_knowledge_base_session` with `Path=/`, and its table is `admin_sessions`, not `sessions` | Predates the spec |
 | AUTH-8, FE-3, SEC-5 | **To fix (Phase 4):** members use HMAC-signed bearer tokens (`LOCAL_AUTH_SECRET`) kept in `localStorage`, without CSRF headers, instead of the cookie sessions in the AUTH-1 row | Predates the spec; a security fix, so it may skip the deprecation period (VER-10) |
-| SEC-1..SEC-4, SEC-6 | **To fix (Phase 4):** the API sends `Access-Control-Allow-*` headers for `server.frontendOrigin` and answers every `OPTIONS` request with `204`; no Content-Security-Policy, `X-Frame-Options`, `Referrer-Policy` or COOP from the API or Nginx; the web port is published on `0.0.0.0:8080` by default; no `deploy/Caddyfile.example` or plain-HTTP warning | Predates the spec |
+| SEC-1..SEC-4, SEC-6, API-9 | **To fix (Phase 4):** the API sends `Access-Control-Allow-*` headers for `server.frontendOrigin` and answers every `OPTIONS` request with `204`; no Content-Security-Policy, `X-Frame-Options`, `Referrer-Policy` or COOP; public reads send `Cache-Control: public, max-age=30`; the web port is published on `0.0.0.0:8080` by default; no `deploy/Caddyfile.example` or plain-HTTP warning | Predates the spec |
 | SEC-7 | **To fix (Phase 4):** a hand-written rate limiter (`server/rate-limit.ts`), not `@fastify/rate-limit` with per-route limits and `429 rate_limited` bodies | Predates the spec |
 | SEC-12, SEC-13 | **To fix (Phase 4):** Markdown is rendered by `MarkdownContent.tsx` with `rehype-sanitize`, not one `src/components/Markdown.tsx` with a remark plugin that turns raw HTML into text and an http/https-only `urlTransform`; external links and images do not yet follow SEC-12/SEC-13 attributes | Predates the spec |
 | DATA-3, DATA-4, DATA-11 | **To fix (Phase 5):** migrations are inline SQL in `server/migrations.ts`, not `server/migrations/NNNN_*.sql`; a separate `migrate` job runs them instead of startup under the BAK-12 migration lock, and a newer schema does not stop the server (SRV-8); contract migrations wait for `MIGRATION_TARGET_ID`; `public` still holds the function `merge_preserved_orphan_tag_ids` (and the 006 triggers where 007 has not run); Compose connects as the `postgres` superuser and there is no `rolsuper` check or preview database | Predates the spec |
 | DATA-6, DATA-8, DATA-10 | **To fix (Phase 5):** IDs come from `gen_random_uuid()` column defaults, not `crypto.randomUUID()`; not every table has `created_at` and `updated_at` (`app_users`, `articles` uses `modified_at`); persistent state is not all under one `/app/data` volume | Predates the spec |
 | BAK-1..BAK-12, SEC-10 | **To fix (Phase 6):** backups are `/admin/backup` and `/admin/backup/restore`, with a `database.json` table dump and a 1.x manifest (`formatVersion: 2`, `migrations`, `files` object), not `pg_dump` with the BAK-2 manifest; no Postgres preview database with the TOC allowlist, operation lock with drain and `503 maintenance`, `control` schema, rollback or `restore-failed.json`; ZIP handling is not in `server/zip.ts` | Predates the spec |
 | LOG-1..LOG-23, SRV-6 | **To fix (Phase 7):** the server logs with Fastify's pino logger to stdout only (scripts and a few services still use `console.*`), at a fixed `info` level; no `logs` schema, server log, audit log, retention, exports or the Server log / Audit log tabs | Predates the spec |
-| STACK-2, FE-1, FE-2, FE-4, FE-5, FE-7 | **To fix (Phase 8):** `react-router-dom` with path routes (`/login`, `/articles/…`, `/tags`, `/api-docs`) instead of query-parameter deep links on `/`; `lucide-react` instead of `src/components/Icons.tsx`; no shared `apiRequest()`/`ApiError` in `src/lib/client.ts` with `x-agt-client: web`; no maintenance notice | Predates the spec |
+| STACK-2, FE-1, FE-2, FE-4, FE-5, FE-7, SRV-9 | **To fix (Phase 8):** `react-router-dom` with path routes (`/login`, `/articles/…`, `/tags`) instead of query-parameter deep links on `/`, so the server also answers those paths with `index.html`; `lucide-react` instead of `src/components/Icons.tsx`; no shared `apiRequest()`/`ApiError` in `src/lib/client.ts` with `x-agt-client: web`; no maintenance notice | Predates the spec |
 | UI-1..UI-16 | **To fix (Phase 8):** own stylesheet and assets (`public/assets/agt-icon.png`, one font) instead of the spec's `assets/` copied unmodified with licence files and `src/agt-base.css` imported first; UI-7 public chrome and UI-8 admin tab order differ | Predates the spec |
 | A11Y-1, A11Y-3..A11Y-6 | **To fix (Phase 8):** no shared `useDialog` hook outside MDXEditor, incomplete live regions, font scale not the 1×–2× `rem` scale, no axe checks | Predates the spec |
 | I18N-1..I18N-6 | **To fix (Phase 9):** English only with hard-coded strings; no `src/translations.ts`, `src/admin/i18n.ts`, translated error codes or completeness tests | Predates the spec |

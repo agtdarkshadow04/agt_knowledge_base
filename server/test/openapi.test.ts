@@ -1,199 +1,150 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { describe, it } from 'node:test';
-import { parse } from 'yaml';
-import { apiRoutes, routeKeys } from '../routes.js';
-import { assertEquals, assertMatches, match, matches } from './helpers.js';
+import { after, before, describe, it } from 'node:test';
+import { buildApp, type App } from '../app.js';
+import { SECURITY } from '../openapi.js';
+import { apiRoutes } from '../routes.js';
+import { errorCodes } from '../schemas.js';
+import { parseOpenApi } from '../../src/lib/openapi.js';
+import { assertMatches, testContext } from './helpers.js';
 
 /**
- * Keeps docs/openapi.yaml (public and member routes) and docs/openapi-admin.yaml
- * (Admin routes) in sync with the route table, and the documented error codes
- * in sync with the codes the backend can return.
+ * The generated OpenAPI document (API-11, API-13): every /api/ route is in
+ * it with a unique operationId, tags, a 2xx schema, the ErrorBody default and
+ * the security its auth mode really needs.
  */
 
 type Node = Record<string, unknown>;
 
 const methods = ['get', 'post', 'put', 'patch', 'delete'] as const;
-const schemeForAuth = { none: undefined, member: 'memberBearer', admin: 'adminCookie' } as const;
 
-/** Reads a file relative to the repository root, where npm runs the tests. */
-function read(path: string) {
-  return readFileSync(path, 'utf8');
+let app: App;
+let document: Node;
+
+before(async () => {
+  app = buildApp(testContext({ version: '9.8.7' }));
+  const response = await app.inject({ method: 'GET', url: '/api/openapi.json' });
+  assert.equal(response.statusCode, 200);
+  document = response.json() as Node;
+});
+
+after(() => app.close());
+
+function operations() {
+  return Object.entries(document.paths as Record<string, Node>).flatMap(([path, item]) => methods
+    .filter((method) => item[method])
+    .map((method) => ({ key: `${method.toUpperCase()} ${path}`, path, method, operation: item[method] as Node })));
 }
 
-const specs = {
-  member: parse(read('docs/openapi.yaml')) as Node,
-  admin: parse(read('docs/openapi-admin.yaml')) as Node,
-};
-
-function isNode(value: unknown): value is Node {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+/** The security a route must declare, from the API-11 table (and the member row of the AUTH-1 deviation). */
+function expectedSecurity(key: string) {
+  const route = apiRoutes.find((candidate) => candidate.routeKey === key)!;
+  if (route.auth === 'member') return SECURITY.member;
+  if (route.auth === 'admin') return route.method === 'GET' ? SECURITY.adminRead : SECURITY.adminWrite;
+  if (['POST /api/setup', 'POST /api/admin/login', 'POST /api/admin/setup', 'POST /api/admin/auth/login'].includes(key)) return SECURITY.csrfOnly;
+  return SECURITY.none;
 }
 
-function resolve(spec: Node, value: unknown): Node {
-  let current = value;
-  while (isNode(current) && typeof current.$ref === 'string') {
-    let target: unknown = spec;
-    for (const part of current.$ref.replace(/^#\//, '').split('/')) target = isNode(target) ? target[part] : undefined;
-    if (!isNode(target)) throw new Error(`Unresolved reference ${current.$ref}`);
-    current = target;
-  }
-  return current as Node;
-}
-
-interface Operation {
-  spec: keyof typeof specs;
-  key: string;
-  path: string;
-  method: string;
-  operation: Node;
-  parameters: Node[];
-}
-
-function operations(name: keyof typeof specs): Operation[] {
-  const spec = specs[name];
-  return Object.entries(spec.paths as Node).flatMap(([path, rawItem]) => {
-    const item = resolve(spec, rawItem);
-    return methods.filter((method) => isNode(item[method])).map((method) => {
-      const operation = item[method] as Node;
-      const parameters = [...(item.parameters as unknown[] ?? []), ...(operation.parameters as unknown[] ?? [])]
-        .map((parameter) => resolve(spec, parameter));
-      return { spec: name, key: `${method.toUpperCase()} ${path}`, path, method, operation, parameters };
-    });
-  });
-}
-
-const documented = [...operations('member'), ...operations('admin')];
-
-function securitySchemes(spec: Node, operation: Node) {
-  const security = (operation.security ?? spec.security ?? []) as Node[];
-  return security.flatMap((requirement) => Object.keys(requirement));
-}
-
-function collectRefs(value: unknown, refs: string[] = []) {
-  if (Array.isArray(value)) value.forEach((entry) => collectRefs(entry, refs));
-  else if (isNode(value)) {
-    if (typeof value.$ref === 'string') refs.push(value.$ref);
-    Object.values(value).forEach((entry) => collectRefs(entry, refs));
-  }
-  return refs;
-}
-
-/** Error codes the backend can send, found in HttpError calls and literal error bodies. */
-function backendErrorCodes() {
+/** Error codes the server can send, found in HttpError calls and literal error bodies. */
+function serverErrorCodes() {
   const codes = new Set<string>();
-  const patterns = [/code: '([A-Z][A-Z_]+)'/g, /(?:HttpError|super)\(\d{3}, '([A-Z][A-Z_]+)'/g, /pathId\([^)]*'([A-Z][A-Z_]+)'\)/g];
+  const patterns = [/error: '([a-z][a-z_]+)'/g, /(?:HttpError|super)\(\d{3}, '([a-z][a-z_]+)'/g, /body\('([a-z][a-z_]+)'/g];
   for (const file of readdirSync('server')) {
     if (!file.endsWith('.ts')) continue;
-    const source = read(`server/${file}`);
+    const source = readFileSync(`server/${file}`, 'utf8');
     for (const pattern of patterns) for (const found of source.matchAll(pattern)) codes.add(found[1]);
   }
   return codes;
 }
 
-function documentedErrorCodes() {
-  const codes = new Set<string>();
-  for (const { spec, operation } of documented) {
-    for (const response of Object.values(operation.responses as Node)) {
-      for (const code of (resolve(specs[spec], response)['x-error-codes'] as string[] | undefined) ?? []) codes.add(code);
-    }
-  }
-  return codes;
-}
-
-describe('OpenAPI description', () => {
-  it('uses OpenAPI 3.1 with the /api server in both files', () => {
-    for (const spec of Object.values(specs)) {
-      assert.equal(spec.openapi, '3.1.0');
-      assertEquals(spec.servers, [match.objectContaining({ url: '/api' })]);
-    }
-  });
-
-  it('documents exactly the routes in routes.ts, once each', () => {
-    const keys = documented.map((operation) => operation.key);
-    assert.equal(new Set(keys).size, keys.length);
-    assert.deepEqual([...keys].sort(), [...routeKeys].sort());
-  });
-
-  it('keeps Admin routes in the admin file and every other route in the member file', () => {
-    for (const operation of documented) {
-      const route = apiRoutes.find((candidate) => candidate.routeKey === operation.key);
-      assert.equal(route?.admin, operation.spec === 'admin', operation.key);
-    }
-  });
-
-  it('declares security that matches each route\'s auth mode and rate limit', () => {
-    for (const operation of documented) {
-      const route = apiRoutes.find((candidate) => candidate.routeKey === operation.key);
-      assert.ok(route, operation.key);
-      const expected = schemeForAuth[route.auth];
-      assert.deepEqual(securitySchemes(specs[operation.spec], operation.operation), expected ? [expected] : [], operation.key);
-      assert.equal(operation.operation['x-rate-limit'], route.rateLimit, operation.key);
-    }
-  });
-
-  it('defines the security schemes the routes use', () => {
-    assertMatches(resolve(specs.member, (specs.member.components as Node).securitySchemes), {
-      memberBearer: { type: 'http', scheme: 'bearer' },
-    });
-    assertMatches(resolve(specs.admin, (specs.admin.components as Node).securitySchemes), {
-      adminCookie: { type: 'apiKey', in: 'cookie', name: 'agt_admin_session' },
+describe('OpenAPI document', () => {
+  it('is OpenAPI 3.1 with the app version (API-11, VER-2)', () => {
+    assert.equal(document.openapi, '3.1.0');
+    assert.deepEqual(document.info, {
+      title: 'AGT Knowledge Base API',
+      version: '9.8.7',
+      description: (document.info as Node).description,
     });
   });
 
-  it('requires the CSRF header on every non-GET admin operation', () => {
-    for (const operation of documented.filter((candidate) => candidate.spec === 'admin')) {
-      const header = operation.parameters.find((parameter) => parameter.in === 'header' && parameter.name === 'x-agt-request');
-      if (operation.method === 'get') assert.equal(header, undefined, operation.key);
-      else assert.ok(matches(header, { required: true }), operation.key);
-    }
+  it('lists every /api/ route of the app exactly once, and nothing else', () => {
+    const documented = operations().map((operation) => operation.key);
+    assert.equal(new Set(documented).size, documented.length);
+    assert.deepEqual([...documented].sort(), apiRoutes.map((route) => route.routeKey).sort());
+    assert.ok(apiRoutes.every((route) => route.path.startsWith('/api/')));
+    // Hidden routes describe nothing: the document itself, the UI pages, OPTIONS.
+    assert.ok(!documented.some((key) => key.includes('openapi.json')));
   });
 
-  it('declares every path parameter, and only those', () => {
-    for (const operation of documented) {
-      const inPath = [...operation.path.matchAll(/\{([^}]+)\}/g)].map((found) => found[1]).sort();
-      const declared = operation.parameters.filter((parameter) => parameter.in === 'path');
-      assert.deepEqual(declared.map((parameter) => parameter.name).sort(), inPath, operation.key);
-      for (const parameter of declared) assert.equal(parameter.required, true, `${operation.key} ${String(parameter.name)}`);
-    }
-  });
-
-  it('gives every operation an ID, summary, known tag, success response, and error codes on errors', () => {
+  it('gives every operation a unique operationId, a tag, a summary, a 2xx schema and the ErrorBody default', () => {
     const ids = new Set<string>();
-    for (const operation of documented) {
-      const spec = specs[operation.spec];
-      const { operationId, summary, tags, responses } = operation.operation as {
-        operationId?: string; summary?: string; tags?: string[]; responses?: Node;
-      };
-      assert.match(operationId ?? '', /^[a-zA-Z]+$/, operation.key);
-      assert.equal(ids.has(operationId!), false, `duplicate ${operationId}`);
-      ids.add(operationId!);
-      assert.ok(summary, operation.key);
-      assert.equal(tags?.length, 1, operation.key);
-      assert.ok((spec.tags as Node[]).map((tag) => tag.name).includes(tags![0]), operation.key);
-      const statuses = Object.keys(responses ?? {});
-      assert.equal(statuses.some((status) => status.startsWith('2')), true, operation.key);
-      for (const status of statuses.filter((candidate) => /^[45]/.test(candidate))) {
-        const codes = resolve(spec, responses![status])['x-error-codes'];
-        assert.equal(Array.isArray(codes) && codes.length > 0, true, `${operation.key} ${status}`);
-      }
+    for (const { key, operation } of operations()) {
+      const id = operation.operationId as string;
+      assert.match(id, /^[a-z][a-zA-Z]+$/, key);
+      assert.ok(!ids.has(id), `duplicate operationId ${id}`);
+      ids.add(id);
+      assert.equal((operation.tags as string[] | undefined)?.length, 1, key);
+      assert.ok(operation.summary, key);
+      const responses = operation.responses as Record<string, Node>;
+      const success = Object.keys(responses).filter((status) => status.startsWith('2'));
+      assert.equal(success.length, 1, key);
+      const content = responses[success[0]].content as Record<string, Node> | undefined;
+      if (success[0] !== '204') assert.ok(content && Object.values(content).every((entry) => entry.schema), key);
+      assert.ok(JSON.stringify(responses.default).includes('ErrorBody'), key);
     }
   });
 
-  it('resolves every $ref', () => {
-    for (const spec of Object.values(specs)) {
-      for (const ref of collectRefs(spec)) assert.doesNotThrow(() => resolve(spec, { $ref: ref }), ref);
+  it('declares the security each route really needs (API-11, API-13)', () => {
+    for (const { key, operation } of operations()) {
+      assert.deepEqual(operation.security, expectedSecurity(key), key);
+    }
+    const schemes = (document.components as Node).securitySchemes as Node;
+    assert.deepEqual(Object.keys(schemes).sort(), ['csrfHeader', 'memberBearer', 'sessionCookie']);
+    assert.deepEqual(schemes.csrfHeader, { type: 'apiKey', in: 'header', name: 'x-agt-request', description: 'Must be "1".' });
+  });
+
+  it('marks the 1.x paths deprecated and names their replacements', () => {
+    for (const route of apiRoutes) {
+      const operation = (document.paths as Record<string, Node>)[route.path][route.method.toLowerCase()] as Node;
+      assert.equal(operation.deprecated === true, route.replacedBy !== undefined, route.routeKey);
+      if (route.replacedBy) assert.ok(apiRoutes.some((candidate) => candidate.routeKey === route.replacedBy && !candidate.replacedBy), route.routeKey);
     }
   });
 
-  it('documents only error codes the backend returns', () => {
-    const backend = backendErrorCodes();
-    assert.ok((backend.size) > 30);
-    for (const code of documentedErrorCodes()) assert.equal(backend.has(code), true, code);
+  it('documents the error body with its deprecated 1.x fields and every error code the server sends', () => {
+    const schemas = (document.components as Node).schemas as Record<string, Node>;
+    const errorBody = Object.values(schemas).find((schema) => schema.title === 'ErrorBody' || (schema.properties as Node | undefined)?.error) as Node;
+    const properties = errorBody.properties as Record<string, Node>;
+    assert.deepEqual((errorBody.required as string[]).sort(), ['code', 'error', 'message']);
+    assert.equal(properties.code.deprecated, true);
+    assert.equal(properties.issues.deprecated, true);
+    const documented = new Set(errorCodes as readonly string[]);
+    for (const code of serverErrorCodes()) assert.ok(documented.has(code), `${code} is not in errorCodes`);
+    for (const code of documented) assert.ok(String(properties.error.description).includes(`\`${code}\``), code);
   });
 
-  it('lists every backend error code in docs/API.md', () => {
-    const guide = read('docs/API.md');
-    for (const code of backendErrorCodes()) assert.ok(guide.includes(`\`${code}\``), code);
+  it('lists every error code in docs/API.md', () => {
+    const guide = readFileSync('docs/API.md', 'utf8');
+    for (const code of errorCodes) assert.ok(guide.includes(`\`${code}\``), code);
+  });
+});
+
+describe('the admin panel\'s API reference', () => {
+  it('reads the generated document', () => {
+    const reference = parseOpenApi(document);
+    assert.equal(reference.title, 'AGT Knowledge Base API');
+    assert.equal(reference.version, '9.8.7');
+    assert.deepEqual(reference.groups.map((group) => group.name), ['public', 'auth', 'articles', 'tags', 'admin']);
+    const all = reference.groups.flatMap((group) => group.operations);
+    assert.equal(all.length, apiRoutes.length);
+    const find = (method: string, path: string) => all.find((operation) => operation.method === method && operation.path === path)!;
+    assertMatches(find('PUT', '/api/admin/settings'), { auth: 'admin', csrfHeader: true, deprecated: false });
+    assertMatches(find('POST', '/api/admin/login'), { auth: 'none', csrfHeader: true });
+    assertMatches(find('GET', '/api/articles'), { auth: 'none', csrfHeader: false });
+    assertMatches(find('POST', '/api/articles'), { auth: 'member', csrfHeader: false });
+    assertMatches(find('POST', '/api/admin/auth/login'), { deprecated: true });
+    const body = find('POST', '/api/articles').requestBody!;
+    assert.deepEqual(body.fields.map((field) => field.name), ['title', 'content', 'tagIds', 'visibility', 'version']);
+    assert.ok(find('GET', '/api/articles').parameters.some((parameter) => parameter.name === 'cursor' && parameter.location === 'query'));
   });
 });

@@ -18,6 +18,8 @@ export function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState('');
   const [tags, setTags] = useState<CanonicalTag[]>([]);
   const [tagsLoading, setTagsLoading] = useState(true);
   const [tagsError, setTagsError] = useState('');
@@ -35,8 +37,7 @@ export function HomePage() {
       verification: (current.get('verification') ?? 'all') as 'all' | 'verified' | 'unverified',
       sort: (current.get('sort') ?? 'modifiedAt') as ArticleSort,
       direction: (current.get('direction') ?? 'desc') as SortDirection,
-      page: Math.max(1, Number(current.get('page') ?? 1) || 1),
-      pageSize: 12,
+      limit: 12,
     };
   }, [queryString]);
 
@@ -50,6 +51,7 @@ export function HomePage() {
       }
       setLoading(true);
       setError('');
+      setMoreError('');
       try {
         const token = viewerSub ? await getToken() : undefined;
         setResult(await listArticles(params, controller.signal, token));
@@ -91,9 +93,25 @@ export function HomePage() {
   const updateParam = useCallback((key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
     if (value && value !== 'all') next.set(key, value); else next.delete(key);
-    if (key !== 'page') next.delete('page');
+    next.delete('page');
     setSearchParams(next);
   }, [searchParams, setSearchParams]);
+
+  /** Appends the next page; the cursor keeps pages from overlapping while articles change (API-8). */
+  async function loadMore() {
+    if (!result?.nextCursor) return;
+    setLoadingMore(true);
+    setMoreError('');
+    try {
+      const token = viewerSub ? await getToken() : undefined;
+      const next = await listArticles({ ...params, cursor: result.nextCursor }, undefined, token);
+      setResult((current) => current && { ...next, items: [...current.items, ...next.items] });
+    } catch (cause) {
+      setMoreError(cause instanceof Error ? cause.message : 'More articles could not be loaded.');
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -220,11 +238,14 @@ export function HomePage() {
         {!loading && !error && result && result.items.length > 0 && (
           <>
             <div className="article-grid">{result.items.map((article) => <ArticleCard key={article.id} article={article} />)}</div>
-            <nav className="pagination" aria-label="Article pages">
-              <button className="button button-secondary" disabled={result.page <= 1} onClick={() => updateParam('page', String(result.page - 1))}>Previous</button>
-              <span>Page {result.page} of {result.totalPages}</span>
-              <button className="button button-secondary" disabled={result.page >= result.totalPages} onClick={() => updateParam('page', String(result.page + 1))}>Next</button>
-            </nav>
+            {result.nextCursor && (
+              <nav className="pagination" aria-label="More articles">
+                <button className="button button-secondary" disabled={loadingMore} onClick={() => void loadMore()}>
+                  {loadingMore ? 'Loading…' : 'Load more'}
+                </button>
+              </nav>
+            )}
+            {moreError && <div className="inline-alert" role="alert">{moreError}</div>}
           </>
         )}
       </section>

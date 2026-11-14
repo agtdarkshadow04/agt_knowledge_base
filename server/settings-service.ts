@@ -159,11 +159,14 @@ export class SettingsService {
     const locked = submitted.find((name) => fileDefined.has(name));
     if (locked) {
       const key = settingDefinitions[locked].key;
-      throw new HttpError(409, 'SETTING_DEFINED_IN_FILE', `${key} is set in the configuration file and cannot be changed here.`);
+      throw new HttpError(409, 'defined_in_config', `${key} is set in the configuration file and cannot be changed here.`, {
+        params: { key },
+        legacyCode: 'SETTING_DEFINED_IN_FILE',
+      });
     }
     for (const name of submitted) {
       if (input[name] === null && typeof settingDefinitions[name].fallback !== 'number') {
-        throw new HttpError(400, 'INVALID_SETTING', `${settingDefinitions[name].key} cannot be cleared.`);
+        throw new HttpError(400, 'invalid_setting', `${settingDefinitions[name].key} cannot be cleared.`);
       }
     }
 
@@ -173,7 +176,7 @@ export class SettingsService {
       await client.query('BEGIN');
       const current = await readRow(client, true);
       if (current.version !== input.version) {
-        throw new HttpError(409, 'VERSION_CONFLICT', 'Application settings changed after you opened them. Reload and try again.');
+        throw new HttpError(409, 'conflict', 'Application settings changed after you opened them. Reload and try again.', { legacyCode: 'VERSION_CONFLICT' });
       }
       const assignments = submitted.map((name, index) => {
         const cast = name === 'defaultVisibility' ? '::jsonb' : '';

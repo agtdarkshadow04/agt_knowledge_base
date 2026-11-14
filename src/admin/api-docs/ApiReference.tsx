@@ -1,6 +1,6 @@
 import { Gauge, KeyRound, LockKeyhole, LockOpen, ShieldCheck, ShieldHalf } from 'lucide-react';
-import { MarkdownContent } from '../MarkdownContent';
-import type { ApiDocument, ApiOperation, AuthMode, SchemaField } from './openapi';
+import { MarkdownContent } from '../../components/MarkdownContent';
+import type { ApiDocument, ApiOperation, AuthMode, SchemaField } from '../../lib/openapi';
 
 /**
  * Renders a parsed OpenAPI document. Descriptions go through MarkdownContent
@@ -80,6 +80,7 @@ function Operation({ operation }: { operation: ApiOperation }) {
           {operation.rateLimit && (
             <span className="api-badge api-rate"><Gauge aria-hidden="true" />Rate-limited ({operation.rateLimit})</span>
           )}
+          {operation.deprecated && <span className="api-badge api-deprecated">Deprecated</span>}
         </div>
       </header>
       {operation.description && <MarkdownContent content={operation.description} />}

@@ -39,6 +39,8 @@ async function main() {
 
   const app = buildApp(context, {
     logger: { level: 'info', redact: ['req.headers.authorization', 'req.headers.cookie'] },
+    // The built client; AGT_KNOWLEDGE_BASE_STATIC_DIR overrides it in development (CFG-2).
+    staticDir: env.AGT_KNOWLEDGE_BASE_STATIC_DIR || 'dist',
   });
   app.log.info(context.configFile.text === null
     ? `No configuration file at ${context.configFile.path}; using defaults.`

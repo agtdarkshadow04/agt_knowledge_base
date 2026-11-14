@@ -3,7 +3,7 @@ import { json, noContent, parseBody, pathId } from './api-response.js';
 import { ArticleService } from './article-service.js';
 import { requireAdminSession } from './auth.js';
 import { BackupService } from './backup-service.js';
-import { HttpError } from './http.js';
+import { HttpError, invalidField } from './http.js';
 import { PostgresArticleRepository } from './postgres-article-repository.js';
 import type { AppContext } from './context.js';
 import type { ApiRequest, ApiResponse } from './routes.js';
@@ -29,7 +29,7 @@ const userId = (request: ApiRequest) => pathId(request, 'userId', 'user', 'INVAL
 function restoreAction(request: ApiRequest) {
   const action = request.query.action;
   if (action !== 'preview' && action !== 'restore') {
-    throw new HttpError(400, 'INVALID_ACTION', 'The action query parameter must be preview or restore.');
+    throw invalidField('action', 'not_allowed', 'The action query parameter must be preview or restore.', 'INVALID_ACTION');
   }
   return action;
 }
@@ -48,27 +48,27 @@ export function createAdminRequestHandler(
   return async function handleAdminRequest(request: ApiRequest): Promise<ApiResponse> {
     requireAdminSession(request);
     switch (request.routeKey) {
-      case 'GET /admin/users':
+      case 'GET /api/admin/users':
         return json(200, await adminService.listUsers(parseUserListQuery(request.query)));
-      case 'POST /admin/users':
+      case 'POST /api/admin/users':
         return json(201, await adminService.createUser(parseAdminUserCreate(parseBody(request))));
-      case 'PUT /admin/users/{userId}':
+      case 'PUT /api/admin/users/{userId}':
         return json(200, await adminService.updateUser(userId(request), parseAdminUserUpdate(parseBody(request))));
-      case 'PUT /admin/users/{userId}/password':
+      case 'PUT /api/admin/users/{userId}/password':
         await adminService.setPassword(userId(request), parseAdminPasswordWrite(parseBody(request)).password);
         return noContent();
-      case 'DELETE /admin/users/{userId}':
+      case 'DELETE /api/admin/users/{userId}':
         await adminService.deleteUser(userId(request));
         return noContent();
-      case 'GET /admin/stats':
+      case 'GET /api/admin/stats':
         return json(200, await adminService.getStats());
-      case 'GET /admin/articles':
+      case 'GET /api/admin/articles':
         return json(200, await articleService.listAll(parseListQuery(request.query)));
-      case 'GET /admin/settings':
+      case 'GET /api/admin/settings':
         return json(200, await settingsService.getAdminView());
-      case 'PUT /admin/settings':
+      case 'PUT /api/admin/settings':
         return json(200, await settingsService.update(parseApplicationSettingsWrite(parseBody(request))));
-      case 'GET /admin/backup': {
+      case 'GET /api/admin/backup': {
         const backup = await backupService.export();
         return {
           statusCode: 200,
@@ -81,16 +81,16 @@ export function createAdminRequestHandler(
           body: backup.archive,
         };
       }
-      case 'POST /admin/backup/restore': {
+      case 'POST /api/admin/backup/restore': {
         const action = restoreAction(request);
         const archive = request.rawBody;
-        if (!archive?.length) throw new HttpError(400, 'INVALID_REQUEST', 'Upload a backup archive.');
+        if (!archive?.length) throw new HttpError(400, 'invalid_request', 'Upload a backup archive.');
         return json(200, action === 'preview'
           ? await backupService.preview(archive)
           : await backupService.restore(archive));
       }
       default:
-        throw new HttpError(404, 'NOT_FOUND', 'Route not found.');
+        throw new HttpError(404, 'not_found', 'Route not found.');
     }
   };
 }

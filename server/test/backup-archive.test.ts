@@ -38,7 +38,7 @@ const databaseData = Buffer.from(JSON.stringify(database));
 async function expectInvalid(archive: Buffer, message: RegExp | string, archiveLimits = limits) {
   await rejectsMatching(readBackupArchive(archive, archiveLimits), {
     statusCode: 400,
-    code: 'INVALID_BACKUP',
+    error: 'invalid_backup', legacyCode: 'INVALID_BACKUP',
     message: match.stringMatching(message),
   });
 }

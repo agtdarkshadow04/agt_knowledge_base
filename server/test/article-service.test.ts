@@ -8,6 +8,9 @@ import {
   ConflictError,
   ForbiddenError,
   type Actor,
+  type ArticleCursor,
+  type ArticlePage,
+  type ArticlePageQuery,
   type ArticleRecord,
   type ArticleRevisionRecord,
   type ArticleWrite,
@@ -59,7 +62,7 @@ class MemoryRepository implements ArticleRepository {
     this.revisions.set(record.id, history);
   }
 
-  async list(query: ListArticlesQuery, viewer: Viewer) {
+  async list(query: ArticlePageQuery, viewer: Viewer): Promise<ArticlePage> {
     let items = [...this.records.values()];
     const search = query.search.toLowerCase();
     if (search) items = items.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(search));
@@ -70,18 +73,28 @@ class MemoryRepository implements ArticleRepository {
     if (query.protection !== 'all') items = items.filter((item) => item.isProtected === (query.protection === 'protected'));
     if (query.verification !== 'all') items = items.filter((item) => item.isVerified === (query.verification === 'verified'));
     items = items.filter((item) => canViewArticleVisibility(viewer, item.visibility));
-    items.sort((left, right) => {
-      if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1;
-      const leftValue = query.sort === 'title' ? left.title.toLowerCase() : left[query.sort];
-      const rightValue = query.sort === 'title' ? right.title.toLowerCase() : right[query.sort];
-      const result = leftValue.localeCompare(rightValue) || left.id.localeCompare(right.id);
-      return query.direction === 'asc' ? result : -result;
+    const key = (item: { isPinned: boolean; id: string; title: string; createdAt: string; modifiedAt: string }) => ({
+      isPinned: item.isPinned,
+      value: query.sort === 'title' ? item.title.toLowerCase() : item[query.sort],
+      id: item.id,
     });
-    const start = (query.page - 1) * query.pageSize;
+    // The repository's order: pinned first, then the sort key, then the ID.
+    const compare = (left: ArticleCursor, right: ArticleCursor) => {
+      if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1;
+      const result = left.value.localeCompare(right.value) || left.id.localeCompare(right.id);
+      return query.direction === 'asc' ? result : -result;
+    };
+    items.sort((left, right) => compare(key(left), key(right)));
+    const total = items.length;
+    const after = query.after;
+    if (after) items = items.filter((item) => compare(key(item), after) > 0);
+    const start = query.page === undefined ? 0 : (query.page - 1) * query.limit;
+    const page = items.slice(start, start + query.limit);
+    const last = page.at(-1);
     return {
-      items: items.slice(start, start + query.pageSize).map(({ content, ...item }) => ({ ...item, excerpt: content.slice(0, 240) })),
-      page: query.page, pageSize: query.pageSize, total: items.length,
-      totalPages: Math.max(1, Math.ceil(items.length / query.pageSize)),
+      items: page.map(({ content, ...item }) => ({ ...item, excerpt: content.slice(0, 240) })),
+      next: items.length > start + query.limit && last ? key(last) : null,
+      total,
     };
   }
 
@@ -188,7 +201,7 @@ class MemoryRepository implements ArticleRepository {
   }
 }
 
-const query: ListArticlesQuery = { search: '', tagId: '', visibility: 'all', pinned: 'all', protection: 'all', verification: 'all', sort: 'title', direction: 'asc', page: 1, pageSize: 10 };
+const query: ListArticlesQuery = { search: '', tagId: '', visibility: 'all', pinned: 'all', protection: 'all', verification: 'all', sort: 'title', direction: 'asc', limit: 10, cursor: '' };
 const articleInput = (title: string, tags: string[] = [], visibility?: ArticleWrite['visibility']): ArticleWrite => ({
   title,
   tagIds: tags.map((tag) => tagCatalog[tag].id),
@@ -218,7 +231,7 @@ describe('ArticleService authorization and persistence', () => {
       editor,
     ), {
       statusCode: 400,
-      code: 'NO_CHANGES',
+      error: 'no_changes', legacyCode: 'NO_CHANGES',
       message: 'No changes were made to the article.',
     });
     assertMatches(repository.records.get(created.id), { version: 1 });
@@ -270,10 +283,54 @@ describe('ArticleService authorization and persistence', () => {
     await service.create(articleInput('Alpha Portal', ['portals']), editor);
     await service.create(articleInput('Beta Portal', ['portals']), editor);
 
-    const result = await service.list({ ...query, search: 'portal', tagId: tagCatalog.portals.id, pageSize: 1 }, editor);
-    assert.equal(result.total, 2);
-    assert.equal(result.totalPages, 2);
-    assert.equal(result.items[0].title, 'Alpha Portal');
+    const filters = { ...query, search: 'portal', tagId: tagCatalog.portals.id, limit: 1 };
+    const first = await service.list(filters, editor);
+    assert.equal(first.total, 2);
+    assert.deepEqual(first.items.map((article) => article.title), ['Alpha Portal']);
+    assert.equal(typeof first.nextCursor, 'string');
+    assert.ok(!('page' in first) && !('totalPages' in first));
+
+    const second = await service.list({ ...filters, cursor: first.nextCursor! }, editor);
+    assert.deepEqual(second.items.map((article) => article.title), ['Beta Portal']);
+    assert.equal(second.nextCursor, null);
+  });
+
+  it('pages with cursors without repeating or skipping articles, pinned ones first', async () => {
+    const repository = new MemoryRepository();
+    const service = new ArticleService(repository);
+    const titles = ['Delta', 'alpha', 'Echo', 'bravo', 'Charlie'];
+    for (const title of titles) await service.create(articleInput(`${title} Portal`), editor);
+    const echo = (await service.list({ ...query, search: 'echo' }, editor)).items[0];
+    await service.setPinned(echo.id, true, echo.version, moderator);
+
+    for (const direction of ['asc', 'desc'] as const) {
+      const seen: string[] = [];
+      let cursor = '';
+      do {
+        const page = await service.list({ ...query, direction, limit: 2, cursor }, editor);
+        seen.push(...page.items.map((article) => article.title));
+        cursor = page.nextCursor ?? '';
+      } while (cursor);
+      const rest = ['alpha Portal', 'bravo Portal', 'Charlie Portal', 'Delta Portal'];
+      assert.deepEqual(seen, ['Echo Portal', ...(direction === 'asc' ? rest : rest.reverse())]);
+    }
+  });
+
+  it('rejects a cursor that is malformed or was made for another sort order', async () => {
+    const service = new ArticleService(new MemoryRepository());
+    for (const title of ['Alpha Portal', 'Beta Portal']) await service.create(articleInput(title), editor);
+    const { nextCursor } = await service.list({ ...query, limit: 1 }, editor);
+    await rejectsMatching(service.list({ ...query, cursor: 'not-a-cursor' }, editor), { statusCode: 400, error: 'invalid_request' });
+    await rejectsMatching(service.list({ ...query, sort: 'createdAt', cursor: nextCursor! }, editor), { statusCode: 400, error: 'invalid_request' });
+    await rejectsMatching(service.list({ ...query, direction: 'desc', cursor: nextCursor! }, editor), { statusCode: 400, error: 'invalid_request' });
+  });
+
+  it('keeps the deprecated page parameters working with their 1.x fields', async () => {
+    const service = new ArticleService(new MemoryRepository());
+    for (const title of ['Alpha Portal', 'Beta Portal', 'Gamma Portal']) await service.create(articleInput(title), editor);
+    const result = await service.list({ ...query, limit: 2, page: 2 }, editor);
+    assertMatches(result, { page: 2, pageSize: 2, total: 3, totalPages: 2, nextCursor: null });
+    assert.deepEqual(result.items.map((article) => article.title), ['Gamma Portal']);
   });
 
   it('places pinned articles first and filters to pinned articles', async () => {

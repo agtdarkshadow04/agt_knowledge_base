@@ -1,4 +1,5 @@
-import type { AgtArticleVisibility, ArticleVisibility, ArticleVisibilityFilter, Role } from '../src/lib/api.js';
+import type { AgtArticleVisibility, ArticleVisibility, ArticleVisibilityFilter, ListArticlesQuery, Role } from '../src/lib/api.js';
+import { fieldError } from '../src/lib/errors.js';
 import { HttpError } from './http.js';
 
 export {
@@ -140,12 +141,34 @@ export interface ArticleRevisionRecord {
 }
 
 
+/** Where a page of articles starts: after the item with these sort keys (API-8). */
+export interface ArticleCursor {
+  isPinned: boolean;
+  /** The sort column's value: an ISO timestamp with microseconds, or the lower-cased title. */
+  value: string;
+  id: string;
+}
+
+/** What the repository is asked for: the query with its cursor decoded. */
+export interface ArticlePageQuery extends Omit<ListArticlesQuery, 'cursor'> {
+  after: ArticleCursor | null;
+}
+
+export interface ArticlePage {
+  items: ArticleSummaryRecord[];
+  /** The sort keys of the last item when more items follow, else null. */
+  next: ArticleCursor | null;
+  total: number;
+}
+
 export interface ArticleListResult {
   items: ArticleSummaryRecord[];
-  page: number;
-  pageSize: number;
+  nextCursor: string | null;
   total: number;
-  totalPages: number;
+  /** Deprecated 1.x paging fields, only with `page` (removed in 3.0.0). */
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
 }
 
 
@@ -157,33 +180,39 @@ export type OrphanCleanupResult =
 
 
 export class NotFoundError extends HttpError {
-  constructor(message = 'Article not found.') { super(404, 'NOT_FOUND', message); }
+  constructor(message = 'Article not found.') { super(404, 'not_found', message); }
 }
 
 export class ForbiddenError extends HttpError {
-  constructor(message = 'You do not have permission to perform this action.') { super(403, 'FORBIDDEN', message); }
+  constructor(message = 'You do not have permission to perform this action.') { super(403, 'forbidden', message); }
 }
 
 export class ConflictError extends HttpError {
-  constructor(message = 'The article has changed. Reload the latest version before saving.') { super(409, 'VERSION_CONFLICT', message); }
+  constructor(message = 'The article has changed. Reload the latest version before saving.') { super(409, 'conflict', message, { legacyCode: 'VERSION_CONFLICT' }); }
 }
 
 export class NoChangesError extends HttpError {
-  constructor() { super(400, 'NO_CHANGES', 'No changes were made to the article.'); }
+  constructor() { super(400, 'no_changes', 'No changes were made to the article.'); }
 }
 
 export class InvalidTagIdsError extends HttpError {
-  constructor() { super(400, 'INVALID_TAG_IDS', 'One or more selected tags do not exist. Refresh the tag list and try again.'); }
+  constructor() {
+    const message = 'One or more selected tags do not exist. Refresh the tag list and try again.';
+    super(400, 'validation_failed', message, { fields: [fieldError('tagIds', 'not_allowed', message)], legacyCode: 'INVALID_TAG_IDS' });
+  }
 }
 
 export class TagNameConflictError extends HttpError {
-  constructor() { super(409, 'TAG_NAME_CONFLICT', 'A tag with that name already exists.'); }
+  constructor() {
+    const message = 'A tag with that name already exists.';
+    super(409, 'conflict', message, { fields: [fieldError('name', 'duplicate', message)], legacyCode: 'TAG_NAME_CONFLICT' });
+  }
 }
 
 export class TagNotFoundError extends HttpError {
-  constructor() { super(404, 'TAG_NOT_FOUND', 'Tag not found.'); }
+  constructor() { super(404, 'not_found', 'Tag not found.', { legacyCode: 'TAG_NOT_FOUND' }); }
 }
 
 export class NotOrphanedTagError extends HttpError {
-  constructor() { super(400, 'TAG_NOT_ORPHANED', 'The selected tag ID is not an unresolved reference on this article.'); }
+  constructor() { super(400, 'tag_not_orphaned', 'The selected tag ID is not an unresolved reference on this article.'); }
 }

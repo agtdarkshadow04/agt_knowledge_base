@@ -1,11 +1,11 @@
 import type {
   Actor,
-  ArticleListResult,
+  ArticlePage,
+  ArticlePageQuery,
   ArticleRecord,
   ArticleRevisionRecord,
   ArticleWrite,
   CanonicalTag,
-  ListArticlesQuery,
   OrphanCleanupResult,
   Viewer,
   TagOrphan,
@@ -13,7 +13,8 @@ import type {
 } from './domain.js';
 
 export interface ArticleRepository {
-  list(query: ListArticlesQuery, viewer: Viewer): Promise<ArticleListResult>;
+  /** One page in the query's order, starting after `query.after` (or at `query.page`, deprecated). */
+  list(query: ArticlePageQuery, viewer: Viewer): Promise<ArticlePage>;
   get(id: string, viewer: Viewer): Promise<ArticleRecord | null>;
   listRevisions(id: string): Promise<ArticleRevisionRecord[]>;
   getRevision(id: string, version: number): Promise<ArticleRevisionRecord | null>;

@@ -21,7 +21,7 @@ export const adminApiBase = '/api/admin';
 export const adminUnauthorizedEvent = 'agt-admin-unauthorized';
 
 /** Paths whose 401 means "wrong credentials", not "the session ended". */
-const credentialPaths = ['/auth/login', '/auth/password', '/setup'];
+const credentialPaths = ['/login', '/password', '/api/setup'];
 
 async function adminFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
@@ -29,7 +29,9 @@ async function adminFetch(path: string, init: RequestInit = {}) {
   if (typeof init.body === 'string') headers.set('Content-Type', 'application/json');
   const method = (init.method ?? 'GET').toUpperCase();
   if (method !== 'GET') headers.set('x-agt-request', '1');
-  const response = await fetch(`${adminApiBase}${path}`, { ...init, headers, credentials: 'same-origin' });
+  // Paths are relative to /api/admin, except the first-run setup routes under /api/setup (API-1).
+  const url = path.startsWith('/api/') ? path : `${adminApiBase}${path}`;
+  const response = await fetch(url, { ...init, headers, credentials: 'same-origin' });
   if (!response.ok) {
     const payload = await response.json().catch(() => undefined);
     if (response.status === 401 && !credentialPaths.includes(path)) {
@@ -54,25 +56,25 @@ function query(params: Record<string, unknown>) {
 }
 
 export function getSetupStatus() {
-  return adminRequest<SetupStatus>('/setup/status');
+  return adminRequest<SetupStatus>('/api/setup/status');
 }
 
 export function completeSetup(input: { setupPassword: string; username: string; password: string; passwordConfirmation: string }) {
-  return adminRequest<AdminSession>('/setup', { method: 'POST', body: JSON.stringify(input) });
+  return adminRequest<AdminSession>('/api/setup', { method: 'POST', body: JSON.stringify(input) });
 }
 
 export function signIn(username: string, password: string) {
-  return adminRequest<AdminSession>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+  return adminRequest<AdminSession>('/login', { method: 'POST', body: JSON.stringify({ username, password }) });
 }
 
 export function signOut() {
-  return adminRequest<void>('/auth/logout', { method: 'POST' });
+  return adminRequest<void>('/logout', { method: 'POST' });
 }
 
 /** The current Admin session, or null when signed out. */
 export async function getSession() {
   try {
-    return await adminRequest<AdminSession>('/auth/session');
+    return await adminRequest<AdminSession>('/session');
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) return null;
     throw error;
@@ -80,7 +82,7 @@ export async function getSession() {
 }
 
 export function changePassword(input: { currentPassword: string; password: string; passwordConfirmation: string }) {
-  return adminRequest<AdminSession>('/auth/password', { method: 'PUT', body: JSON.stringify(input) });
+  return adminRequest<AdminSession>('/password', { method: 'POST', body: JSON.stringify(input) });
 }
 
 export function listUsers(params: {

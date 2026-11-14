@@ -16,19 +16,20 @@ function apiRequest(input: Partial<ApiRequest> & Pick<ApiRequest, 'routeKey'>): 
 describe('article request validation', () => {
   it('includes the validation reason in the error message', async () => {
     const request = apiRequest({
-      routeKey: 'POST /articles',
-      body: JSON.stringify({
+      routeKey: 'POST /api/articles',
+      body: {
         title: 'Portal Guide',
         content: '<script>unsafe</script> content is rejected by the API.',
         tagIds: [],
-      }),
+      },
       requestId: 'request-1',
     });
 
     const response = await handleRequest(request);
 
     assertMatches(response, { statusCode: 400 });
-    assertMatches(JSON.parse(String(response.body)), {
+    assertMatches(response.body, {
+      error: 'validation_failed',
       code: 'VALIDATION_ERROR',
       message: 'The request is invalid: Executable MDX and raw HTML are not allowed.',
     });
@@ -36,7 +37,7 @@ describe('article request validation', () => {
 
   it('requires authentication to view revision history', async () => {
     const request = apiRequest({
-      routeKey: 'GET /articles/{id}/revisions',
+      routeKey: 'GET /api/articles/{id}/revisions',
       pathParameters: { id: '00000000-0000-4000-8000-000000000001' },
       requestId: 'request-2',
     });
@@ -48,9 +49,9 @@ describe('article request validation', () => {
 
   it('rejects revision restoration by Editors before accessing persistence', async () => {
     const request = apiRequest({
-      routeKey: 'POST /articles/{id}/revisions/{version}/restore',
+      routeKey: 'POST /api/articles/{id}/revisions/{version}/restore',
       pathParameters: { id: '00000000-0000-4000-8000-000000000001', version: '1' },
-      body: JSON.stringify({ currentVersion: 2 }),
+      body: { currentVersion: 2 },
       requestId: 'request-3',
       actor: editorActor,
     });
@@ -62,9 +63,9 @@ describe('article request validation', () => {
 
   it('rejects pin changes by Editors before accessing persistence', async () => {
     const request = apiRequest({
-      routeKey: 'PATCH /articles/{id}/pinning',
+      routeKey: 'PATCH /api/articles/{id}/pinning',
       pathParameters: { id: '00000000-0000-4000-8000-000000000001' },
-      body: JSON.stringify({ isPinned: true, version: 1 }),
+      body: { isPinned: true, version: 1 },
       requestId: 'request-4',
       actor: editorActor,
     });
@@ -76,9 +77,9 @@ describe('article request validation', () => {
 
   it('rejects verification changes by Editors before accessing persistence', async () => {
     const request = apiRequest({
-      routeKey: 'PATCH /articles/{id}/verification',
+      routeKey: 'PATCH /api/articles/{id}/verification',
       pathParameters: { id: '00000000-0000-4000-8000-000000000001' },
-      body: JSON.stringify({ isVerified: true, version: 1 }),
+      body: { isVerified: true, version: 1 },
       requestId: 'request-5',
       actor: editorActor,
     });
@@ -90,13 +91,13 @@ describe('article request validation', () => {
 
   it('rejects restricted AGT visibility assignments by Editors before accessing persistence', async () => {
     const request = apiRequest({
-      routeKey: 'POST /articles',
-      body: JSON.stringify({
+      routeKey: 'POST /api/articles',
+      body: {
         title: 'Restricted Guide',
         content: 'Restricted guidance with enough content for validation.',
         tagIds: [],
         visibility: 2,
-      }),
+      },
       requestId: 'request-6',
       actor: editorActor,
     });
@@ -108,8 +109,8 @@ describe('article request validation', () => {
 
   it('rejects tag management by Editors before accessing persistence', async () => {
     const request = apiRequest({
-      routeKey: 'POST /tags',
-      body: JSON.stringify({ name: 'Portal', color: '#B5C3B7' }),
+      routeKey: 'POST /api/tags',
+      body: { name: 'Portal', color: '#B5C3B7' },
       requestId: 'request-7',
       actor: editorActor,
     });
@@ -121,7 +122,7 @@ describe('article request validation', () => {
 
   it('rejects orphan cleanup by Editors before accessing persistence', async () => {
     const request = apiRequest({
-      routeKey: 'DELETE /articles/{id}/orphan-tags/{tagId}',
+      routeKey: 'DELETE /api/articles/{id}/orphan-tags/{tagId}',
       pathParameters: {
         id: '00000000-0000-4000-8000-000000000001',
         tagId: '10000000-0000-4000-8000-000000000099',
@@ -138,15 +139,15 @@ describe('article request validation', () => {
 
   it('does not dispatch admin routes, even for Moderators', async () => {
     const moderator: Actor = { sub: 'moderator-sub', role: 'Moderator', displayName: 'Moderator Traveller' };
-    for (const routeKey of ['GET /admin/stats', 'GET /admin/users', 'GET /admin/backup', 'POST /admin/backup/restore']) {
-      const response = await handleRequest(apiRequest({ routeKey, actor: moderator, body: '{}' }));
+    for (const routeKey of ['GET /api/admin/stats', 'GET /api/admin/users', 'GET /api/admin/backup', 'POST /api/admin/backup/restore']) {
+      const response = await handleRequest(apiRequest({ routeKey, actor: moderator, body: {} }));
       assertMatches(response, { statusCode: 404 });
     }
   });
 
   it('returns 404 for route keys it does not handle', async () => {
-    const response = await handleRequest(apiRequest({ routeKey: 'GET /unknown', actor: editorActor }));
+    const response = await handleRequest(apiRequest({ routeKey: 'GET /api/unknown', actor: editorActor }));
     assertMatches(response, { statusCode: 404 });
-    assertMatches(JSON.parse(String(response.body)), { code: 'NOT_FOUND' });
+    assertMatches(response.body, { error: 'not_found', code: 'NOT_FOUND' });
   });
 });

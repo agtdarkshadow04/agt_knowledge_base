@@ -33,12 +33,12 @@ export function toActor(user: AuthenticatedUser): Actor {
 }
 
 export function requireActor(request: Pick<ApiRequest, 'actor'>): Actor {
-  if (!request.actor) throw new HttpError(401, 'UNAUTHENTICATED', 'Authentication is required.');
+  if (!request.actor) throw new HttpError(401, 'unauthorized', 'Authentication is required.', { legacyCode: 'UNAUTHENTICATED' });
   return request.actor;
 }
 
 /** The signed-in Admin; admin routes call this instead of reading `request.actor`. */
 export function requireAdminSession(request: Pick<ApiRequest, 'admin'>) {
-  if (!request.admin) throw new HttpError(401, 'UNAUTHENTICATED', 'Admin authentication is required.');
+  if (!request.admin) throw new HttpError(401, 'unauthorized', 'Admin authentication is required.', { legacyCode: 'UNAUTHENTICATED' });
   return request.admin;
 }

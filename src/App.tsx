@@ -19,7 +19,6 @@ const router = createBrowserRouter([
       { index: true, element: <HomePage /> },
       { path: 'login', element: <LoginPage /> },
       // Loaded on demand so the bundled API description stays out of the main chunk.
-      { path: 'api-docs', lazy: async () => ({ Component: (await import('./pages/ApiDocsPage')).ApiDocsPage }) },
       { path: 'tags', element: <RequireModerator><TagsPage /></RequireModerator> },
       { path: 'articles/:id', element: <ArticlePage /> },
       { path: 'articles/:id/history', element: <RequireAuth><ArticleHistoryPage /></RequireAuth> },

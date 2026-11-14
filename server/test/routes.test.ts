@@ -7,14 +7,15 @@ import { assertMatches, fakeDatabase, testContext } from './helpers.js';
 
 // Routes answered by the app (app.ts) itself rather than by a handler.
 const serverRoutes = [
-  'POST /auth/login',
-  'GET /auth/session',
-  'GET /admin/setup/status',
-  'POST /admin/setup',
-  'POST /admin/auth/login',
-  'POST /admin/auth/logout',
-  'GET /admin/auth/session',
-  'PUT /admin/auth/password',
+  'GET /api/health',
+  'POST /api/auth/login',
+  'GET /api/auth/session',
+  'GET /api/setup/status',
+  'POST /api/setup',
+  'POST /api/admin/login',
+  'POST /api/admin/logout',
+  'GET /api/admin/session',
+  'POST /api/admin/password',
 ];
 
 const articleId = '00000000-0000-4000-8000-000000000001';
@@ -55,36 +56,36 @@ async function route(method: string, url: string): Promise<Routed> {
 
 describe('route table', () => {
   it('matches literal and parameterized routes and extracts path parameters', async () => {
-    assertMatches(await route('GET', '/articles'), { routeKey: 'GET /articles', params: {} });
-    assertMatches(await route('POST', `/articles/${articleId}/revisions/4/restore`), {
-      routeKey: 'POST /articles/{id}/revisions/{version}/restore',
+    assertMatches(await route('GET', '/api/articles'), { routeKey: 'GET /api/articles', params: {} });
+    assertMatches(await route('POST', `/api/articles/${articleId}/revisions/4/restore`), {
+      routeKey: 'POST /api/articles/{id}/revisions/{version}/restore',
       params: { id: articleId, version: '4' },
     });
-    assertMatches(await route('DELETE', `/articles/${articleId}/orphan-tags/${tagId}`), {
-      routeKey: 'DELETE /articles/{id}/orphan-tags/{tagId}',
+    assertMatches(await route('DELETE', `/api/articles/${articleId}/orphan-tags/${tagId}`), {
+      routeKey: 'DELETE /api/articles/{id}/orphan-tags/{tagId}',
       params: { id: articleId, tagId },
     });
-    assertMatches(await route('PUT', '/admin/users/abc/password'), {
-      routeKey: 'PUT /admin/users/{userId}/password',
+    assertMatches(await route('PUT', '/api/admin/users/abc/password'), {
+      routeKey: 'PUT /api/admin/users/{userId}/password',
       params: { userId: 'abc' },
     });
   });
 
   it('prefers literal paths over parameterized ones', async () => {
-    assertMatches(await route('GET', '/tags/orphans'), { routeKey: 'GET /tags/orphans', params: {} });
-    assertMatches(await route('PUT', '/tags/orphans'), { routeKey: 'PUT /tags/{tagId}', params: { tagId: 'orphans' } });
+    assertMatches(await route('GET', '/api/tags/orphans'), { routeKey: 'GET /api/tags/orphans', params: {} });
+    assertMatches(await route('PUT', '/api/tags/orphans'), { routeKey: 'PUT /api/tags/{tagId}', params: { tagId: 'orphans' } });
   });
 
   it('keeps public reads public and requires authentication everywhere else', async () => {
     const publicRoutes = [
-      ['POST', '/auth/login'],
-      ['GET', '/settings'],
-      ['GET', '/articles'],
-      ['GET', `/articles/${articleId}`],
-      ['GET', '/tags'],
-      ['GET', '/admin/setup/status'],
-      ['POST', '/admin/setup'],
-      ['POST', '/admin/auth/login'],
+      ['POST', '/api/auth/login'],
+      ['GET', '/api/settings'],
+      ['GET', '/api/articles'],
+      ['GET', `/api/articles/${articleId}`],
+      ['GET', '/api/tags'],
+      ['GET', '/api/admin/setup/status'],
+      ['POST', '/api/admin/setup'],
+      ['POST', '/api/admin/auth/login'],
     ];
     for (const [method, path] of publicRoutes) {
       const routed = await route(method, path);
@@ -93,33 +94,33 @@ describe('route table', () => {
     }
 
     const memberRoutes = [
-      ['GET', '/auth/session'],
-      ['POST', '/articles'],
-      ['PUT', `/articles/${articleId}`],
-      ['DELETE', `/articles/${articleId}`],
-      ['GET', `/articles/${articleId}/revisions`],
-      ['PATCH', `/articles/${articleId}/protection`],
-      ['GET', '/member/articles'],
-      ['GET', `/member/articles/${articleId}`],
-      ['GET', '/member/tags'],
-      ['GET', '/tags/orphans'],
-      ['POST', '/tags'],
+      ['GET', '/api/auth/session'],
+      ['POST', '/api/articles'],
+      ['PUT', `/api/articles/${articleId}`],
+      ['DELETE', `/api/articles/${articleId}`],
+      ['GET', `/api/articles/${articleId}/revisions`],
+      ['PATCH', `/api/articles/${articleId}/protection`],
+      ['GET', '/api/member/articles'],
+      ['GET', `/api/member/articles/${articleId}`],
+      ['GET', '/api/member/tags'],
+      ['GET', '/api/tags/orphans'],
+      ['POST', '/api/tags'],
     ];
     for (const [method, path] of memberRoutes) {
-      assertMatches(await route(method, path), { status: 401, body: { code: 'UNAUTHENTICATED', message: 'Authentication is required.' } });
+      assertMatches(await route(method, path), { status: 401, body: { error: 'unauthorized', code: 'UNAUTHENTICATED', message: 'Authentication is required.' } });
     }
   });
 
   it('puts every admin route behind the Admin session except setup and sign-in', async () => {
     const adminKeys = apiRoutes.filter((candidate) => candidate.admin).map((candidate) => candidate.routeKey);
-    const open = ['GET /admin/setup/status', 'POST /admin/setup', 'POST /admin/auth/login'];
+    const open = ['GET /api/admin/setup/status', 'POST /api/admin/setup', 'POST /api/admin/auth/login', 'POST /api/admin/login'];
     assert.ok(adminKeys.length > 10);
     for (const key of adminKeys) {
       const [method, path] = key.split(' ');
       const routed = await route(method, path.replace(/\{[^}]+\}/g, articleId));
       assert.equal(routed.routeKey, key);
       if (open.includes(key)) assert.notEqual(routed.status, 401, key);
-      else assertMatches(routed, { status: 401, body: { code: 'UNAUTHENTICATED', message: 'Admin sign-in is required.' } });
+      else assertMatches(routed, { status: 401, body: { error: 'unauthorized', code: 'UNAUTHENTICATED', message: 'Admin sign-in is required.' } });
     }
     // No member route lives under /admin, and no admin route outside it.
     for (const entry of apiRoutes) {
@@ -130,20 +131,27 @@ describe('route table', () => {
 
   it('rate-limits member sign-in, Admin sign-in, setup, and Admin password changes', () => {
     const rateLimit = (key: string) => apiRoutes.find((entry) => entry.routeKey === key)?.rateLimit;
-    assert.equal(rateLimit('POST /auth/login'), 'login');
-    assert.equal(rateLimit('POST /admin/auth/login'), 'adminLogin');
-    assert.equal(rateLimit('POST /admin/setup'), 'setup');
-    assert.equal(rateLimit('PUT /admin/auth/password'), 'adminPassword');
+    assert.equal(rateLimit('POST /api/auth/login'), 'login');
+    assert.equal(rateLimit('POST /api/admin/login'), 'adminLogin');
+    assert.equal(rateLimit('POST /api/setup'), 'setup');
+    assert.equal(rateLimit('POST /api/admin/password'), 'adminPassword');
+    // Each deprecated path shares its replacement's limit.
+    assert.equal(rateLimit('POST /api/admin/auth/login'), 'adminLogin');
+    assert.equal(rateLimit('POST /api/admin/setup'), 'setup');
+    assert.equal(rateLimit('PUT /api/admin/auth/password'), 'adminPassword');
     assert.deepEqual(apiRoutes.filter((entry) => entry.rateLimit).map((entry) => entry.routeKey).sort(), [
-      'POST /admin/auth/login',
-      'POST /admin/setup',
-      'POST /auth/login',
-      'PUT /admin/auth/password',
+      'POST /api/admin/auth/login',
+      'POST /api/admin/login',
+      'POST /api/admin/password',
+      'POST /api/admin/setup',
+      'POST /api/auth/login',
+      'POST /api/setup',
+      'PUT /api/admin/auth/password',
     ]);
   });
 
   it('takes the restore body limit from the effective backup.maxBytes setting', () => {
-    const restore = apiRoutes.find((entry) => entry.routeKey === 'POST /admin/backup/restore');
+    const restore = apiRoutes.find((entry) => entry.routeKey === 'POST /api/admin/backup/restore');
     assertMatches(restore, { maxBodyBytes: 'backup', rawBody: true });
     for (const entry of apiRoutes.filter((candidate) => candidate !== restore)) {
       assert.equal(entry.maxBodyBytes, undefined, entry.routeKey);
@@ -153,14 +161,14 @@ describe('route table', () => {
 
   it('answers unknown paths, unsupported methods, and extra segments with 404', async () => {
     for (const [method, path] of [
-      ['GET', '/unknown'],
-      ['PATCH', `/articles/${articleId}`],
-      ['GET', `/articles/${articleId}/extra/segments`],
-      ['GET', '/articles/'],
-      ['GET', '/setup/status'],
-      ['POST', '/setup'],
+      ['GET', '/api/unknown'],
+      ['PATCH', `/api/articles/${articleId}`],
+      ['GET', `/api/articles/${articleId}/extra/segments`],
+      ['GET', '/api/articles/'],
+      ['GET', '/articles'],
+      ['GET', '/admin/stats'],
     ]) {
-      assertMatches(await route(method, path), { status: 404, body: { code: 'NOT_FOUND', message: 'Route not found.' } });
+      assertMatches(await route(method, path), { status: 404, body: { error: 'not_found', code: 'NOT_FOUND', message: 'Route not found.' } });
     }
   });
 
@@ -171,8 +179,11 @@ describe('route table', () => {
     assert.equal(new Set(routeKeys).size, routeKeys.length);
     assert.equal(member.every((key) => isAdmin(key) === false), true);
     assert.equal(admin.every((key) => isAdmin(key) === true), true);
-    assert.deepEqual(routeKeys.filter((key) => !serverRoutes.includes(key)).sort(), [...member, ...admin].sort());
+    const canonical = apiRoutes.filter((entry) => !entry.replacedBy).map((entry) => entry.routeKey);
+    assert.deepEqual(canonical.filter((key) => !serverRoutes.includes(key)).sort(), [...member, ...admin].sort());
     const served = handledRoutes('server/app.ts');
     assert.deepEqual(served.sort(), [...serverRoutes].sort());
+    // A deprecated path is served by the handler of its replacement.
+    for (const entry of apiRoutes.filter((candidate) => candidate.replacedBy)) assert.equal(entry.handlerKey, entry.replacedBy, entry.routeKey);
   });
 });

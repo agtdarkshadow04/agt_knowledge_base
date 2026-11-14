@@ -18,7 +18,7 @@ type Phase =
 
 type Tab = 'users' | 'data' | 'settings' | 'backup' | 'account' | 'api';
 
-// The bundled API description is loaded only when the API tab is opened.
+// The API reference is loaded only when the API tab is opened.
 const ApiPanel = lazy(async () => ({ default: (await import('./ApiPanel')).ApiPanel }));
 
 const tabs: { id: Tab; label: string; icon: typeof Users }[] = [
@@ -130,6 +130,7 @@ function Dashboard({ session, onSessionChange, onSignedOut }: {
       <header className="admin-header">
         <div><p className="eyebrow">Installation control panel</p><h1>Administration</h1></div>
         <div className="admin-identity">
+          <span className="admin-version">Version {session.version}</span>
           <span className="identity-badge admin"><ShieldCheck aria-hidden="true" /> {session.username}</span>
           <button className="icon-button" type="button" onClick={() => void leave()} title="Sign out"><LogOut aria-hidden="true" /><span className="sr-only">Sign out</span></button>
         </div>

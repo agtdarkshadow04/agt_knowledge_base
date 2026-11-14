@@ -222,9 +222,14 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
     verification: z.enum(['all', 'verified', 'unverified']).default('all'),
     sort: z.enum(['createdAt', 'modifiedAt', 'title']).default('modifiedAt'),
     direction: z.enum(['asc', 'desc']).default('desc'),
-    page: z.coerce.number().int().min(1).default(1),
-    pageSize: z.coerce.number().int().min(1).max(50).default(12),
-  }).parse({
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+    cursor: z.string().max(1000).default(''),
+    page: z.coerce.number().int().min(1).optional(),
+    pageSize: z.coerce.number().int().min(1).max(50).optional(),
+  }).transform(({ limit, page, pageSize, ...rest }) => (page === undefined
+    ? { ...rest, limit: limit ?? pageSize ?? 50 }
+    // Deprecated offset paging keeps its 1.x page size: `pageSize`, default 12.
+    : { ...rest, limit: pageSize ?? 12, page })).parse({
     search: first(query.search),
     tagId: first(query.tagId),
     visibility: first(query.visibility),
@@ -233,6 +238,8 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
     verification: first(query.verification),
     sort: first(query.sort),
     direction: first(query.direction),
+    limit: first(query.limit),
+    cursor: first(query.cursor),
     page: first(query.page),
     pageSize: first(query.pageSize),
   });
