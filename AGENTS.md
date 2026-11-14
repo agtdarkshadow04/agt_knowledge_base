@@ -1,122 +1,195 @@
-# AGENTS.md
+# Agent guide — AGT Knowledge Base
 
-Guidance for AI coding agents working in this repository. Human-facing setup and deployment instructions live in `README.md`; security expectations live in `SECURITY.md`. Read both before making non-trivial changes.
+AGT Knowledge Base is a TypeScript knowledge base for the Alliance of Galactic Travellers: a React 19 + Vite member
+UI (`index.html` → `src/`) and a separate admin panel entry (`admin.html` → `src/admin/`), served by Nginx, with a
+hand-written Node.js HTTP API (`backend/`) in front of PostgreSQL. There are two kinds of account. **Members**
+(`local_users`, roles `Editor` and `Moderator`) sign in at `/login`. The single installation **Admin** (the one-row
+`admin` table) signs in only at `/admin` with an HttpOnly cookie session (`admin_sessions`), manages members,
+settings and backups, and is never a member `Actor`. Moderators hold every content-moderation power (protection,
+pinning, verification, restore, delete, tags, visibility levels 2–5 and legacy `Admin`). No cloud services: the
+former AWS deployment has been removed, and no code, package or schema name may depend on AWS again.
 
-## Project overview
+**Database: PostgreSQL** (DATA-2), because many members edit at the same time: sustained concurrent writes from many
+users, which also need Postgres full-text search and row-level optimistic concurrency control (`version` checks with
+`409`). Users are keyed by `app_users.user_id` (migration `011` renamed it from `cognito_sub`; migrated Cognito
+subjects keep their values). Deployment today: Docker Compose with three images (Nginx `web`, `api`, one-shot
+`migrate`) and `postgres:16`; see `README.md`.
 
-AGT Knowledge Base is a TypeScript knowledge base for the Alliance of Galactic Travellers: a React 19 + Vite frontend, a Node.js API, and PostgreSQL. It is self-hosted with Docker: Nginx → Node.js API (`backend/local-server.ts`) → PostgreSQL, with local username/password auth.
-
-There are two kinds of account. **Members** (`local_users`, roles `Editor` and `Moderator`) sign in at `/login` with bearer tokens. The single installation **Admin** (the one-row `admin` table) signs in only at `/admin` with an HttpOnly cookie session (`admin_sessions`), manages members, settings, and backups, and is never a member `Actor`. Moderators hold every content-moderation power (protection, pinning, verification, restore, delete, tags, visibility levels 2–5 and legacy `Admin`).
-
-The former AWS deployment (Amplify Hosting, API Gateway, Lambda, RDS, Cognito) has been removed from this branch: no code, packages, or schema names depend on AWS. Do not add AWS dependencies. Users are keyed by `app_users.user_id`; migration `011_rename_user_key` renamed it from `cognito_sub`, and existing Cognito subjects keep their values so migrated authorship stays intact. Migration `012_admin_account` moved the former super administrator into `admin` and renamed roles (`Admin` → `Moderator`, `Standard` → `Editor`).
+This app follows the **[AGT Web Application Specification](docs/agt-webapp-spec.md) v6.0.0**
+(`agtdarkshadow04/agt_webapp_specification@v6.0.0`). Read it before changing architecture, API, security, UI or
+deployment. `docs/agt-webapp-spec.md` is a pinned copy of that tag: never edit it (SPEC-2). Propose rule changes as a
+PR to the spec repository (SPEC-4); move to a newer spec version in a PR of its own (SPEC-3). The app does not meet
+the spec yet: every unmet rule is listed under [Deviations](#deviations-from-the-agt-web-app-spec) below, and
+issue #48 plans the phases that remove the "to fix" rows. Code written now should move towards the spec, not away
+from it. Security expectations also live in `SECURITY.md`.
 
 ## Branches
 
-- `main` is the default branch. Base work on it unless told otherwise.
-- `staging` is frozen: AWS Amplify builds the existing AWS test deployment from it. Never push to, merge into, rebase, or delete `staging`.
-
-## Repository layout
-
-```text
-src/              Member React UI (index.html → src/main.tsx): pages/, components/, auth/,
-                  settings/, services/api.ts (member API client),
-                  components/api-docs/ (OpenAPI renderer shared by both bundles)
-src/admin/        Admin panel, a separate Vite entry (admin.html → src/admin/main.tsx):
-                  AdminApp (setup/login/dashboard), *Panel.tsx tabs, api.ts (admin client).
-                  The member bundle must never import from src/admin/.
-backend/          API: routes.ts (route table + ApiRequest/ApiResponse types),
-                  server.ts (HTTP pipeline: matching, rate limits, CSRF, member/Admin
-                  authentication, body limits, sign-in/setup routes), local-server.ts (startup),
-                  config.ts (config.yaml loading and Zod schema), rate-limit.ts,
-                  auth.ts (member token-to-user step, requireActor/requireAdminSession),
-                  admin-auth.ts (Admin setup, sign-in, cookie sessions),
-                  local-auth.ts (password hashing, signed member tokens), db.ts (pg pool),
-                  handler.ts (public/member route dispatch), admin-handler.ts (admin route dispatch),
-                  *-service.ts (domain logic; settings-service.ts resolves config-file-wins
-                  settings; backup-service.ts + backup-archive.ts export/preview/restore ZIP
-                  backups), domain.ts (types, roles, visibility, AppError classes),
-                  validation.ts (Zod request parsing), repository.ts (interfaces),
-                  postgres-article-repository.ts (SQL), migrations.ts + migrations-runner.ts
-migrations/       Reviewable SQL copies of each migration
-docs/             API.md (API guide), openapi.yaml (public/member routes),
-                  openapi-admin.yaml (/admin/* routes), rendered at /api-docs and the admin API tab
-scripts/          migrate, member-account recovery CLI
-config.example.yaml  Every config.yaml key with its default
-.github/          CI workflow
-```
+- `main` is the default branch. Work on a feature branch and open a PR into `main`.
+- `staging` is frozen: AWS Amplify builds the existing AWS test deployment from it. Never push to, merge into,
+  rebase or delete `staging` (WF-1).
 
 ## Commands
 
-Requires Node.js 22+. Install with `npm ci`.
+Requires Node.js 22+ today (Node.js 26 is the target, see Deviations). Install with `npm ci`.
 
 ```bash
 npm run lint        # ESLint, zero warnings allowed
 npm run typecheck   # tsc -b over app and node projects
-npm test            # Vitest, single run
+npm test            # Vitest, single run (~27 s, mostly jsdom)
 npm run build       # typecheck + Vite production build
+npm run api:dev     # run the API locally (needs PostgreSQL and .env)
+npm run db:migrate  # apply migrations (only when explicitly asked; never against a real database otherwise)
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint, typecheck, test, and build, and builds both Docker images, on pull requests and pushes to `main`.
-
-Use the narrowest check that covers your change while iterating, then widen before finishing:
+Run a narrower check while iterating, then widen before finishing:
 
 ```bash
-npx vitest run backend                    # backend tests only (~4s; full suite ~27s, mostly jsdom)
+npx vitest run backend                    # backend tests only (~4 s)
 npx vitest run path/to/file.test.ts       # one file; add -t "name" for one test
 npx eslint path/to/file.ts                # lint only the files you touched
 ```
 
-Before finishing, run lint, typecheck, and the relevant tests; run the full suite and build for changes that cross the frontend/backend boundary. Do not run migrations against a real database unless explicitly asked. No check needs a database, Docker, or network access beyond `npm ci`.
+Before finishing, run lint, typecheck and the relevant tests; run the full suite and build for changes that cross the
+frontend/backend boundary. No check needs a database, Docker or network access beyond `npm ci`. CI
+(`.github/workflows/ci.yml`) runs lint, typecheck, test and build, and builds both Docker images, on pull requests and
+pushes to `main`.
 
-## Code conventions
+## Where things live
 
-- TypeScript `strict`, ES modules. No Prettier is configured: match the surrounding style (2-space indent, single quotes, semicolons, trailing commas).
-- Backend and scripts use `NodeNext` resolution, so relative imports **must** end in `.js` (e.g. `import { AppError } from './domain.js';`). Frontend imports under `src/` are extensionless.
-- Validate request input in `backend/validation.ts` with Zod; signal domain failures with the `AppError` subclasses in `backend/domain.ts` rather than ad-hoc errors.
-- Keep SQL in `postgres-article-repository.ts` (or `admin-service.ts` for local users) and always parameterize values; map user-supplied sort fields through the existing allowlist.
-- Keep changes minimal and consistent with existing patterns; do not add dependencies without a clear need.
+| Path | Purpose |
+| --- | --- |
+| `docs/agt-webapp-spec.md` | Pinned copy of the AGT Web Application Specification v6.0.0 (tag `v6.0.0`). Never edit; `.gitattributes` keeps it byte-identical |
+| `CHANGELOG.md` | Release notes (Keep a Changelog 1.1.0), newest first (VER-9) |
+| `backend/routes.ts` | Route table (`auth: 'none' \| 'member' \| 'admin'`, `rateLimit`) and the `ApiRequest`/`ApiResponse` types |
+| `backend/server.ts` | HTTP pipeline: matching, rate limits, CSRF, member/Admin authentication, body limits, and the sign-in/setup/session/logout/password routes it serves itself |
+| `backend/local-server.ts` | Startup: config, database pool, listen |
+| `backend/config.ts` | `config.yaml` loading and its Zod schema (unknown keys are errors) |
+| `backend/auth.ts` | `authenticate()`, the only place a member bearer token becomes a user; `requireActor` / `requireAdminSession` |
+| `backend/admin-auth.ts` | Admin setup (`AGT_SETUP_PASSWORD`), sign-in and SHA-256-hashed cookie sessions |
+| `backend/local-auth.ts` | Password hashing and signed member tokens |
+| `backend/handler.ts`, `backend/admin-handler.ts` | Public/member and `/admin/*` route dispatch. The Admin handler never reads `request.actor` |
+| `backend/*-service.ts` | Domain logic. `settings-service.ts` resolves config-file-wins settings; `backup-service.ts` + `backup-archive.ts` export, preview and restore ZIP backups |
+| `backend/domain.ts` | Types, roles, visibility access rules, `AppError` classes |
+| `backend/validation.ts` | Zod request parsing |
+| `backend/repository.ts`, `backend/postgres-article-repository.ts` | Repository interfaces and all article/tag SQL (`admin-service.ts` holds the member-account SQL) |
+| `backend/migrations.ts`, `backend/migrations-runner.ts`, `migrations/*.sql` | Inline migration SQL that actually runs, its runner, and reviewable SQL copies |
+| `backend/rate-limit.ts`, `backend/db.ts`, `backend/line-diff.ts` | Rate limiter, `pg` pool, revision diff |
+| `scripts/` | `migrate.ts` and the member-account recovery CLI `manage-local-user.ts` |
+| `src/` | Member UI: `pages/`, `components/` (`MarkdownContent.tsx`, `RichMarkdownEditor.tsx`), `auth/`, `settings/`, `services/api.ts` (member API client), `types.ts`, `visibility.ts` (display options and colours) |
+| `src/components/api-docs/` | OpenAPI renderer shared by both bundles |
+| `src/admin/` | Admin panel: `AdminApp` (setup/login/dashboard), `*Panel.tsx` tabs, `api.ts`, `types.ts`. The member bundle must never import from `src/admin/` |
+| `docs/API.md`, `docs/openapi.yaml`, `docs/openapi-admin.yaml` | API guide and the hand-written OpenAPI documents (public/member and `/admin/*`), rendered at `/api-docs` and in the admin API tab |
+| `config.example.yaml` | Every `config.yaml` key with its default |
+| `Dockerfile`, `docker-compose.yml`, `nginx.conf`, `.env.example`, `docker.env.example` | Docker deployment and its environment templates |
+| `.github/workflows/ci.yml` | CI |
 
-## Tests
+## Conventions and gotchas
 
-- Tests are colocated as `*.test.ts` / `*.test.tsx` next to the code they cover.
-- Frontend tests run in jsdom with Testing Library (`src/test/setup.ts`). Backend test files begin with `// @vitest-environment node` and use in-memory fakes of the repository interfaces rather than a real database. Extend the existing fakes (`MemoryRepository` in `backend/article-service.test.ts`, `MemoryTagRepository` in `backend/tag-service.test.ts`) when a repository interface changes, rather than writing new ones.
-- Vitest runs with a single worker and no file parallelism; do not change that to speed up runs.
-- Per `SECURITY.md`, changes to role handling, protected-article rules, visibility, Markdown rendering, SQL construction, or optimistic concurrency must include regression tests.
+- **Versioning (§21):** every PR that ships changes (code, assets, migrations, `Dockerfile`, `docker-compose.yml`,
+  `nginx.conf`, `config.example.yaml`) bumps the version with `npm version X.Y.Z --no-git-tag-version` and adds its
+  entries under `## [X.Y.Z] - Unreleased` in `CHANGELOG.md`; the PR description states the level and rule (VER-8,
+  VER-9). Docs-only, test-only, CI and `AGENTS.md` changes need no bump (VER-6). Removing or renaming a config key,
+  environment variable, route, parameter or field needs a deprecation in an earlier minor release first (VER-10).
+  Create tags and GitHub Releases only when the maintainer asks (VER-12).
+- **Spec work:** cite rule IDs in commits and PRs (WF-2). When a PR makes a deviation below go away, delete its row in
+  the same PR; when it adds one, add a row. One concern per PR (WF-3); the #48 phases are one PR each.
+- TypeScript `strict`, ES modules. No Prettier: match the surrounding style (2-space indent, single quotes,
+  semicolons, trailing commas).
+- Backend and scripts use `NodeNext` resolution, so relative imports **must** end in `.js`
+  (`import { AppError } from './domain.js';`). Frontend imports under `src/` are extensionless.
+- Validate request input in `backend/validation.ts`; signal domain failures with the `AppError` subclasses in
+  `backend/domain.ts`, not ad-hoc errors.
+- Keep SQL in `postgres-article-repository.ts` (or `admin-service.ts` for local users), always parameterized; map
+  user-supplied sort fields through the existing allowlist.
+- Keep changes minimal and consistent with existing patterns; a new runtime dependency needs a reason in the PR
+  (STACK-1).
+- **Tests:** colocated `*.test.ts(x)`. Frontend tests run in jsdom with Testing Library (`src/test/setup.ts`).
+  Backend test files begin with `// @vitest-environment node` and use in-memory fakes; extend `MemoryRepository`
+  (`backend/article-service.test.ts`) and `MemoryTagRepository` (`backend/tag-service.test.ts`) when a repository
+  interface changes. Vitest runs with one worker and no file parallelism; keep it that way. Changes to role handling,
+  protected-article rules, visibility, Markdown rendering, SQL construction or optimistic concurrency need regression
+  tests (`SECURITY.md`). Never skip or weaken a test to make a change pass (TEST-5).
+- **Adding or changing an API route:**
+  1. `backend/routes.ts`: add it with `auth: 'member'`, `auth: 'admin'` (path must start with `/admin/`) or
+     `auth: 'none'`. Every non-GET `/admin/*` request must carry `x-agt-request: 1` (`server.ts` enforces it). Add
+     `rateLimit` for credential-checking routes.
+  2. Member/public routes go in `backend/handler.ts` (roles via `requireActor` and the services); admin routes in
+     `backend/admin-handler.ts`. `backend/routes.test.ts` fails if the table and the switches disagree. Routes that
+     `server.ts` serves itself (sign-in, session, setup, logout, password) are listed in `serverRoutes` there.
+  3. Client: `src/services/api.ts` + `src/types.ts` (member), `src/admin/api.ts` + `src/admin/types.ts` (admin).
+  4. Docs: `docs/openapi.yaml` or `docs/openapi-admin.yaml` (security, parameters, body constraints from
+     `validation.ts`, responses, `x-error-codes`, `x-required-role: Moderator`); `docs/API.md` for new concepts or
+     error codes. `backend/openapi.test.ts` fails if routes, auth modes, rate limits or error codes and the docs
+     disagree.
+  5. Tests: `backend/handler.test.ts` / `backend/admin-handler.test.ts` (authorization), `backend/server.test.ts`
+     (session separation, CSRF), `backend/routes.test.ts` (public routes).
+- **Adding a database migration:** append the next `NNN_snake_case` entry to `migrations` in `backend/migrations.ts`
+  (this inline SQL is what runs), add the matching `migrations/NNN_snake_case.sql` wrapped in `BEGIN;`/`COMMIT;`, and
+  update `backend/migrations-runner.test.ts`. Never edit a shipped migration. Destructive (contract-phase) migrations
+  set `requiresExplicitTarget: true`. Never schema-qualify objects (`public.`) or set `search_path`: backup restore
+  replays migrations inside a staging schema; `migrations-runner.test.ts` checks this. Do not add functions, triggers,
+  views or extensions (DATA-11).
+- **Article visibility:** legacy text levels (`Public`, `Internal`, `Admin`) and AGT numeric levels (`0`–`5`) are both
+  supported. Access rules live in `backend/domain.ts`, display options and colours in `src/visibility.ts`; keep them in
+  sync and preserve legacy behaviour.
+- **Authentication:** local accounts only; `AUTH_MODE` other than `local` stops the server. Handlers get the `Actor`
+  on `request.actor` and never inspect tokens. `server.ts` verifies the Admin cookie for `auth: 'admin'` routes and
+  passes `request.admin`. Bearer tokens are ignored on admin routes and the Admin cookie on member routes; never let
+  one grant the other.
+- **Configuration:** non-secret settings live in `config.yaml` (document every key in `config.example.yaml`); secrets
+  stay in environment variables. Dashboard-editable keys resolve file → `application_settings` → default in
+  `settings-service.ts`, and a key the file defines must never be changeable through any API, migration or restore.
+- **Security (do not weaken, WF-4):** the API is the authorization boundary; UI hiding is never access control.
+  Never commit `.env` files, secrets, database URLs or credentials; `VITE_*` values are public. Markdown is rendered
+  without raw HTML and the API rejects HTML/JSX/MDX imports: never enable raw HTML or execute content as MDX, and
+  never use `dangerouslySetInnerHTML` for user content. Updates, restores and deletes carry the article `version` and
+  return `409` on mismatch. Server-owned fields (`created_at`, `created_by`, `modified_at`, `modified_by`, pinning,
+  protection, version) are never accepted from clients, except by the Admin backup restore, which restores rows
+  verbatim. No outbound requests from the server and no CDN assets in the client (SEC-14).
+- **Backups:** a new table goes into `backupTables` in `backend/backup-service.ts` in foreign-key order. Only
+  `admin_sessions` is listed in `unbackedTables`: never backed up, cleared by every restore. `config.yaml` is included
+  in backups but never restored.
+- The app has no anonymous writes (so no ALTCHA, §11), no file uploads other than backup archives (SEC-9), and shows
+  no portal codes (UI-14).
+- Update `README.md` when a change affects setup, configuration, roles/permissions or user-visible behaviour.
+- Commit subjects are short and imperative (`Add AGT-standard visibility levels`), with `Refs #<issue>` in the body
+  when working from an issue.
 
-## Cross-cutting change checklists
+## Deviations from the AGT web app spec
 
-**Adding or changing an API route:**
+Rule IDs refer to the pinned v6.0.0 copy. The first two rows are permanent and agreed in issue #48. Every row
+marked **To fix** names the #48 phase that removes it; delete the row in that phase's PR.
 
-1. `backend/routes.ts` — add the route to the table with `auth: 'member'` (bearer token), `auth: 'admin'` (Admin cookie session; path must start with `/admin/`), or `auth: 'none'` for public reads. Every non-GET `/admin/*` request must carry `x-agt-request: 1`; `server.ts` enforces this. Add `rateLimit` for credential-checking routes.
-2. Member/public routes: add the `case` to `backend/handler.ts`, enforcing roles with `requireActor` and the services' role checks. Admin routes: add it to `backend/admin-handler.ts`, which never reads `request.actor`. `backend/routes.test.ts` fails if the table and the switches disagree. The exceptions are the member and Admin sign-in, session, setup, logout, and password routes, which `server.ts` serves itself; they are listed in `serverRoutes` in `backend/routes.test.ts`, so a new server-served route must be added there too.
-3. Frontend client: `src/services/api.ts` and `src/types.ts` for member routes; `src/admin/api.ts` and `src/admin/types.ts` for admin routes.
-4. API docs: document the operation in `docs/openapi.yaml` (public and member routes) or `docs/openapi-admin.yaml` (`/admin/*`), with its security, parameters, request body constraints from `validation.ts`, responses, and `x-error-codes`; mark Moderator-only operations with `x-required-role: Moderator`. Update `docs/API.md` if the change affects concepts it covers, and add any new error code to its table. `backend/openapi.test.ts` fails if routes, auth modes, rate limits, or error codes and the docs disagree.
-5. Tests: `backend/handler.test.ts` / `backend/admin-handler.test.ts` for authorization behavior, `backend/server.test.ts` for session separation and CSRF, and `backend/routes.test.ts` if the route is public.
-
-**Adding a database migration:**
-
-1. Append a new entry to the `migrations` array in `backend/migrations.ts` using the next number (`NNN_snake_case`). This inline SQL is what actually runs.
-2. Add the matching reviewable `migrations/NNN_snake_case.sql`, wrapped in `BEGIN;` / `COMMIT;`.
-3. Update `backend/migrations-runner.test.ts`.
-4. Never edit a migration that has already shipped; add a new one. Destructive (contract-phase) migrations must set `requiresExplicitTarget: true` so they are not applied by default.
-5. Never schema-qualify objects (no `public.`) and do not set `search_path`: backup restore replays migrations inside a staging schema with `search_path` set to that schema only, so every migration must work under any `search_path`. `backend/migrations-runner.test.ts` checks this.
-
-**Article visibility:** legacy text levels (`Public`, `Internal`, `Admin`) and AGT numeric levels (`0`–`5`) are both supported. Access rules live in `backend/domain.ts`; display options and colors in `src/visibility.ts`. Keep both in sync and preserve legacy behavior.
-
-**Authentication:** the API supports local accounts only; setting `AUTH_MODE` to anything other than `local` stops the server from starting. `backend/auth.ts` `authenticate()` is the single place a member bearer token becomes a user, so a future provider (such as OIDC) belongs there. Handlers receive the resulting `Actor` on `request.actor` and must not inspect tokens themselves. The Admin is authenticated separately in `backend/admin-auth.ts` (setup with `AGT_SETUP_PASSWORD`, sign-in, SHA-256-hashed cookie sessions); `server.ts` verifies the cookie for `auth: 'admin'` routes and passes `request.admin`. Bearer tokens are ignored on admin routes and the Admin cookie on member routes; never let one grant the other.
-
-**Configuration:** non-secret settings live in `config.yaml`, validated by the Zod schema in `backend/config.ts` (unknown keys are errors); document every key in `config.example.yaml`. Secrets stay in environment variables. Dashboard-editable keys resolve file → `application_settings` → default in `backend/settings-service.ts`, and a key the file defines must never be changeable through any API, migration, or restore.
-
-## Security rules
-
-- The API is the authorization boundary. UI hiding is never an access control: enforce roles, visibility, and protection in backend services.
-- Never commit `.env` files, secrets, database URLs, or credentials. `VITE_*` values are public identifiers only; never put secrets in frontend code or Vite variables.
-- Markdown is rendered with `react-markdown` + `rehype-sanitize` without raw HTML, and the API rejects HTML/JSX/MDX imports. Do not enable raw HTML or execute content as MDX.
-- Updates, restores, and deletes carry the article `version` and must return HTTP `409` on mismatch rather than overwrite concurrent edits.
-- Server-owned fields (`created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, version) must not be accepted from clients. The only exception is the Admin backup restore in `backend/backup-service.ts`, which restores rows verbatim.
-- A new application table must be added to `backupTables` in `backend/backup-service.ts` (in foreign-key order) so backups stay complete. The one exception is `admin_sessions`, listed in `unbackedTables`: it is never backed up and is cleared by every restore. `config.yaml` is included in backups but never restored.
-
-## Documentation and commits
-
-- Update `README.md` when a change affects setup, configuration variables, roles/permissions, or user-visible behavior.
-- Commit subjects are short and imperative (e.g. `Add AGT-standard visibility levels`), with `Refs #<issue>` in the body when working from an issue.
+| Rule | What differs | Why |
+| --- | --- | --- |
+| AUTH-1 | Besides the single Admin there are **member accounts** (`local_users`, roles `Editor` and `Moderator`). Consequences, all reusing the spec's own mechanisms: members sign in with AUTH-8 cookie sessions (cookie `agt_knowledge_base_member_session`, same attributes as the Admin cookie; table `member_sessions`; routes `/api/member/login`, `/api/member/logout`, `/api/member/session`), accepted only on member routes by one `onRequest` hook and never in place of the Admin cookie or the reverse; `x-agt-request: 1` on every member write (SEC-5); `rateLimits.login` with its own counter (SEC-7); AUTH-2/AUTH-3 password rules, with old member hashes rehashed on the next sign-in; a password reset, deactivation, role change or deletion by the Admin ends all of that member's sessions (AUTH-4); member sessions are never backed up and are emptied by a restore (BAK-2, BAK-4); OpenAPI adds the `memberSessionCookie` scheme (member reads `[{ memberSessionCookie: [] }]`, writes `[{ memberSessionCookie: [], csrfHeader: [] }]`, login `[{ csrfHeader: [] }]`), checked by the API-13 test (API-11); the audit log records `actor_type: member` with the username, and member 401/403 responses like admin ones (LOG-10, LOG-11) | Members writing and moderating articles are what the product is for. Nothing else is loosened. Until Phase 4 the member mechanism itself still deviates (see the AUTH-8 / FE-3 row) |
+| STACK-3, UI-9, A11Y-2 | `@mdxeditor/editor` brings its own toolbar, select and link-dialog components (Radix-based) instead of `.button`/`.modal-*` classes and `useDialog` | Rich Markdown editing is a core feature, and no reasonable plain-React replacement exists. Limits: used only inside the article editor; styled with AGT tokens through its own CSS variables, never by overriding UI-9 classes; its popovers must still pass the TEST-6 checks (keyboard opening, Escape closes, focus returns, axe WCAG 2.2 AA) |
+| NAME-1, §2.1 | **To fix (Phase 0):** the slug `knowledge-base` (AGT Knowledge Base, `agtdarkshadow04/agt_knowledge_base`, default port **8081**, PostgreSQL) is not in the spec's app registry yet | Needs a registry PR in the spec repository (SPEC-4) |
+| STACK-1, STACK-7 | **To fix (Phase 1):** `engines` is `node >=22` without npm; TypeScript ~5.9, Vite 7, `@vitejs/plugin-react` 5, esbuild 0.25; no `allowScripts` decisions; extra dependencies (`zod`, `tsx`, `react-router-dom`, `lucide-react`, `rehype-sanitize`, ESLint, Vitest, jsdom, Testing Library) | Predates the spec |
+| STACK-1, TEST-1, TEST-2, TEST-3 | **To fix (Phase 1):** lint is ESLint and tests are Vitest with jsdom, not `tsc -b` and `node:test`; no `npm run check` or the other TEST-1 scripts; CI runs on Node 22 | Predates the spec |
+| STACK-1, REPO-1, SRV-1..SRV-8, SRV-10 | **To fix (Phase 1):** a hand-written HTTP pipeline in `backend/` (`server.ts`, `routes.ts`, `handler.ts`) instead of Fastify 5 + TypeBox in `server/` with `index.ts`, `buildApp()`, `context.ts`, `HttpError` and one error handler; esbuild bundles to `server/` rather than `dist-server/index.mjs` | Predates the spec |
+| REPO-1, REPO-2, REPO-3, FE-6, FE-8 | **To fix (Phase 1):** layout uses `backend/`, `scripts/`, `migrations/*.sql` mirrored into `backend/migrations.ts`, `src/services/`, `src/pages/`; validation lives in `backend/validation.ts`, not a shared `src/lib/validation.ts` used by both server and forms; `.gitignore`/`.dockerignore` miss `dist-server/`, `.test-build/`, `test-results/`, `playwright-report/`, `data/` | Predates the spec |
+| API-1, API-2, SRV-9, SRV-11 | **To fix (Phase 2):** routes have no `/api` prefix (Nginx strips it) and use `/admin/auth/login`, `/admin/backup/restore` and similar paths; Nginx, not the app, serves `dist/`; no `GET /api/health` | Predates the spec |
+| API-5, API-6, API-8 | **To fix (Phase 2):** error bodies are `{ code: 'VALIDATION_ERROR', message, issues }` rather than snake_case `error` with `fields` and `params`; malformed IDs return `400`, not `404`; collections that can grow without bound use page/pageSize, not cursors | Predates the spec |
+| API-3, API-10..API-14, VER-2 | **To fix (Phase 2):** OpenAPI is hand-written (`docs/openapi*.yaml`), not generated from TypeBox route schemas and served at `/api/openapi.json`; no `operationId`/`tags`/`security` per route or API-13 test; the in-app API docs are shown to members and visitors, not only to the signed-in Admin; `info.version` is not read from `package.json` | Predates the spec |
+| CFG-1, CFG-3..CFG-10 | **To fix (Phase 3):** Zod config schema with non-standard keys (`server.frontendOrigin`, `adminSession.*`, `backup.maxBytes`, `rateLimits.adminLogin`/`adminPassword`, `site.applicationName`, …); `server.port` defaults to `3001`, not 8081; settings in `application_settings`, not `settings`; no `EDITABLE_SETTINGS`/`settingStates()`, `unknown_setting`/`invalid_setting`/`defined_in_config` codes or `GET /api/settings/public` | Predates the spec |
+| CFG-2, NAME-2, DEP-4 | **To fix (Phase 3):** environment variables `LOCAL_AUTH_SECRET`, `AGT_SETUP_PASSWORD`, `DB_*`, `DATABASE_URL`, `DATABASE_SSL`, `POSTGRES_*`, `CONFIG_FILE`, `AUTH_MODE`, `MIGRATION_TARGET_ID`, `APP_*` instead of the CFG-2 set with the `AGT_KNOWLEDGE_BASE_` prefix; `docker.env.example` beside `.env.example`; npm package, volumes (`agt-postgres`, `agt-backups`), images, backup file name (`agt-kb-backup-…`) and `localStorage` keys (`agt-*`) do not follow NAME-2 | Predates the spec |
+| AUTH-2, AUTH-3 | **To fix (Phase 4):** scrypt runs with default parameters and stores `scrypt$salt$hash`, not the fixed options and `scrypt$N$r$p$salt$hash` with a format check before any scrypt call; usernames are lower-cased and limited to 3–64 of `[a-z0-9_.-]` instead of stored as entered after trimming (1–64 code points) | Predates the spec; existing hashes need a rehash path. Passwords are already 12–1024 characters (the extra character-class rules tighten AUTH-3) |
+| AUTH-5, AUTH-6, AUTH-8, AUTH-9 | **To fix (Phase 4):** setup is not at `/api/setup`, has no startup length check, and answers `403 SETUP_DISABLED` instead of `503 setup_password_missing`; the AUTH-6 reminders are incomplete; the Admin cookie is not `agt_knowledge_base_session` with `Path=/`, and its table is `admin_sessions`, not `sessions` | Predates the spec |
+| AUTH-8, FE-3, SEC-5 | **To fix (Phase 4):** members use HMAC-signed bearer tokens (`LOCAL_AUTH_SECRET`) kept in `localStorage`, without CSRF headers, instead of the cookie sessions in the AUTH-1 row | Predates the spec; a security fix, so it may skip the deprecation period (VER-10) |
+| SEC-1, SEC-2, SEC-3, SEC-4 | **To fix (Phase 4):** no Content-Security-Policy, `X-Frame-Options`, `Referrer-Policy` or COOP from the API or Nginx; the web port is published on `0.0.0.0:8080` by default; no `deploy/Caddyfile.example` or plain-HTTP warning | Predates the spec |
+| SEC-7 | **To fix (Phase 4):** a hand-written rate limiter (`backend/rate-limit.ts`), not `@fastify/rate-limit` with per-route limits and `429 rate_limited` bodies | Predates the spec |
+| SEC-12, SEC-13 | **To fix (Phase 4):** Markdown is rendered by `MarkdownContent.tsx` with `rehype-sanitize`, not one `src/components/Markdown.tsx` with a remark plugin that turns raw HTML into text and an http/https-only `urlTransform`; external links and images do not yet follow SEC-12/SEC-13 attributes | Predates the spec |
+| DATA-3, DATA-4, DATA-11 | **To fix (Phase 5):** migrations are inline SQL in `backend/migrations.ts`, not `server/migrations/NNNN_*.sql`; a separate `migrate` job runs them instead of startup under the BAK-12 migration lock, and a newer schema does not stop the server; contract migrations wait for `MIGRATION_TARGET_ID`; `public` still holds the function `merge_preserved_orphan_tag_ids` (and the 006 triggers where 007 has not run); Compose connects as the `postgres` superuser and there is no `rolsuper` check or preview database | Predates the spec |
+| DATA-6, DATA-8, DATA-10 | **To fix (Phase 5):** IDs come from `gen_random_uuid()` column defaults, not `crypto.randomUUID()`; not every table has `created_at` and `updated_at` (`app_users`, `articles` uses `modified_at`); persistent state is not all under one `/app/data` volume | Predates the spec |
+| BAK-1..BAK-12, SEC-10 | **To fix (Phase 6):** backups are `/admin/backup` and `/admin/backup/restore`, with a `database.json` table dump and a 1.x manifest (`formatVersion: 2`, `migrations`, `files` object), not `pg_dump` with the BAK-2 manifest; no Postgres preview database with the TOC allowlist, operation lock with drain and `503 maintenance`, `control` schema, rollback or `restore-failed.json`; ZIP handling is not in `server/zip.ts` | Predates the spec |
+| LOG-1..LOG-23, SRV-6 | **To fix (Phase 7):** logs go to `console.*` only; no pino, `logs` schema, server log, audit log, retention, exports or the Server log / Audit log tabs | Predates the spec |
+| STACK-2, FE-1, FE-2, FE-4, FE-5, FE-7 | **To fix (Phase 8):** `react-router-dom` with path routes (`/login`, `/articles/…`, `/tags`, `/api-docs`) instead of query-parameter deep links on `/`; `lucide-react` instead of `src/components/Icons.tsx`; no shared `apiRequest()`/`ApiError` in `src/lib/client.ts` with `x-agt-client: web`; no maintenance notice | Predates the spec |
+| UI-1..UI-16 | **To fix (Phase 8):** own stylesheet and assets (`public/assets/agt-icon.png`, one font) instead of the spec's `assets/` copied unmodified with licence files and `src/agt-base.css` imported first; UI-7 public chrome and UI-8 admin tab order differ | Predates the spec |
+| A11Y-1, A11Y-3..A11Y-6 | **To fix (Phase 8):** no shared `useDialog` hook outside MDXEditor, incomplete live regions, font scale not the 1×–2× `rem` scale, no axe checks | Predates the spec |
+| I18N-1..I18N-6 | **To fix (Phase 9):** English only with hard-coded strings; no `src/translations.ts`, `src/admin/i18n.ts`, translated error codes or completeness tests | Predates the spec |
+| DEP-1..DEP-10, SEC-15 | **To fix (Phase 10):** three Alpine images (Nginx `web`, `api`, `migrate`) on `node:22`, not one `node:26-bookworm-slim` image with healthcheck, `read_only`, `tmpfs` and `no-new-privileges`; no `deploy/` directory, systemd unit, local installation or Caddy example | Predates the spec |
+| TEST-4, TEST-6..TEST-9 | **To fix (Phase 10):** no Playwright suite in `tests/e2e/` or CI job, no Postgres two-process tests, no release acceptance checklist | Predates the spec |
+| DOC-1 | **To fix (Phase 10):** `README.md` lacks the AI disclosure line, Credits and the DOC-1 section order, and does not document local installation | Predates the spec |
+| VER-11, VER-13 | **To fix (Phase 10):** no release tags yet (the deployed `1.0.0` is untagged), and the README installs and upgrades from a branch, not a release tag | Predates the spec |

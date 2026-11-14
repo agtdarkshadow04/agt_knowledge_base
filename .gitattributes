@@ -1,0 +1,2 @@
+# Keep the pinned spec copy byte-identical to its release tag (SPEC-2).
+docs/agt-webapp-spec.md -text
