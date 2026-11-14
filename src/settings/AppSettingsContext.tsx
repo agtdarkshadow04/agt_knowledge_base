@@ -3,11 +3,13 @@ import { getApplicationSettings } from '../services/api';
 import type { ApplicationSettings } from '../types';
 
 const defaults: ApplicationSettings = {
-  applicationName: 'AGT Knowledge Base',
-  applicationSubtitle: 'Field-tested guides, community procedures, and traveller intelligence.',
-  defaultVisibility: 'Internal',
-  allowPublicBrowsing: true,
-  version: 1,
+  site: {
+    title: 'AGT Knowledge Base',
+    subtitle: 'Field-tested guides, community procedures, and traveller intelligence.',
+    supportUrl: 'https://www.nms-agt.com/support',
+  },
+  articles: { defaultVisibility: 'Internal' },
+  access: { allowPublicBrowsing: true },
 };
 
 interface AppSettingsContextValue {

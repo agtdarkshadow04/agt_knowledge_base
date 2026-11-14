@@ -35,7 +35,8 @@ export interface ApiResponse {
  * - `admin`: an Admin session cookie is required; bearer tokens are ignored.
  */
 export type RouteAuth = 'none' | 'member' | 'admin';
-export type RateLimitName = 'login' | 'adminLogin' | 'setup' | 'adminPassword';
+/** Rate-limit buckets, each counted separately; `rateLimitRule()` in app.ts maps them to `rateLimits.*`. */
+export type RateLimitName = 'login' | 'adminLogin' | 'setup' | 'adminPassword' | 'adminUploads';
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface RouteDefinition {
@@ -49,12 +50,14 @@ export interface RouteDefinition {
   description?: string;
   /** A 1.x path kept until 3.0.0; `replacedBy` names the route that replaces it (VER-10). */
   replacedBy?: string;
+  /** A deprecated route whose response differs from its replacement's, so it has its own handler case. */
+  ownHandler?: boolean;
   params?: TSchema;
   querystring?: TSchema;
   body?: TSchema;
   /** Success responses by status code. */
   response: Record<number, TSchema>;
-  /** Largest accepted body in bytes, or `backup` for the effective `backup.maxBytes`. */
+  /** Largest accepted body in bytes, or `backup` for the effective `backup.maxZipBytes`. */
   maxBodyBytes?: number | 'backup';
   /** Pass the body to the handler as a Buffer (backup uploads). */
   rawBody?: boolean;
@@ -63,7 +66,7 @@ export interface RouteDefinition {
 }
 
 export const defaultMaxBodyBytes = 1_000_000;
-/** The highest `backup.maxBytes` can be set to; the effective value is checked per request. */
+/** The highest `backup.maxZipBytes` can be set to; the effective value is checked per request. */
 export const maxBackupBodyBytes = 1024 * 1024 * 1024;
 
 const moderatorOnly = 'Moderators only.';
@@ -74,7 +77,7 @@ const routes: RouteDefinition[] = [
 
   { method: 'POST', path: '/api/auth/login', auth: 'none', rateLimit: 'login', operationId: 'createMemberSession', tag: 'auth', summary: 'Sign in a member and return a bearer token.', body: S.Credentials, response: { 200: S.MemberLogin } },
   { method: 'GET', path: '/api/auth/session', auth: 'member', operationId: 'getMemberSession', tag: 'auth', summary: 'Return the signed-in member.', response: { 200: S.MemberUser } },
-  { method: 'GET', path: '/api/settings', auth: 'none', operationId: 'getPublicSettings', tag: 'public', summary: 'Return the settings the public UI needs.', response: { 200: S.PublicSettings } },
+  { method: 'GET', path: '/api/settings/public', auth: 'none', operationId: 'getPublicSettings', tag: 'public', summary: 'Return the settings the public UI needs.', response: { 200: S.PublicSettings } },
 
   { method: 'GET', path: '/api/articles', auth: 'none', operationId: 'listPublicArticles', tag: 'articles', summary: 'List public articles, newest pinned first, one page at a time.', querystring: S.ArticleListQuery, response: { 200: S.ArticleList } },
   { method: 'POST', path: '/api/articles', auth: 'member', operationId: 'createArticle', tag: 'articles', summary: 'Create an article.', body: S.ArticleWriteBody, response: { 201: S.Article } },
@@ -108,6 +111,7 @@ const routes: RouteDefinition[] = [
 
   // 1.x paths of the routes above, kept until 3.0.0 (VER-10).
   { method: 'GET', path: '/api/admin/setup/status', auth: 'none', replacedBy: 'GET /api/setup/status', operationId: 'getSetupStatusDeprecated', tag: 'auth', summary: 'Deprecated: use GET /api/setup/status.', response: { 200: S.SetupStatus } },
+  { method: 'GET', path: '/api/settings', auth: 'none', replacedBy: 'GET /api/settings/public', ownHandler: true, operationId: 'getPublicSettingsDeprecated', tag: 'public', summary: 'Deprecated: use GET /api/settings/public, which groups the settings by config.yaml key.', response: { 200: S.LegacyPublicSettings } },
   { method: 'POST', path: '/api/admin/setup', auth: 'none', rateLimit: 'setup', replacedBy: 'POST /api/setup', operationId: 'completeSetupDeprecated', tag: 'auth', summary: 'Deprecated: use POST /api/setup.', body: S.AdminSetupBody, response: { 201: S.AdminSession } },
   { method: 'POST', path: '/api/admin/auth/login', auth: 'none', rateLimit: 'adminLogin', replacedBy: 'POST /api/admin/login', operationId: 'createAdminSessionDeprecated', tag: 'auth', summary: 'Deprecated: use POST /api/admin/login.', body: S.Credentials, response: { 200: S.AdminSession } },
   { method: 'POST', path: '/api/admin/auth/logout', auth: 'admin', replacedBy: 'POST /api/admin/logout', operationId: 'deleteAdminSessionDeprecated', tag: 'auth', summary: 'Deprecated: use POST /api/admin/logout.', response: { 204: S.NoContent } },
@@ -124,7 +128,7 @@ const routes: RouteDefinition[] = [
   { method: 'GET', path: '/api/admin/settings', auth: 'admin', operationId: 'getSettings', tag: 'admin', summary: 'Return each dashboard setting with its value and source.', response: { 200: S.AdminSettings } },
   { method: 'PUT', path: '/api/admin/settings', auth: 'admin', operationId: 'updateSettings', tag: 'admin', summary: 'Change dashboard settings; keys config.yaml defines are refused.', body: S.SettingsWriteBody, response: { 200: S.AdminSettings } },
   { method: 'GET', path: '/api/admin/backup', auth: 'admin', operationId: 'downloadBackup', tag: 'admin', summary: 'Download a backup ZIP of every table and config.yaml.', response: { 200: S.BackupArchive } },
-  { method: 'POST', path: '/api/admin/backup/restore', auth: 'admin', maxBodyBytes: 'backup', rawBody: true, operationId: 'restoreBackup', tag: 'admin', summary: 'Preview or restore an uploaded backup ZIP.', description: 'The body is the ZIP archive itself, at most `backup.maxBytes`.', querystring: S.RestoreActionQuery, body: S.BackupUpload, response: { 200: Type.Union([S.RestoreReport, S.RestorePreview]) } },
+  { method: 'POST', path: '/api/admin/backup/restore', auth: 'admin', rateLimit: 'adminUploads', maxBodyBytes: 'backup', rawBody: true, operationId: 'restoreBackup', tag: 'admin', summary: 'Preview or restore an uploaded backup ZIP.', description: 'The body is the ZIP archive itself, at most `backup.maxZipBytes`.', querystring: S.RestoreActionQuery, body: S.BackupUpload, response: { 200: Type.Union([S.RestoreReport, S.RestorePreview]) } },
 ];
 
 /** A route-table entry with its derived key, as registered on the Fastify app. */
@@ -149,7 +153,7 @@ export const apiRoutes: readonly CompiledRoute[] = routes.map((route) => {
   return {
     ...route,
     routeKey: `${route.method} ${route.path}`,
-    handlerKey: route.replacedBy ?? `${route.method} ${route.path}`,
+    handlerKey: route.ownHandler ? `${route.method} ${route.path}` : route.replacedBy ?? `${route.method} ${route.path}`,
     admin,
     csrf: route.method !== 'GET' && (admin || route.path === '/api/setup'),
   };

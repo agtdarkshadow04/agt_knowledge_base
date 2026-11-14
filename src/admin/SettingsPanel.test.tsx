@@ -7,18 +7,22 @@ import type { AdminSettingsView } from './types';
 const mocks = vi.hoisted(() => ({ getSettings: vi.fn(), updateSettings: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({ ...await importOriginal<typeof import('./api')>(), ...mocks }));
 
-const view: AdminSettingsView = {
-  version: 3,
-  settings: {
-    applicationName: { key: 'site.applicationName', value: 'File Archive', source: 'file' },
-    applicationSubtitle: { key: 'site.applicationSubtitle', value: 'Dashboard subtitle', source: 'dashboard' },
-    defaultVisibility: { key: 'articles.defaultVisibility', value: 'Internal', source: 'dashboard' },
-    allowPublicBrowsing: { key: 'access.allowPublicBrowsing', value: true, source: 'dashboard' },
-    backupMaxBytes: { key: 'backup.maxBytes', value: 104857600, source: 'default' },
-    backupMaxEntries: { key: 'backup.maxEntries', value: 16, source: 'default' },
-    backupMaxUncompressedBytes: { key: 'backup.maxUncompressedBytes', value: 268435456, source: 'default' },
-  },
-};
+const state = (key: string, value: unknown, source: 'config' | 'dashboard' | 'default', defaultValue: unknown = value) => ({
+  key, value, source, locked: source === 'config', default: defaultValue, description: `${key} description`,
+});
+
+const view = {
+  states: [
+    state('site.title', 'File Archive', 'config', 'AGT Knowledge Base'),
+    state('site.subtitle', 'Dashboard subtitle', 'dashboard', 'Default subtitle'),
+    state('site.supportUrl', 'https://www.nms-agt.com/support', 'default'),
+    state('articles.defaultVisibility', 'Internal', 'dashboard'),
+    state('access.allowPublicBrowsing', true, 'dashboard'),
+    state('backup.maxZipBytes', 104857600, 'default'),
+    state('backup.maxUncompressedBytes', 268435456, 'default'),
+    state('backup.maxEntries', 30, 'dashboard', 16),
+  ],
+} as AdminSettingsView;
 
 describe('SettingsPanel', () => {
   beforeEach(() => {
@@ -33,32 +37,40 @@ describe('SettingsPanel', () => {
     const name = await screen.findByLabelText(/Application name/);
     expect(name).toHaveValue('File Archive');
     expect(name).toHaveAttribute('readonly');
-    expect(screen.getByText(/Set in the configuration file/)).toHaveTextContent('site.applicationName');
+    expect(screen.getByText(/Set in the configuration file/)).toHaveTextContent('site.title');
     expect(screen.getByLabelText(/Subtitle or description/)).not.toHaveAttribute('readonly');
 
     await user.clear(screen.getByLabelText(/Subtitle or description/));
     await user.type(screen.getByLabelText(/Subtitle or description/), 'New subtitle');
     await user.type(screen.getByLabelText(/Largest backup upload/), '52428800');
+    await user.clear(screen.getByLabelText(/Most entries/));
     await user.click(screen.getByRole('button', { name: 'Save settings' }));
 
     await waitFor(() => expect(mocks.updateSettings).toHaveBeenCalledOnce());
-    const input = mocks.updateSettings.mock.calls[0][0];
-    expect(input).not.toHaveProperty('applicationName');
-    expect(input).toMatchObject({
-      version: 3,
-      applicationSubtitle: 'New subtitle',
-      backupMaxBytes: 52428800,
-      backupMaxEntries: null,
-      backupMaxUncompressedBytes: null,
+    // Only changed keys are sent; clearing a limit resets it to its default.
+    expect(mocks.updateSettings.mock.calls[0][0]).toEqual({
+      values: {
+        'site.subtitle': 'New subtitle',
+        'backup.maxZipBytes': 52428800,
+        'backup.maxEntries': null,
+      },
     });
     expect(await screen.findByRole('status')).toHaveTextContent('Settings saved.');
   });
 
-  it('shows save conflicts from the API', async () => {
+  it('shows errors from the API', async () => {
     const user = userEvent.setup();
-    mocks.updateSettings.mockRejectedValue(new Error('Application settings changed after you opened them. Reload and try again.'));
+    mocks.updateSettings.mockRejectedValue(new Error('site.title is defined in the configuration file and cannot be changed from the dashboard.'));
     render(<SettingsPanel />);
     await user.click(await screen.findByRole('button', { name: 'Save settings' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('changed after you opened them');
+    expect(await screen.findByRole('alert')).toHaveTextContent('defined in the configuration file');
+  });
+
+  it('shows defaults as placeholders for limits left at their default', async () => {
+    render(<SettingsPanel />);
+    const upload = await screen.findByLabelText(/Largest backup upload/);
+    expect(upload).toHaveValue(null);
+    expect(upload).toHaveAttribute('placeholder', `Default: ${(104857600).toLocaleString()}`);
+    expect(screen.getByLabelText(/Most entries/)).toHaveValue(30);
   });
 });

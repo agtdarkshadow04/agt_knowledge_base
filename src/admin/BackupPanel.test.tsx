@@ -16,14 +16,14 @@ const preview: RestorePreview = {
   createdAt: '2026-11-01T00:00:00.000Z',
   appVersion: '1.0.0',
   migrations: { backup: ['001_initial'], upgrade: ['013_backup_limit_settings'] },
-  counts: { app_users: 2, local_users: 2, tags: 4, articles: 7, article_revisions: 12, application_settings: 1, admin: 1 },
+  counts: { app_users: 2, local_users: 2, tags: 4, articles: 7, article_revisions: 12, settings: 1, admin: 1 },
   config: {
     included: true,
     content: 'server:\n  port: 3001\n',
     diff: [{ kind: ' ', text: 'server:' }, { kind: '-', text: '  port: 4000' }, { kind: '+', text: '  port: 3001' }],
     identical: false,
   },
-  ignoredSettings: ['site.applicationName'],
+  ignoredSettings: ['site.title'],
 };
 
 const archive = () => new File(['PK'], 'agt-kb-backup.zip', { type: 'application/zip' });
@@ -49,7 +49,7 @@ describe('BackupPanel', () => {
     expect(mocks.previewBackup).toHaveBeenCalledWith(file);
     expect(mocks.restoreBackup).not.toHaveBeenCalled();
     expect(screen.getByText(/upgrades it with 1 migration: 013_backup_limit_settings/)).toBeInTheDocument();
-    expect(screen.getByText(/backup's values are ignored: site.applicationName/)).toBeInTheDocument();
+    expect(screen.getByText(/backup's values are ignored: site.title/)).toBeInTheDocument();
     expect(screen.getByLabelText('config.yaml differences')).toHaveTextContent(/- +port: 4000/);
     expect(screen.getByText('Article revisions').nextSibling).toHaveTextContent('12');
 

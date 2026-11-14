@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type pg from 'pg';
 import {
   buildBackupArchive,
@@ -9,12 +9,12 @@ import {
   type BackupContents,
   type BackupRow,
 } from './backup-archive.js';
-import type { AppContext } from './context.js';
+import { lockedSettingKeys, type AppContext } from './context.js';
 import { HttpError } from './http.js';
 import { diffLines, type DiffLine } from './line-diff.js';
 import { migrations as knownMigrations } from './migrations.js';
 import { migrationsById } from './migrations-runner.js';
-import { fileDefinedSettings, settingDefinitions, SettingsService } from './settings-service.js';
+import { SettingsService } from './settings-service.js';
 
 
 /**
@@ -28,12 +28,19 @@ export const backupTables = [
   'tags',
   'articles',
   'article_revisions',
-  'application_settings',
+  'settings',
   'admin',
 ] as const;
 
 /** Tables the migrations create that backups deliberately leave out. */
 export const unbackedTables = ['admin_sessions'] as const;
+
+/**
+ * Tables that exist only until a contract migration drops them. They are
+ * exported while they exist, so a backup matches its schema version, but a
+ * restore never writes them: their data has already moved.
+ */
+export const legacyTables = ['application_settings'] as const;
 
 export type BackupTable = typeof backupTables[number];
 export type BackupCounts = Record<string, number>;
@@ -174,9 +181,10 @@ export class BackupService {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       migrations = await appliedMigrations(client);
       const schema = (await client.query<{ schema: string }>('SELECT current_schema() AS schema')).rows[0].schema;
-      const columns = await schemaColumns(client, schema, backupTables);
-      for (const table of backupTables) {
+      const columns = await schemaColumns(client, schema, [...backupTables, ...legacyTables]);
+      for (const table of [...backupTables, ...legacyTables]) {
         const entry = columns.get(table);
+        if (!entry && (legacyTables as readonly string[]).includes(table)) continue;
         if (!entry) throw new Error(`The ${table} table is missing.`);
         const result = await client.query<{ rows: BackupRow[] }>(
           `SELECT coalesce(jsonb_agg(to_jsonb(source) - $1::text[]), '[]'::jsonb) AS rows
@@ -222,22 +230,21 @@ export class BackupService {
   }
 
   private async read(archive: Buffer) {
-    const limits = await this.settings.getEffective();
+    const limits = await this.settings.values();
     const contents = await readBackupArchive(archive, {
-      maxBytes: limits.backupMaxBytes,
-      maxEntries: limits.backupMaxEntries,
-      maxUncompressedBytes: limits.backupMaxUncompressedBytes,
+      maxBytes: limits['backup.maxZipBytes'],
+      maxEntries: limits['backup.maxEntries'],
+      maxUncompressedBytes: limits['backup.maxUncompressedBytes'],
     });
     const { tables } = contents.database;
     if (tables.admin?.length !== 1) invalidBackup('it must contain exactly one Admin account.');
-    if (tables.application_settings?.length !== 1) invalidBackup('it must contain exactly one application settings row.');
     return contents;
   }
 
   /** Writes the current data to `storage.backupsDir`, then prunes old pre-restore backups. */
   async writePreRestoreBackup() {
     const { config } = this.context;
-    const directory = config.storage.backupsDir;
+    const directory = resolve(config.storage.dataDir, config.storage.backupsDir);
     const { archive } = await this.export();
     const filename = `pre-restore-backup-${stamp(this.now(), true)}-${randomBytes(3).toString('hex')}.zip`;
     try {
@@ -260,9 +267,7 @@ export class BackupService {
   }
 
   private async run({ manifest, database, configText }: BackupContents, apply: boolean): Promise<RestorePreview> {
-    const fileDefined = fileDefinedSettings(this.context.config);
-    const backupSettings = database.tables.application_settings[0];
-    const ignored = fileDefined.filter((name) => settingDefinitions[name].column in backupSettings);
+    const locked = lockedSettingKeys(this.context.config);
     const tableNames = Object.keys(database.tables);
     const counts = Object.fromEntries(tableNames.map((table) => [table, database.tables[table].length]));
 
@@ -311,7 +316,14 @@ export class BackupService {
       for (const table of tableNames) await client.query(`ALTER TABLE ${qualified(staging, table)} ENABLE TRIGGER USER`);
       await this.migrate(client, upgrade, 'it could not be upgraded to this version');
 
-      if (apply) await this.replaceLiveTables(client, live, staging, fileDefined.map((name) => settingDefinitions[name].column));
+      // Settings config.yaml now locks are not restored (CFG-8); the report names them.
+      const stagedSettings = await client.query<{ key: string }>(
+        `SELECT key FROM ${qualified(staging, 'settings')} WHERE key = ANY($1::text[]) ORDER BY key`,
+        [locked],
+      );
+      const ignored = stagedSettings.rows.map((row) => row.key);
+
+      if (apply) await this.replaceLiveTables(client, live, staging, ignored);
       await client.query(apply ? 'COMMIT' : 'ROLLBACK');
 
       const currentConfig = this.context.configFile.text;
@@ -326,7 +338,7 @@ export class BackupService {
           diff: configText !== null && currentConfig !== null ? diffLines(currentConfig, configText) : null,
           identical: configText !== null && configText === currentConfig,
         },
-        ignoredSettings: ignored.map((name) => settingDefinitions[name].key),
+        ignoredSettings: ignored,
       };
     } catch (error) {
       await client.query('ROLLBACK');
@@ -349,8 +361,8 @@ export class BackupService {
     }
   }
 
-  /** Replaces the live tables with the upgraded staging tables, keeping file-defined settings. */
-  private async replaceLiveTables(client: pg.PoolClient, live: string, staging: string, keptSettingColumns: string[]) {
+  /** Replaces the live tables with the upgraded staging tables, without the settings config.yaml locks. */
+  private async replaceLiveTables(client: pg.PoolClient, live: string, staging: string, lockedSettings: string[]) {
     await client.query(`SET LOCAL search_path TO ${quoteIdentifier(live)}`);
     const liveColumns = await schemaColumns(client, live, backupTables);
     const stagedColumns = await schemaColumns(client, staging, backupTables);
@@ -361,11 +373,6 @@ export class BackupService {
         throw new Error(`The upgraded ${table} table does not match the live schema.`);
       }
     }
-    const previousSettings = keptSettingColumns.length
-      ? (await client.query<{ row: unknown }>(
-        `SELECT to_jsonb(settings) AS row FROM ${qualified(live, 'application_settings')} settings`,
-      )).rows[0]?.row
-      : undefined;
 
     await client.query(`TRUNCATE ${[...backupTables, ...unbackedTables].map((table) => qualified(live, table)).join(', ')}`);
     for (const table of backupTables) await client.query(`ALTER TABLE ${qualified(live, table)} DISABLE TRIGGER USER`);
@@ -376,16 +383,8 @@ export class BackupService {
       );
     }
     for (const table of backupTables) await client.query(`ALTER TABLE ${qualified(live, table)} ENABLE TRIGGER USER`);
-    if (previousSettings) {
-      // Settings config.yaml defines are not restored: keep this installation's values.
-      const columnList = keptSettingColumns.map(quoteIdentifier).join(', ');
-      await client.query(
-        `UPDATE ${qualified(live, 'application_settings')}
-         SET (${columnList}) = (
-           SELECT ${columnList} FROM jsonb_populate_record(NULL::${qualified(live, 'application_settings')}, $1::jsonb)
-         )`,
-        [JSON.stringify(previousSettings)],
-      );
+    if (lockedSettings.length) {
+      await client.query(`DELETE FROM ${qualified(live, 'settings')} WHERE key = ANY($1::text[])`, [lockedSettings]);
     }
     // Restored session versions could match tokens issued before the backup
     // was taken; bumping them signs every member out. Admin sessions were

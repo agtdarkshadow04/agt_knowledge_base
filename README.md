@@ -45,15 +45,15 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
    cp config.example.yaml config.yaml
    ```
 
-   For local development, set `storage.backupsDir` in `config.yaml` to a writable directory (for example `./data/backups`) if you want to try backup restores.
+   Pre-restore backups go to `./data/backups` (`storage.dataDir` and `storage.backupsDir`, relative to the working directory).
 
-2. Start PostgreSQL and apply migrations:
+2. Start PostgreSQL and apply migrations. The database container's user and password must match `database.user` in `config.yaml` (default `agt_knowledge_base`) and `AGT_KNOWLEDGE_BASE_DB_PASSWORD` in `.env.local`:
 
    ```bash
-   POSTGRES_PASSWORD=postgres \
+   POSTGRES_USER=agt_knowledge_base POSTGRES_PASSWORD=local-development-db-password \
      LOCAL_AUTH_SECRET=local-development-only-secret-32-chars \
      docker compose up -d postgres
-   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agt_knowledge_base npm run db:migrate
+   set -a && source .env.local && set +a && npm run db:migrate
    ```
 
 3. Start the API and Vite in separate terminals:
@@ -63,7 +63,7 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
    npm run dev
    ```
 
-`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; rerun it after changing server code. Vite proxies `/api` to the API on port 3001, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base at `/login`. The API verifies signed member tokens and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
+`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; rerun it after changing server code. The API listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Vite proxies `/api` to it, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base at `/login`. The API verifies signed member tokens and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
 
 ## Docker self-hosting
 
@@ -77,7 +77,7 @@ The Compose stack runs the web frontend, API, schema migrations, PostgreSQL, and
    cp config.example.yaml config.yaml
    ```
 
-   In `.env`, replace `POSTGRES_PASSWORD`, `LOCAL_AUTH_SECRET`, and `AGT_SETUP_PASSWORD` with independent random values. For example, `openssl rand -hex 32` generates a suitable value for any of them. These secrets must not be committed. If the site will be reached anywhere other than `http://localhost:8080`, set `server.frontendOrigin` in `config.yaml` to its externally visible origin (see [Configuration](#configuration)). `config.yaml` must exist before the stack starts: Compose mounts it into the API container.
+   In `.env`, replace `POSTGRES_PASSWORD`, `LOCAL_AUTH_SECRET`, and `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` with independent random values. For example, `openssl rand -hex 32` generates a suitable value for any of them. These secrets must not be committed. `config.yaml` must exist before the stack starts: Compose mounts it into the API and migration containers.
 
 3. Build and start the stack:
 
@@ -88,7 +88,7 @@ The Compose stack runs the web frontend, API, schema migrations, PostgreSQL, and
 
    The one-shot `migrate` service waits for PostgreSQL, applies pending non-destructive migrations, and must finish successfully before the API starts.
 
-4. Open `http://localhost:8080/admin` (or the configured host and port) to create the Admin account. A fresh installation shows a setup screen that asks for the one-time `AGT_SETUP_PASSWORD` from `.env`, then the Admin username and a new password (at least 12 characters, including uppercase, lowercase, a number, and a symbol, and different from the setup password). Without `AGT_SETUP_PASSWORD`, setup is refused, so nobody can claim a fresh installation by reaching it first. Once setup is complete, remove `AGT_SETUP_PASSWORD` from `.env` and run `docker compose up -d`; until then the API logs a warning at startup and the admin panel shows a reminder.
+4. Open `http://localhost:8080/admin` (or the configured host and port) to create the Admin account. A fresh installation shows a setup screen that asks for the one-time `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env`, then the Admin username and a new password (at least 12 characters, including uppercase, lowercase, a number, and a symbol, and different from the setup password). Without `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD`, setup is refused, so nobody can claim a fresh installation by reaching it first. Once setup is complete, remove `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env` and run `docker compose up -d`; until then the API logs a warning at startup and the admin panel shows a reminder.
 
 ### The admin panel
 
@@ -96,12 +96,12 @@ The admin panel is a separate page reachable only by visiting `/admin` directly;
 
 - **Users** creates, updates, deactivates, resets passwords for, and deletes member accounts (Editor or Moderator).
 - **Data** shows archive statistics and the inventory of every article at every visibility level.
-- **Settings** edits branding, default article visibility, public browsing, and backup limits. Settings defined in `config.yaml` are shown read-only, marked "Set in the configuration file" (see [Configuration](#configuration)).
+- **Settings** edits the site title, subtitle and support link, default article visibility, public browsing, and backup limits. Settings defined in `config.yaml` are shown read-only, marked "Set in the configuration file" (see [Configuration](#configuration)).
 - **Backup & restore** downloads and restores backups (see [Backups](#backups)).
 - **Account** changes the Admin password. It requires the current password and signs out every other Admin session.
 - **API** renders the API reference from the server's OpenAPI document (`/api/openapi.json`). The header shows the app version.
 
-Admin sessions are random 32-byte tokens in an `HttpOnly`, `SameSite=Strict` cookie scoped to `/api/admin`; only their SHA-256 is stored, in `admin_sessions`, so signing out revokes them on the server. Every non-GET admin request must also carry an `x-agt-request: 1` header. The cookie is marked `Secure` when `server.frontendOrigin` is an `https://` origin (or a trusted proxy reports HTTPS); set `adminSession.secureCookie` to override this. Member bearer tokens are ignored on admin routes, and the Admin cookie is ignored on member routes.
+Admin sessions are random 32-byte tokens in an `HttpOnly`, `SameSite=Strict` cookie scoped to `/api/admin`; only their SHA-256 is stored, in `admin_sessions`, so signing out revokes them on the server. Every non-GET admin request must also carry an `x-agt-request: 1` header. The cookie is marked `Secure` when a trusted proxy reports HTTPS (or the deprecated `server.frontendOrigin` is an `https://` origin); set `session.secureCookie` to `true` or `false` to override this. Member bearer tokens are ignored on admin routes, and the Admin cookie is ignored on member routes.
 
 Moderators manage canonical tags and clean up orphaned tag references on the **Tags** page of the knowledge base, linked in the header for Moderators only. Personal accessibility, download, and search-view preferences remain browser-local in the Settings dialog.
 
@@ -110,15 +110,15 @@ Moderators manage canonical tags and clean up orphaned tag references on the **T
 **Member accounts.** The command-line tool creates or resets a member account (Editor or Moderator); it cannot create the Admin:
 
 ```bash
-read -rsp "Recovery password: " LOCAL_USER_PASSWORD && echo
-export LOCAL_USER_PASSWORD
-docker compose run --rm --no-deps -e LOCAL_USER_PASSWORD api \
+read -rsp "Recovery password: " AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD && echo
+export AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD
+docker compose run --rm --no-deps -e AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD api \
   node server/scripts/manage-local-user.js \
   --username recovery-moderator \
   --display-name "Recovery Moderator" \
   --role Moderator \
   --confirm
-unset LOCAL_USER_PASSWORD
+unset AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD
 ```
 
 Use the admin panel for routine account management.
@@ -129,49 +129,55 @@ Use the admin panel for routine account management.
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DELETE FROM admin_sessions; DELETE FROM admin;"'
 ```
 
-Then set `AGT_SETUP_PASSWORD` in `.env`, run `docker compose up -d`, and complete setup at `/admin`. Member accounts and articles are not affected. Alternatively, restore a backup whose Admin password you know.
+Then set `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` in `.env`, run `docker compose up -d`, and complete setup at `/admin`. Member accounts and articles are not affected. Alternatively, restore a backup whose Admin password you know.
 
 ### Configuration
 
-Settings that are not secret live in `config.yaml`, which Compose mounts read-only at `/app/config.yaml` (the API reads `CONFIG_FILE` if set). [`config.example.yaml`](config.example.yaml) documents every key and its default. The file is validated when the API starts: an unknown key or an invalid value stops the API with an error naming the key, and a missing file means "all defaults". Changes take effect when the API restarts (`docker compose restart api`).
+Configuration comes from three places (CFG-1): `config.yaml` for every setting that is not secret, `.env` for secrets, and the admin panel's **Settings** tab for the keys marked below.
+
+Compose mounts `config.yaml` read-only at `/app/config.yaml` (the server reads `AGT_KNOWLEDGE_BASE_CONFIG_FILE`, default `./config.yaml`). [`config.example.yaml`](config.example.yaml) documents every key and its default. The file is validated when the server starts: an unknown key or an invalid value stops it with an error naming the key (for example `Invalid /app/config.yaml: server.prot: Unexpected property`), and a missing file means "all defaults" and logs a warning. The server never writes it. Changes take effect when the server restarts (`docker compose restart api`).
 
 | Key | Default | Purpose | Also editable in the dashboard |
 | --- | --- | --- | --- |
-| `server.host`, `server.port` | `0.0.0.0`, `3001` | API listener | No |
-| `server.frontendOrigin` | `http://localhost:8080` | The site's external origin: the browser origin the API allows, and an `https://` value makes the Admin cookie `Secure` | No |
-| `server.trustProxy` | `false` (`config.example.yaml` sets `1`) | Proxy hops to trust for `X-Forwarded-For` and `X-Forwarded-Proto`. Use `1` for the bundled Nginx and `2` with a TLS proxy in front of it; with `false`, every client shares Nginx's address for rate limits | No |
-| `session.ttlHours` | `12` | Member sign-in lifetime (1–168 hours) | No |
-| `adminSession.ttlHours`, `adminSession.secureCookie` | `12`, `auto` | Admin sign-in lifetime; `Secure` cookie attribute (`auto`, `true`, or `false`) | No |
-| `rateLimits.login` | 5 per 1 minute | Member sign-in attempts per client address | No |
-| `rateLimits.adminLogin`, `rateLimits.setup`, `rateLimits.adminPassword` | 10 per 15 minutes each | Admin sign-in, first-run setup, and Admin password changes | No |
-| `storage.backupsDir` | `/app/data/backups` | Where pre-restore backups are written (the `agt-backups` volume) | No |
+| `server.host`, `server.port` | `127.0.0.1` (`0.0.0.0` in the Docker image), `8081` | API listener | No |
+| `server.trustProxy` | `false` (`config.example.yaml` sets `1`) | Proxies to trust for `X-Forwarded-For` and `X-Forwarded-Proto`: `true`, a proxy IP or CIDR (string or list), or a number of hops. Use `1` for the bundled Nginx and `2` with a TLS proxy in front of it; with `false`, every client shares Nginx's address for rate limits | No |
+| `server.logLevel` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` | No |
+| `storage.dataDir`, `storage.backupsDir` | `data`, `backups` | Persistent files, relative to the working directory (`/app` in Docker); pre-restore backups go to `dataDir/backupsDir` (the `agt-backups` volume) | No |
+| `database.host`, `.port`, `.name`, `.user`, `.ssl` | `localhost` (or `AGT_KNOWLEDGE_BASE_DATABASE_HOST`), `5432`, `agt_knowledge_base`, `agt_knowledge_base`, `false` | PostgreSQL connection; the password is `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | No |
+| `session.ttlHours` | `12` | Sign-in lifetime (1–168 hours), for the Admin and for members | No |
+| `session.secureCookie` | `auto` | `Secure` attribute of the Admin cookie: `auto`, `true` or `false` | No |
+| `rateLimits.login` | 10 per 15 minutes | Member sign-in, Admin sign-in and Admin password changes, each counted separately | No |
+| `rateLimits.setup` | 10 per 15 minutes | First-run setup | No |
+| `rateLimits.adminUploads` | 120 per 15 minutes | Backup restore uploads | No |
 | `backup.preRestore.keep` | unset (keep all) | How many pre-restore backups to keep | No |
-| `backup.maxBytes` | `104857600` (100 MB) | Largest backup upload | Yes |
-| `backup.maxEntries` | `16` | Most entries in an uploaded archive | Yes |
-| `backup.maxUncompressedBytes` | `268435456` (256 MB, at most 500 MB) | Largest uncompressed archive contents | Yes |
-| `site.applicationName`, `site.applicationSubtitle` | `AGT Knowledge Base`, the default subtitle | Branding | Yes |
+| `site.title`, `site.subtitle` | `AGT Knowledge Base`, the default subtitle | Branding | Yes |
+| `site.supportUrl` | `https://www.nms-agt.com/support` | Support link (an absolute `http:` or `https:` URL) | Yes |
 | `articles.defaultVisibility` | `Internal` | Default visibility of new articles | Yes |
 | `access.allowPublicBrowsing` | `true` | Whether visitors who are not signed in can browse public articles | Yes |
+| `backup.maxZipBytes` | `104857600` (100 MB, at most 1 GiB) | Largest backup upload | Yes |
+| `backup.maxUncompressedBytes` | `268435456` (256 MB, at most 500 MB) | Largest uncompressed archive contents | Yes |
+| `backup.maxEntries` | `16` | Most entries in an uploaded archive | Yes |
 
 A dashboard-editable key resolves to the value in `config.yaml` if the file sets it, otherwise the dashboard value, otherwise the default. **The configuration file always wins**: the API rejects changes to a key the file defines with HTTP `409`, naming the key, and no settings write, migration, or backup restore can override it.
 
+**Deprecated keys** (still accepted until 3.0.0; the server logs a warning for each one it finds): `site.applicationName` and `site.applicationSubtitle` (now `site.title` and `site.subtitle`), `backup.maxBytes` (now `backup.maxZipBytes`), `adminSession.secureCookie` (now `session.secureCookie`), `adminSession.ttlHours` (the Admin lifetime, overriding `session.ttlHours`), `rateLimits.adminLogin` and `rateLimits.adminPassword` (overriding `rateLimits.login` for those routes), and `server.frontendOrigin` (allows that browser origin and, when `https://`, makes the Admin cookie `Secure` under `auto`). A deprecated key next to its new name stops the server.
+
 Rate limits are applied by the API, per client address, before authentication and before the request body is read; an exceeded limit returns HTTP `429` with `Retry-After`. Limits are kept in memory and reset when the API restarts.
 
-Secrets and bootstrap values stay in `.env`:
+Environment variables are only for secrets and for values the launcher sets (CFG-2). Secrets go in `.env`:
 
-Configuration is read from `.env`:
+| Variable | Purpose |
+| --- | --- |
+| `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` | One-time password for creating the Admin at `/admin`; ignored once the Admin exists. Remove it after setup |
+| `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | Password of the database role. Compose sets it from `POSTGRES_PASSWORD` |
+| `LOCAL_AUTH_SECRET` | Signs member sessions; at least 32 characters |
+| `AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD` | Only for the member-recovery command (see [Account recovery](#account-recovery)) |
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `APP_BIND_ADDRESS` | `0.0.0.0` | Host interface exposed by the web container |
-| `APP_PORT` | `8080` | Host HTTP port |
-| `POSTGRES_DB` | `agt_knowledge_base` | PostgreSQL database name |
-| `POSTGRES_USER` | `postgres` | PostgreSQL user |
-| `POSTGRES_PASSWORD` | none | Required PostgreSQL password |
-| `POSTGRES_BIND_ADDRESS` | `127.0.0.1` | Interface for optional host database access |
-| `POSTGRES_PORT` | `5432` | Host PostgreSQL port |
-| `LOCAL_AUTH_SECRET` | none | Required secret used to sign member sessions; at least 32 characters |
-| `AGT_SETUP_PASSWORD` | none | One-time password for creating the Admin at `/admin`; ignored once the Admin exists. Remove it after setup |
+Set by the Dockerfile or Compose file, or for development: `AGT_KNOWLEDGE_BASE_CONFIG_FILE` (path of `config.yaml`), `AGT_KNOWLEDGE_BASE_SERVER_HOST` (listen address when `server.host` is not set; the image sets `0.0.0.0`), `AGT_KNOWLEDGE_BASE_DATABASE_HOST` (database host when `database.host` is not set; Compose sets `postgres`), `AGT_KNOWLEDGE_BASE_STATIC_DIR` (path of the built client), and `NODE_ENV`.
+
+Compose itself also reads these variables from `.env`: `POSTGRES_PASSWORD` (required; the database container's password, passed to the API as `AGT_KNOWLEDGE_BASE_DB_PASSWORD`), `POSTGRES_DB` and `POSTGRES_USER` (defaults `agt_knowledge_base` and `postgres`, used when the database container is first created), `POSTGRES_BIND_ADDRESS` and `POSTGRES_PORT` (`127.0.0.1`, `5432`), and `APP_BIND_ADDRESS` and `APP_PORT` (`0.0.0.0`, `8080`, the web container's host port).
+
+**Deprecated variables** (still read until 3.0.0, each with a startup warning): `AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_PASSWORD`, `DATABASE_URL`, `LOCAL_USER_PASSWORD` (use the `AGT_KNOWLEDGE_BASE_` names above), `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DATABASE_SSL` (use `database.*` in `config.yaml`), and `AUTH_MODE` (only `local` is accepted). Compose still passes `DB_USER` and `DB_NAME` from `POSTGRES_USER` and `POSTGRES_DB`; set `database.user` (and `database.name` if you changed it) in `config.yaml` to stop the warning.
 
 `API_HOST`, `API_PORT`, `APP_ORIGIN`, `LOCAL_FRONTEND_ORIGIN`, and `LOCAL_AUTH_SESSION_HOURS` are no longer read: use `server.*` and `session.ttlHours` in `config.yaml`.
 
@@ -200,7 +206,6 @@ and in `config.yaml`:
 
 ```yaml
 server:
-  frontendOrigin: https://kb.example.org
   trustProxy: 2
 ```
 
@@ -214,7 +219,7 @@ kb.example.org {
 
 Any other proxy (Traefik, Nginx, HAProxy) works the same way.
 
-In `config.yaml`, set `server.frontendOrigin` to the public HTTPS origin, which also makes the Admin cookie `Secure`, and set `server.trustProxy: 2` so rate limits see the client address forwarded by both the TLS proxy and the bundled Nginx (the proxy must set `X-Forwarded-For`, as Caddy does). The proxy must also accept request bodies of at least `backup.maxBytes` (100 MB by default) for backup uploads.
+`server.trustProxy: 2` makes rate limits see the client address forwarded by both the TLS proxy and the bundled Nginx (the proxy must set `X-Forwarded-For`, as Caddy does), and lets the API see that the request arrived over HTTPS, which makes the Admin cookie `Secure`. The proxy must also accept request bodies of at least `backup.maxZipBytes` (100 MB by default) for backup uploads.
 
 ### Backups
 
@@ -222,20 +227,20 @@ The Admin backs up and restores the installation from **Backup & restore** in th
 
 **Download backup** creates `agt-kb-backup-YYYYMMDD-HHMMSS.zip` from one consistent database snapshot. It contains:
 
-- `database.json`: every article, revision, tag, author record, member account, the Admin account, and the application settings;
+- `database.json`: every article, revision, tag, author record, member account, the Admin account, and the dashboard settings;
 - `config.yaml`, if the installation has one;
 - `manifest.json`: the format version, application version, applied migrations, creation time, and a SHA-256 checksum for every file.
 
 Admin sessions and `.env` are never included. **Backups contain the Admin and member password hashes and every restricted article**: store them as securely as the database itself, and never commit them.
 
-**Restoring is two steps: preview, then restore.** Uploading a backup first previews it and changes nothing. The preview checks the manifest checksums, that the archive contains only the expected files (no other paths, directories, symlinks, or `..`), the `backup.maxBytes`, `backup.maxEntries`, and `backup.maxUncompressedBytes` limits (checked while decompressing), that it contains exactly one Admin account, and that its schema version is compatible. It then loads the backup into a temporary staging schema, so constraint violations are reported before anything is replaced. The preview shows per-table counts, whether an upgrade will run, a line diff between the backup's `config.yaml` and the current one, and any settings that will be ignored.
+**Restoring is two steps: preview, then restore.** Uploading a backup first previews it and changes nothing. The preview checks the manifest checksums, that the archive contains only the expected files (no other paths, directories, symlinks, or `..`), the `backup.maxZipBytes`, `backup.maxEntries`, and `backup.maxUncompressedBytes` limits (checked while decompressing), that it contains exactly one Admin account, and that its schema version is compatible. It then loads the backup into a temporary staging schema, so constraint violations are reported before anything is replaced. The preview shows per-table counts, whether an upgrade will run, a line diff between the backup's `config.yaml` and the current one, and any settings that will be ignored.
 
 - **Versions.** A backup restores if its applied migrations are exactly the start of this installation's. Older backups are upgraded during the restore, with this installation's remaining migrations; backups from a newer version, or with migrations this installation does not know, are refused. Backups from before this archive format (JSON files) are not supported.
-- **Pre-restore backup.** Before restoring, the current data is saved as `pre-restore-backup-<timestamp>.zip` in `storage.backupsDir` (the `agt-backups` volume). If it cannot be written, nothing is restored. Pre-restore backups are kept indefinitely unless `backup.preRestore.keep` is set, in which case the oldest beyond that number are deleted after a new one is written.
-- **`config.yaml` is never restored.** Download the backup's copy from the preview and apply any changes by hand. Settings in the backup for keys the current `config.yaml` defines are ignored and listed in the report.
+- **Pre-restore backup.** Before restoring, the current data is saved as `pre-restore-backup-<timestamp>.zip` in `storage.dataDir/storage.backupsDir` (the `agt-backups` volume). If it cannot be written, nothing is restored. Pre-restore backups are kept indefinitely unless `backup.preRestore.keep` is set, in which case the oldest beyond that number are deleted after a new one is written.
+- **`config.yaml` is never restored.** Download the backup's copy from the preview and apply any changes by hand. Dashboard settings in the backup for keys the current `config.yaml` defines are dropped and listed in the report.
 - **One transaction.** The restore validates the archive again, then replaces every table in a single transaction: an invalid file, a constraint violation, or any other error leaves the current data unchanged. Afterwards every member and the Admin are signed out; sign in at `/admin` with the Admin account stored in the backup.
 
-The restore creates a temporary schema, so the database user needs the `CREATE` privilege on the database (the Compose user owns the database and has it). Nginx streams backup uploads to the API without buffering them, and the API checks the Admin session before reading the body and enforces `backup.maxBytes` itself. If a TLS reverse proxy sits in front of the stack, allow request bodies of at least `backup.maxBytes` there too.
+The restore creates a temporary schema, so the database user needs the `CREATE` privilege on the database (the Compose user owns the database and has it). Nginx streams backup uploads to the API without buffering them, and the API checks the Admin session before reading the body and enforces `backup.maxZipBytes` itself. If a TLS reverse proxy sits in front of the stack, allow request bodies of at least `backup.maxZipBytes` there too.
 
 For host-level backups, scheduled backups, or moving data between versions, use `pg_dump` from the running `postgres` container:
 
@@ -304,7 +309,7 @@ npm run check   # lint (tsc -b), all tests, and the production build
 
 Migrations are recorded in `schema_migrations` and are idempotent. `npm run db:migrate` (and the Compose `migrate` service) applies every pending non-destructive migration.
 
-Migrations marked as requiring an explicit target are destructive contract phases and are not applied by default. Set `MIGRATION_TARGET_ID` to apply through a specific migration, for example `MIGRATION_TARGET_ID=007_canonical_tags_contract npm run db:migrate` or `MIGRATION_TARGET_ID=014_admin_account_contract npm run db:migrate`. Do not target a contract migration until the application version that depends on it is running.
+Migrations marked as requiring an explicit target are destructive contract phases and are not applied by default. Set `MIGRATION_TARGET_ID` to apply through a specific migration, for example `MIGRATION_TARGET_ID=014_admin_account_contract npm run db:migrate` or, once 2.0.0 runs, `MIGRATION_TARGET_ID=016_drop_application_settings npm run db:migrate`. Do not target a contract migration until the application version that depends on it is running.
 
 ## Data and content security
 

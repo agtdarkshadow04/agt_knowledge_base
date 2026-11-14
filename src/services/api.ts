@@ -52,7 +52,7 @@ export function createLocalSession(username: string, password: string) {
 }
 
 export function getApplicationSettings(signal?: AbortSignal) {
-  return request<ApplicationSettings>('/settings', { signal });
+  return request<ApplicationSettings>('/settings/public', { signal });
 }
 
 export function getLocalSession(token: string) {

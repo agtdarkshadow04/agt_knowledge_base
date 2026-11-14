@@ -15,7 +15,7 @@ import type { AdminIdentity } from './routes.js';
 export const adminSessionCookie = 'agt_admin_session';
 /** The cookie is sent only to the admin API, as the browser sees it behind Nginx. */
 export const adminCookiePath = '/api/admin';
-const setupPasswordVariable = 'AGT_SETUP_PASSWORD';
+const setupPasswordVariable = 'AGT_KNOWLEDGE_BASE_SETUP_PASSWORD';
 
 interface AdminRow {
   username: string;
@@ -85,7 +85,7 @@ export class AdminAuthService {
   }
 
   private createSession(client: pg.Pool | pg.PoolClient, username: string) {
-    return createSession(client, username, this.context.config.adminSession.ttlHours);
+    return createSession(client, username, this.context.config.adminSession.ttlHours ?? this.context.config.session.ttlHours);
   }
 
   async setupStatus() {
@@ -95,7 +95,7 @@ export class AdminAuthService {
   }
 
   /**
-   * Creates the Admin on a fresh installation. Requires AGT_SETUP_PASSWORD,
+   * Creates the Admin on a fresh installation. Requires AGT_KNOWLEDGE_BASE_SETUP_PASSWORD,
    * which is ignored once an Admin exists, and a new password that differs from it.
    */
   async setup(input: { setupPassword: string; username: string; password: string }): Promise<AdminSessionResult> {

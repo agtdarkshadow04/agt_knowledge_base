@@ -1,14 +1,15 @@
 import packageJson from '../package.json' with { type: 'json' };
 import { buildApp } from './app.js';
-import { defaultConfigPath, loadConfigFile } from './config.js';
 import type { AppContext } from './context.js';
-import { createDatabase, databaseSettingsFromEnv } from './db.js';
+import { createDatabase } from './db.js';
 import { assertLocalAuthSecret } from './local-auth.js';
+import { envPrefix, loadStartup, type Startup } from './startup.js';
 
 /**
- * The server entry point and the only file that reads `process.env`, decides
- * where the configuration file lives, or calls `listen()` (SRV-1). It refuses
- * to start, with one clear log line, on an invalid configuration (SRV-8).
+ * The server entry point and the only file that reads `process.env` or calls
+ * `listen()` (SRV-1); `server/startup.ts` interprets the variables and loads
+ * config.yaml. It refuses to start, with one clear log line, on an invalid
+ * configuration (SRV-8).
  */
 
 function fail(message: string): never {
@@ -18,18 +19,15 @@ function fail(message: string): never {
 
 async function main() {
   const env = process.env;
-  if (env.AUTH_MODE !== undefined && env.AUTH_MODE !== 'local') {
-    fail('AUTH_MODE must be local or unset. Cognito authentication is no longer supported.');
-  }
-
+  let startup: Startup;
   let context: AppContext;
   try {
-    const configFile = loadConfigFile(env.CONFIG_FILE || defaultConfigPath);
+    startup = loadStartup(env);
     context = {
-      config: configFile.config,
-      configFile: { path: configFile.path, text: configFile.text },
-      db: createDatabase(databaseSettingsFromEnv(env)),
-      setupPassword: env.AGT_SETUP_PASSWORD || null,
+      config: startup.configFile.config,
+      configFile: { path: startup.configFile.path, text: startup.configFile.text },
+      db: createDatabase(startup.database),
+      setupPassword: startup.setupPassword,
       localAuthSecret: assertLocalAuthSecret(env.LOCAL_AUTH_SECRET),
       version: packageJson.version,
     };
@@ -38,15 +36,18 @@ async function main() {
   }
 
   const app = buildApp(context, {
-    logger: { level: 'info', redact: ['req.headers.authorization', 'req.headers.cookie'] },
+    logger: { level: context.config.server.logLevel, redact: ['req.headers.authorization', 'req.headers.cookie'] },
     // The built client; AGT_KNOWLEDGE_BASE_STATIC_DIR overrides it in development (CFG-2).
-    staticDir: env.AGT_KNOWLEDGE_BASE_STATIC_DIR || 'dist',
+    staticDir: env[`${envPrefix}STATIC_DIR`] || 'dist',
   });
-  app.log.info(context.configFile.text === null
-    ? `No configuration file at ${context.configFile.path}; using defaults.`
-    : `Loaded configuration from ${context.configFile.path}.`);
+  if (context.configFile.text === null) {
+    app.log.warn(`No configuration file at ${context.configFile.path}; using defaults.`);
+  } else {
+    app.log.info(`Loaded configuration from ${context.configFile.path}.`);
+  }
+  for (const warning of startup.warnings) app.log.warn(warning);
   if (context.setupPassword !== null) {
-    app.log.warn('AGT_SETUP_PASSWORD is set. It is only needed until the Admin account exists: remove it from .env and restart.');
+    app.log.warn(`${envPrefix}SETUP_PASSWORD is set. It is only needed until the Admin account exists: remove it from .env and restart.`);
   }
 
   let closing = false;

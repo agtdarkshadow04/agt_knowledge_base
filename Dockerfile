@@ -4,7 +4,6 @@ COPY package.json package-lock.json .npmrc ./
 RUN npm ci
 
 FROM dependencies AS frontend-build
-ENV VITE_API_URL=/api
 COPY . .
 RUN npm run build:client
 
@@ -18,7 +17,10 @@ RUN npm run build:server \
     --outdir=server-scripts
 
 FROM node:26-alpine AS api
-ENV NODE_ENV=production
+# CFG-2: the launcher-set variables. config.yaml's server.host overrides the listen address.
+ENV NODE_ENV=production \
+  AGT_KNOWLEDGE_BASE_CONFIG_FILE=/app/config.yaml \
+  AGT_KNOWLEDGE_BASE_SERVER_HOST=0.0.0.0
 WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev && npm cache clean --force
@@ -28,7 +30,7 @@ COPY --from=server-build --chown=node:node /app/server-scripts ./server/scripts
 # The backups volume inherits this ownership on first use.
 RUN mkdir -p /app/data/backups && chown -R node:node /app/data
 USER node
-EXPOSE 3001
+EXPOSE 8081
 CMD ["node", "dist-server/index.mjs"]
 
 # Nginx only forwards to the API, which serves the client too (SRV-9).

@@ -2,7 +2,7 @@ import type { ArticleVisibility, UserRole } from '../types';
 
 export interface AdminSession {
   username: string;
-  /** AGT_SETUP_PASSWORD is still set on the server and should be removed. */
+  /** AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is still set on the server and should be removed. */
   setupPasswordSet: boolean;
   /** The app version, shown in the dashboard header (VER-2). */
   version: string;
@@ -45,25 +45,39 @@ export interface AdminStats {
   orphanedTagReferences: number;
 }
 
+/** The effective value of each dashboard setting, by dotted key (CFG-6). */
 export interface DashboardSettings {
-  applicationName: string;
-  applicationSubtitle: string;
-  defaultVisibility: ArticleVisibility;
-  allowPublicBrowsing: boolean;
-  backupMaxBytes: number;
-  backupMaxEntries: number;
-  backupMaxUncompressedBytes: number;
+  'site.title': string;
+  'site.subtitle': string;
+  'site.supportUrl': string;
+  'articles.defaultVisibility': ArticleVisibility;
+  'access.allowPublicBrowsing': boolean;
+  'backup.maxZipBytes': number;
+  'backup.maxUncompressedBytes': number;
+  'backup.maxEntries': number;
 }
 
-export type SettingName = keyof DashboardSettings;
-export type SettingSource = 'file' | 'dashboard' | 'default';
+export type SettingKey = keyof DashboardSettings;
+export type SettingSource = 'config' | 'dashboard' | 'default';
+
+/** One setting as `GET /api/admin/settings` reports it (CFG-7). */
+export interface SettingState<Key extends SettingKey = SettingKey> {
+  key: Key;
+  value: DashboardSettings[Key];
+  source: SettingSource;
+  locked: boolean;
+  default: DashboardSettings[Key];
+  description: string;
+}
 
 export interface AdminSettingsView {
-  version: number;
-  settings: { [Name in SettingName]: { key: string; value: DashboardSettings[Name]; source: SettingSource } };
+  states: SettingState[];
 }
 
-export type SettingsWrite = { [Name in SettingName]?: DashboardSettings[Name] | null } & { version: number };
+/** `PUT /api/admin/settings`: `null` resets a key to its default (CFG-8). */
+export interface SettingsWrite {
+  values: { [Key in SettingKey]?: DashboardSettings[Key] | null };
+}
 
 export interface DiffLine {
   kind: ' ' | '-' | '+';
