@@ -83,10 +83,10 @@ describe('AdminApp', () => {
     });
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
     // The setup password is still configured, so the dashboard reminds the Admin to remove it.
-    expect(screen.getByRole('alert')).toHaveTextContent('AGT_SETUP_PASSWORD is still set');
+    expect(screen.getByRole('alert')).toHaveTextContent('AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is still set');
   });
 
-  it('explains how to enable setup when AGT_SETUP_PASSWORD is unset', async () => {
+  it('explains how to enable setup when AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is unset', async () => {
     mocks.getSetupStatus.mockResolvedValue({ required: true, setupPasswordConfigured: false });
     render(<AdminApp />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Setup is disabled');

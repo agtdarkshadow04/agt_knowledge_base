@@ -26,7 +26,7 @@ const mocks = {
   authenticateLocalUser: mock.fn(async (_identifier: string, _password: string): Promise<LocalSessionUser | null> => null),
   handleRequest: mock.fn(async (_request: ApiRequest): Promise<ApiResponse> => ({ statusCode: 200, headers: {}, body: '{"ok":"member"}' })),
   handleAdminRequest: mock.fn(async (_request: ApiRequest): Promise<ApiResponse> => ({ statusCode: 200, headers: {}, body: '{"ok":"admin"}' })),
-  getEffective: mock.fn(async () => ({ backupMaxBytes: 1000 })),
+  values: mock.fn(async () => ({ 'backup.maxZipBytes': 1000 })),
 };
 
 interface Reply { status: number; headers: IncomingHttpHeaders; body: string }
@@ -50,7 +50,7 @@ async function start(config = '', setupPassword: string | null = null) {
         setupStatus: mocks.setupStatus,
         changePassword: mocks.changePassword,
       },
-      settings: { getEffective: mocks.getEffective as never },
+      settings: { values: mocks.values as never },
     },
   });
   await app.listen({ host: '127.0.0.1', port: 0 });
@@ -125,7 +125,7 @@ describe('session separation', () => {
       assert.equal(reply.status, 401, routeKey);
     }
     // Public reads are dispatched without any identity.
-    for (const path of ['/api/settings', '/api/articles', '/api/articles/00000000-0000-4000-8000-000000000001', '/api/tags']) {
+    for (const path of ['/api/settings/public', '/api/settings', '/api/articles', '/api/articles/00000000-0000-4000-8000-000000000001', '/api/tags']) {
       assert.equal((await send('GET', path, { headers: adminCookie })).status, 200, path);
     }
     assert.equal(mocks.session.mock.callCount(), 0);
@@ -185,7 +185,12 @@ describe('CSRF protection', () => {
     assert.equal(reply.status, 204);
     assert.equal(reply.headers['access-control-allow-credentials'], undefined);
     assert.ok(!(reply.headers['access-control-allow-headers'] ?? '').includes('x-agt-request'));
-    assert.equal(reply.headers['access-control-allow-origin'], 'http://localhost:8080');
+    assert.equal(reply.headers['access-control-allow-origin'], undefined);
+    await start('server:\n  frontendOrigin: https://kb.example.org\n');
+    const configured = await send('OPTIONS', '/api/admin/settings', { headers: { origin: 'https://evil.example' } });
+    assert.equal(configured.headers['access-control-allow-credentials'], undefined);
+    assert.ok(!(configured.headers['access-control-allow-headers'] ?? '').includes('x-agt-request'));
+    assert.equal(configured.headers['access-control-allow-origin'], 'https://kb.example.org');
   });
 });
 
@@ -209,6 +214,23 @@ describe('Admin session cookies', () => {
     mocks.login.mock.mockImplementation(async () => ({ token: 't', expiresAt: new Date(Date.now() + 3_600_000), admin: { username: 'atlas' } }));
     const login = await send('POST', '/api/admin/auth/login', { headers: csrf, body: JSON.stringify({ username: 'atlas', password: 'x' }) });
     assert.match(login.headers['set-cookie']?.[0] ?? '', /; Secure$/);
+  });
+
+  it('follows session.secureCookie, and the deprecated adminSession.secureCookie', async () => {
+    mocks.login.mock.mockImplementation(async () => ({ token: 't', expiresAt: new Date(Date.now() + 3_600_000), admin: { username: 'atlas' } }));
+    const body = JSON.stringify({ username: 'atlas', password: 'x' });
+    for (const config of ['session:\n  secureCookie: true\n', 'adminSession:\n  secureCookie: true\n']) {
+      await start(config);
+      assert.match((await send('POST', '/api/admin/login', { headers: csrf, body })).headers['set-cookie']?.[0] ?? '', /; Secure$/, config);
+    }
+    await start('session:\n  secureCookie: false\nserver:\n  frontendOrigin: https://kb.example.org\n');
+    assert.doesNotMatch((await send('POST', '/api/admin/login', { headers: csrf, body })).headers['set-cookie']?.[0] ?? '', /Secure/);
+  });
+
+  it('sends CORS headers only for the deprecated server.frontendOrigin', async () => {
+    assert.equal((await send('GET', '/api/settings/public')).headers['access-control-allow-origin'], undefined);
+    await start('server:\n  frontendOrigin: https://kb.example.org\n');
+    assert.equal((await send('GET', '/api/settings/public')).headers['access-control-allow-origin'], 'https://kb.example.org');
   });
 
   it('trusts X-Forwarded-Proto only from a trusted proxy', async () => {
@@ -246,7 +268,7 @@ describe('request body limits', () => {
       request.write(Buffer.alloc(1024));
     });
     assert.equal(reply.status, 401);
-    assert.equal(mocks.getEffective.mock.callCount(), 0);
+    assert.equal(mocks.values.mock.callCount(), 0);
     assert.equal(mocks.handleAdminRequest.mock.callCount(), 0);
   });
 
@@ -340,14 +362,15 @@ describe('error bodies', () => {
 describe('rate limits', () => {
   it('limits member sign-in per client and reports Retry-After', async () => {
     const body = JSON.stringify({ username: 'apollo', password: 'wrong' });
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    // rateLimits.login defaults to 10 per 15 minutes (SEC-7).
+    for (let attempt = 0; attempt < 10; attempt += 1) {
       assert.equal((await send('POST', '/api/auth/login', { body })).status, 401);
     }
     const limited = await send('POST', '/api/auth/login', { body });
     assert.equal(limited.status, 429);
     assertMatches(JSON.parse(limited.body), { error: 'rate_limited', code: 'RATE_LIMITED' });
-    assert.ok(Number(limited.headers['retry-after']) > 0);
-    assert.equal(mocks.authenticateLocalUser.mock.callCount(), 5);
+    assert.ok(Number(limited.headers['retry-after']) > 14 * 60);
+    assert.equal(mocks.authenticateLocalUser.mock.callCount(), 10);
   });
 
   it('counts clients behind a trusted proxy by their forwarded address', async () => {
@@ -368,7 +391,24 @@ describe('rate limits', () => {
     assert.equal((await send('POST', '/api/auth/login', { body, headers: { 'x-forwarded-for': '203.0.113.2' } })).status, 429);
   });
 
-  it('applies the configured Admin sign-in limit before checking credentials', async () => {
+  it('applies rateLimits.login to Admin sign-in with its own counter, before checking credentials', async () => {
+    await start('rateLimits:\n  login:\n    max: 1\n');
+    mocks.login.mock.mockImplementation(async () => { throw new Error('x'); });
+    const credentials = '{"username":"a","password":"b"}';
+    assert.equal((await send('POST', '/api/auth/login', { body: credentials })).status, 401);
+    await send('POST', '/api/admin/login', { headers: csrf, body: credentials });
+    assert.equal((await send('POST', '/api/admin/login', { headers: csrf, body: credentials })).status, 429);
+    assert.equal(mocks.login.mock.callCount(), 1);
+  });
+
+  it('limits backup uploads with rateLimits.adminUploads', async () => {
+    await start('rateLimits:\n  adminUploads:\n    max: 1\n');
+    const upload = () => send('POST', '/api/admin/backup/restore?action=preview', { headers: { ...csrf, 'content-type': 'application/zip' }, body: Buffer.from('zip') });
+    assert.equal((await upload()).status, 401);
+    assert.equal((await upload()).status, 429);
+  });
+
+  it('still applies the deprecated rateLimits.adminLogin before checking credentials', async () => {
     await start('rateLimits:\n  adminLogin:\n    max: 1\n');
     mocks.login.mock.mockImplementation(async () => { throw new Error('x'); });
     await send('POST', '/api/admin/auth/login', { headers: csrf, body: '{"username":"a","password":"b"}' });

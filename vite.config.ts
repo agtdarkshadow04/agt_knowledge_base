@@ -19,7 +19,7 @@ function adminEntry(): Plugin {
 // The API is proxied so the browser sees one origin, as in production: the
 // Admin session cookie is scoped to /api/admin and same-origin only.
 const apiProxy = {
-  '/api/': { target: 'http://localhost:3001' },
+  '/api/': { target: 'http://localhost:8081' },
 };
 
 export default defineConfig({

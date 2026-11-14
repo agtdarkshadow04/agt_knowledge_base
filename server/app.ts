@@ -15,6 +15,7 @@ import {
 } from './admin-auth.js';
 import { createAdminRequestHandler, type AdminRequestHandler } from './admin-handler.js';
 import { authenticate, toActor, type AuthenticatedUser } from './auth.js';
+import type { AppConfig } from './config.js';
 import type { AppContext } from './context.js';
 import { createRequestHandler, type RequestHandler } from './handler.js';
 import { BodyTooLargeError, errorReply, HttpError, RateLimitedError } from './http.js';
@@ -28,6 +29,7 @@ import {
   type AdminIdentity,
   type ApiResponse,
   type CompiledRoute,
+  type RateLimitName,
 } from './routes.js';
 import { SettingsService } from './settings-service.js';
 import { parseAdminAccountPassword, parseAdminSetup, parseCredentials } from '../src/lib/validation.js';
@@ -51,7 +53,7 @@ export interface BuildAppOptions {
   services?: {
     localAuth?: Pick<LocalAuthService, 'authenticate' | 'issueToken' | 'verifyToken'>;
     adminAuth?: Pick<AdminAuthService, 'setupStatus' | 'setup' | 'login' | 'session' | 'logout' | 'changePassword'>;
-    settings?: Pick<SettingsService, 'getEffective'>;
+    settings?: Pick<SettingsService, 'values'>;
   };
 }
 
@@ -92,9 +94,21 @@ function sendApiResponse(reply: FastifyReply, result: ApiResponse) {
  * `server.trustProxy`: false uses the socket address, true trusts every
  * X-Forwarded-For hop, and a number trusts that many proxies nearest the API.
  */
-function trustProxyOption(trustProxy: boolean | number) {
-  if (typeof trustProxy === 'boolean') return trustProxy;
+function trustProxyOption(trustProxy: AppConfig['server']['trustProxy']) {
+  if (typeof trustProxy !== 'number') return trustProxy;
   return (_address: string, hop: number) => hop < trustProxy;
+}
+
+/** The limit each rate-limit bucket uses (SEC-7); the deprecated 1.x keys still override theirs until 3.0.0. */
+function rateLimitRule(config: AppConfig, name: RateLimitName) {
+  const limits = config.rateLimits;
+  switch (name) {
+    case 'login': return limits.login;
+    case 'adminLogin': return limits.adminLogin ?? limits.login;
+    case 'adminPassword': return limits.adminPassword ?? limits.login;
+    case 'setup': return limits.setup;
+    case 'adminUploads': return limits.adminUploads;
+  }
 }
 
 /** Counts streamed request bytes and fails once they exceed `limit`. */
@@ -180,9 +194,9 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
    * site's configured origin is HTTPS, or when a trusted proxy reports HTTPS.
    */
   function secureCookie(request: FastifyRequest) {
-    const { adminSession, server } = config;
-    if (adminSession.secureCookie !== 'auto') return adminSession.secureCookie;
-    if (server.frontendOrigin.startsWith('https:')) return true;
+    const { session, server } = config;
+    if (session.secureCookie !== 'auto') return session.secureCookie;
+    if (server.frontendOrigin?.startsWith('https:')) return true;
     if (server.trustProxy === false || server.trustProxy === 0) return false;
     return request.protocol === 'https';
   }
@@ -211,8 +225,9 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   });
   app.setNotFoundHandler((_request, reply) => sendError(reply, 404, { error: 'not_found', message: 'Route not found.', code: 'NOT_FOUND' }));
 
-  app.addHook('onRequest', async (_request, reply) => {
-    reply.header('access-control-allow-origin', config.server.frontendOrigin);
+  // CORS for the deprecated server.frontendOrigin only; the site itself is same-origin.
+  if (config.server.frontendOrigin) app.addHook('onRequest', async (_request, reply) => {
+    reply.header('access-control-allow-origin', config.server.frontendOrigin!);
     reply.header('access-control-allow-headers', 'authorization,content-type');
     reply.header('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     reply.header('vary', 'origin');
@@ -229,7 +244,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
       throw new HttpError(404, 'not_found', 'Route not found.');
     }
     if (route.rateLimit) {
-      const result = rateLimiter.hit(route.rateLimit, request.ip, config.rateLimits[route.rateLimit]);
+      const result = rateLimiter.hit(route.rateLimit, request.ip, rateLimitRule(config, route.rateLimit));
       if (!result.allowed) throw new RateLimitedError(result.retryAfterSeconds);
     }
     if (route.csrf && request.headers[csrfHeader] !== '1') {
@@ -267,12 +282,12 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
         url: route.path.replace(/\{([^}]+)\}/g, ':$1'),
         config: { apiRoute: route },
         schema: routeSchema(route),
-        // The restore upload is limited by the effective backup.maxBytes setting
+        // The restore upload is limited by the effective backup.maxZipBytes setting
         // in preParsing; Fastify's own limit there is only the hard ceiling.
         bodyLimit: route.maxBodyBytes === 'backup' ? maxBackupBodyBytes : route.maxBodyBytes ?? defaultMaxBodyBytes,
         ...(route.maxBodyBytes === 'backup' ? {
           preParsing: async (request: FastifyRequest, _reply: FastifyReply, payload: NodeJS.ReadableStream) => {
-            const limit = (await settingsService.getEffective()).backupMaxBytes;
+            const limit = (await settingsService.values())['backup.maxZipBytes'];
             const declared = Number(request.headers['content-length']);
             if (Number.isFinite(declared) && declared > limit) throw new BodyTooLargeError(limit);
             return payload.pipe(limitStream(limit));

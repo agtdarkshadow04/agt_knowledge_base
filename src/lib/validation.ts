@@ -16,15 +16,16 @@ export const visibilitySchema = z.union([
   z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
 ]);
 
-/** Largest database.json a backup may contain: it is parsed as one string, so it must stay below V8's string limit. */
-export const backupUncompressedCeiling = 500 * 1024 * 1024;
-
-/** Bounds for the backup limits, which can be set in config.yaml or the admin dashboard. */
-export const backupLimitSchemas = {
-  maxBytes: z.number().int().min(1024 * 1024).max(1024 * 1024 * 1024),
-  maxEntries: z.number().int().min(3).max(10_000),
-  maxUncompressedBytes: z.number().int().min(1024 * 1024).max(backupUncompressedCeiling),
-};
+/**
+ * Bounds of the backup limits (`backup.*` in config.yaml and the dashboard).
+ * The uncompressed size stays below 500 MB because the 1.x archive's
+ * database.json is parsed as one string, which must fit V8's string limit.
+ */
+export const backupLimits = {
+  maxZipBytes: { min: 1024 * 1024, max: 1024 * 1024 * 1024 },
+  maxUncompressedBytes: { min: 1024 * 1024, max: 500 * 1024 * 1024 },
+  maxEntries: { min: 3, max: 10_000 },
+} as const;
 
 const articleSchema = z.object({
   title: z.string().trim().min(3).max(180),
@@ -129,18 +130,6 @@ const userListSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
 
-const applicationSettingsSchema = z.object({
-  applicationName: z.string().trim().min(1).max(80).optional(),
-  applicationSubtitle: z.string().trim().min(1).max(240).optional(),
-  defaultVisibility: visibilitySchema.optional(),
-  allowPublicBrowsing: z.boolean().optional(),
-  /** null clears the dashboard value so the default applies again. */
-  backupMaxBytes: backupLimitSchemas.maxBytes.nullable().optional(),
-  backupMaxEntries: backupLimitSchemas.maxEntries.nullable().optional(),
-  backupMaxUncompressedBytes: backupLimitSchemas.maxUncompressedBytes.nullable().optional(),
-  version: z.number().int().positive(),
-}).strict();
-
 export function parseArticleWrite(value: unknown): ArticleWrite {
   return articleSchema.parse(value);
 }
@@ -202,10 +191,6 @@ export function parseUserListQuery(query: Record<string, string | string[] | und
     page: first(query.page),
     pageSize: first(query.pageSize),
   });
-}
-
-export function parseApplicationSettingsWrite(value: unknown) {
-  return applicationSettingsSchema.parse(value);
 }
 
 function first(value: string | string[] | undefined) {

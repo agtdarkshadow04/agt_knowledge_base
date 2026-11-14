@@ -1,80 +1,95 @@
-# AGT Knowledge Base configuration.
+# AGT Knowledge Base configuration (config.yaml).
 #
 # Copy this file to config.yaml and edit it. Docker Compose mounts config.yaml
-# read-only at /app/config.yaml (override the path with CONFIG_FILE). The file
-# is validated when the API starts: an unknown key or invalid value stops the
-# server with an error naming the key. A missing file means "all defaults".
+# read-only at /app/config.yaml (another path: AGT_KNOWLEDGE_BASE_CONFIG_FILE).
+# The file is validated when the server starts: an unknown key or an invalid
+# value stops it with an error naming the key. A missing file means "all
+# defaults". The server never writes this file.
 #
-# This file holds settings that are not secret. Secrets (POSTGRES_PASSWORD,
-# LOCAL_AUTH_SECRET, AGT_SETUP_PASSWORD) belong in .env, which is never
-# included in backups.
+# Every key is shown commented out with its default. Secrets never go here:
+# AGT_KNOWLEDGE_BASE_DB_PASSWORD, AGT_KNOWLEDGE_BASE_SETUP_PASSWORD and
+# LOCAL_AUTH_SECRET belong in .env, which is never included in backups.
 #
-# Every key is shown with its default. Keys under site, articles, access and
-# backup (except backup.preRestore) can also be edited in the admin dashboard;
-# when this file sets one, the file always wins and the dashboard shows it as
-# read-only.
+# The keys under site, articles, access and backup (except backup.preRestore)
+# can also be changed in the admin dashboard's Settings tab. When this file
+# sets one, the file wins: the dashboard shows it read-only.
 
+# Config-file-only keys
 server:
-  # host: 0.0.0.0
-  # port: 3001
-  # The site's externally visible origin, without a trailing slash. Behind a
-  # TLS proxy use the HTTPS origin, which also makes the Admin cookie Secure.
-  # frontendOrigin: http://localhost:8080
-  # How many reverse proxies in front of the API to trust for X-Forwarded-For
-  # (client addresses for rate limits) and X-Forwarded-Proto. false (the
-  # default) uses the socket address. The bundled Nginx is one hop, so the
-  # Compose stack sets 1; use 2 behind an additional TLS proxy.
+  # Listen address. Default: AGT_KNOWLEDGE_BASE_SERVER_HOST if set (0.0.0.0 in
+  # the Docker image), else 127.0.0.1.
+  # host: 127.0.0.1
+  # port: 8081
+  # Reverse proxies whose X-Forwarded-For and X-Forwarded-Proto to trust (client
+  # addresses for rate limits, HTTPS for the Secure cookie): false, true, a proxy
+  # IP or CIDR (string or list), or a number of proxy hops. The Compose stack's
+  # Nginx is one hop, hence 1; use 2 behind an additional TLS proxy.
   trustProxy: 1
+  # Log level: fatal, error, warn, info, debug, trace or silent.
+  # logLevel: info
+
+storage:
+  # Directory for persistent files, relative to the working directory (/app in Docker).
+  # dataDir: data
+  # Pre-restore backups, relative to dataDir (a volume in docker-compose.yml).
+  # backupsDir: backups
+
+database:
+  # PostgreSQL connection; the password is AGT_KNOWLEDGE_BASE_DB_PASSWORD in .env.
+  # host: localhost             # default: AGT_KNOWLEDGE_BASE_DATABASE_HOST if set (the Compose stack sets it)
+  # port: 5432
+  # name: agt_knowledge_base
+  # Scratch database for the restore preview (reserved for a later 2.x release).
+  # previewName: agt_knowledge_base_preview
+  # user: agt_knowledge_base
+  # Connect with TLS and verify the server certificate.
+  # ssl: false
 
 session:
-  # Member sign-in lifetime, 1 to 168 hours.
+  # Sign-in lifetime in hours (1 to 168), for the Admin at /admin and for members.
   # ttlHours: 12
-
-adminSession:
-  # Admin sign-in lifetime at /admin, 1 to 168 hours.
-  # ttlHours: 12
-  # auto sets Secure when frontendOrigin is https:// or a trusted proxy reports HTTPS.
+  # Secure attribute of the Admin cookie: auto (when a trusted proxy reports
+  # HTTPS), true or false.
   # secureCookie: auto
 
 rateLimits:
-  # Attempts per client address per window, applied by the API.
-  # login:            # member sign-in
-  #   max: 5
-  #   windowMinutes: 1
-  # adminLogin:       # Admin sign-in
+  # Attempts per client address per window. Member sign-in, Admin sign-in and
+  # the Admin password change each count separately against login.
+  # login:
   #   max: 10
   #   windowMinutes: 15
   # setup:            # first-run Admin setup
   #   max: 10
   #   windowMinutes: 15
-  # adminPassword:    # Admin password change
-  #   max: 10
+  # adminUploads:     # backup restore uploads
+  #   max: 120
   #   windowMinutes: 15
 
-storage:
-  # Where pre-restore backups are written (a volume in docker-compose.yml).
-  # backupsDir: /app/data/backups
+# Keys that can also be set in the dashboard
+site:
+  # Name shown in the header and the browser title (1 to 100 characters).
+  # title: AGT Knowledge Base
+  # Subtitle shown under the name on the home page (1 to 240 characters).
+  # subtitle: Field-tested guides, community procedures, and traveller intelligence.
+  # Support link: an absolute http: or https: URL.
+  # supportUrl: https://www.nms-agt.com/support
 
 backup:
-  # Largest backup upload in bytes (100 MB). A TLS proxy in front of the stack
-  # must accept request bodies at least this large.
-  # maxBytes: 104857600
-  # Most entries an uploaded archive may contain.
-  # maxEntries: 16
-  # Largest total uncompressed size of an uploaded archive (256 MB; at most 500 MB).
+  # Largest backup upload in bytes (1 MiB to 1 GiB). A TLS proxy in front of
+  # the stack must accept request bodies at least this large.
+  # maxZipBytes: 104857600
+  # Largest total uncompressed size of an uploaded backup (1 MiB to 500 MB).
   # maxUncompressedBytes: 268435456
+  # Most entries an uploaded archive may contain (3 to 10000).
+  # maxEntries: 16
   preRestore:
-    # Pre-restore backups to keep. Unset keeps every one.
+    # Config file only: pre-restore backups to keep. Unset keeps every one.
     # keep: 10
 
-site:
-  # applicationName: AGT Knowledge Base
-  # applicationSubtitle: Field-tested guides, community procedures, and traveller intelligence.
-
 articles:
-  # Default visibility for new articles: Public, Internal, Admin (legacy), or 0-5.
+  # Visibility of new articles: Public, Internal, Admin (legacy), or 0-5.
   # defaultVisibility: Internal
 
 access:
-  # Allow visitors who are not signed in to browse public articles.
+  # Whether visitors who are not signed in can browse public articles.
   # allowPublicBrowsing: true

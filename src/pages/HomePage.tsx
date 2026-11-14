@@ -44,7 +44,7 @@ export function HomePage() {
   useEffect(() => {
     const controller = new AbortController();
     async function load() {
-      if (!viewerSub && !settings.allowPublicBrowsing) {
+      if (!viewerSub && !settings.access.allowPublicBrowsing) {
         setResult(null);
         setLoading(false);
         return;
@@ -64,12 +64,12 @@ export function HomePage() {
     }
     void load();
     return () => controller.abort();
-  }, [getToken, params, reloadKey, settings.allowPublicBrowsing, viewerSub]);
+  }, [getToken, params, reloadKey, settings.access.allowPublicBrowsing, viewerSub]);
 
   useEffect(() => {
     const controller = new AbortController();
     async function loadTagCatalog() {
-      if (!viewerSub && !settings.allowPublicBrowsing) {
+      if (!viewerSub && !settings.access.allowPublicBrowsing) {
         setTags([]);
         setTagsLoading(false);
         return;
@@ -88,7 +88,7 @@ export function HomePage() {
     }
     void loadTagCatalog();
     return () => controller.abort();
-  }, [getToken, settings.allowPublicBrowsing, tagsReloadKey, viewerSub]);
+  }, [getToken, settings.access.allowPublicBrowsing, tagsReloadKey, viewerSub]);
 
   const updateParam = useCallback((key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -134,14 +134,14 @@ export function HomePage() {
         <p className="eyebrow">Galactic archive // public terminal</p>
         <div className="hero-heading">
           <div>
-            <h1 id="home-title">{settings.applicationName}</h1>
-            <p>{settings.applicationSubtitle}</p>
+            <h1 id="home-title">{settings.site.title}</h1>
+            <p>{settings.site.subtitle}</p>
           </div>
           {user && <Link className="button button-primary" to="/articles/new">Create article</Link>}
         </div>
       </section>
 
-      {!user && !settings.allowPublicBrowsing ? (
+      {!user && !settings.access.allowPublicBrowsing ? (
         <section className="admin-panel public-browsing-disabled" aria-labelledby="public-access-title">
           <h2 id="public-access-title">Sign in to browse the archive</h2>
           <p>Public browsing is disabled for this installation.</p>

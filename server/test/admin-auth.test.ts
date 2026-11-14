@@ -43,7 +43,7 @@ describe('Admin setup', () => {
 
   const input = { setupPassword: setupSecret, username: 'atlas', password: 'Permanent123!' };
 
-  it('is refused when AGT_SETUP_PASSWORD is unset', async () => {
+  it('is refused when AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is unset', async () => {
     await rejectsMatching(service(null).setup(input), { statusCode: 403, error: 'setup_disabled', legacyCode: 'SETUP_DISABLED' });
     assert.equal((database.query).mock.callCount(), 0);
   });

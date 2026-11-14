@@ -3,7 +3,7 @@ import { afterEach, describe, it, mock } from 'node:test';
 import { createAdminRequestHandler } from '../admin-handler.js';
 import type { Actor } from '../domain.js';
 import type { ApiRequest } from '../routes.js';
-import { assertMatches, fakeDatabase, match, respond, testContext } from './helpers.js';
+import { assertMatches, fakeDatabase, respond, testContext } from './helpers.js';
 
 const database = {
   connect: mock.fn(async (): Promise<unknown> => undefined),
@@ -53,10 +53,15 @@ describe('admin request dispatch', () => {
   it('rejects settings the configuration file defines with 409, naming the key', async () => {
     const response = await handleAdminRequest(adminRequest({
       routeKey: 'PUT /api/admin/settings',
-      body: { version: 1, applicationName: 'Dashboard Archive' },
-    }), 'site:\n  applicationName: File Archive\n');
+      body: { values: { 'site.title': 'Dashboard Archive' } },
+    }), 'site:\n  title: File Archive\n');
     assert.equal(response.statusCode, 409);
-    assertMatches(body(response), { error: 'defined_in_config', code: 'SETTING_DEFINED_IN_FILE', message: match.stringContaining('site.applicationName') });
+    assertMatches(body(response), {
+      error: 'defined_in_config',
+      code: 'SETTING_DEFINED_IN_FILE',
+      message: 'site.title is defined in the configuration file and cannot be changed from the dashboard.',
+      params: { key: 'site.title' },
+    });
     assert.equal((database.connect).mock.callCount(), 0);
   });
 

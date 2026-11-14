@@ -5,7 +5,6 @@ import {
   parseAdminSetup,
   parseAdminUserCreate,
   parseAdminUserUpdate,
-  parseApplicationSettingsWrite,
   parseArticleWrite,
   parseCredentials,
   parseListQuery,
@@ -35,15 +34,6 @@ describe('request validation', () => {
     assert.deepEqual(parseCredentials({ username: 'atlas', password: 'x' }), { username: 'atlas', password: 'x' });
     assert.throws(() => parseCredentials({ username: 'atlas' }));
     assert.throws(() => parseAdminAccountPassword({ currentPassword: 'old', password: 'Permanent123!', passwordConfirmation: 'Different123!' }));
-  });
-
-  it('accepts partial settings writes and clears only backup limits with null', () => {
-    assert.deepEqual(parseApplicationSettingsWrite({ version: 1, applicationName: 'Archive' }), { version: 1, applicationName: 'Archive' });
-    assert.deepEqual(parseApplicationSettingsWrite({ version: 1, backupMaxBytes: null }), { version: 1, backupMaxBytes: null });
-    assert.throws(() => parseApplicationSettingsWrite({ version: 1, backupMaxBytes: 10 }));
-    assert.throws(() => parseApplicationSettingsWrite({ version: 1, backupMaxUncompressedBytes: 600 * 1024 * 1024 }));
-    assert.throws(() => parseApplicationSettingsWrite({ version: 1, applicationName: null }));
-    assert.throws(() => parseApplicationSettingsWrite({ applicationName: 'Archive' }));
   });
 
   it('rejects executable MDX and raw HTML while accepting Markdown', () => {

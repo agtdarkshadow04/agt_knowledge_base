@@ -19,7 +19,8 @@ const Id = Type.String({ description: 'Lowercase UUID. A malformed ID answers 40
 // --- Errors (API-6) -------------------------------------------------------
 
 export const errorCodes = [
-  'invalid_request', 'validation_failed', 'invalid_setting', 'no_changes', 'tag_not_orphaned', 'invalid_backup',
+  'invalid_request', 'validation_failed', 'unknown_setting',
+  'invalid_setting', 'no_changes', 'tag_not_orphaned', 'invalid_backup',
   'unauthorized', 'invalid_credentials', 'invalid_setup_password',
   'csrf', 'forbidden', 'public_browsing_closed', 'setup_disabled', 'invalid_current_password',
   'not_found',
@@ -117,6 +118,12 @@ export const TagOrphan = object({
 });
 
 export const PublicSettings = object({
+  site: object({ title: Type.String(), subtitle: Type.String(), supportUrl: Type.String() }),
+  articles: object({ defaultVisibility: Visibility }),
+  access: object({ allowPublicBrowsing: Type.Boolean() }),
+});
+
+export const LegacyPublicSettings = object({
   applicationName: Type.String(),
   applicationSubtitle: Type.String(),
   defaultVisibility: Visibility,
@@ -138,7 +145,7 @@ export const SetupStatus = object({ required: Type.Boolean(), setupPasswordConfi
 
 export const AdminSession = object({
   username: Type.String(),
-  setupPasswordSet: Type.Boolean({ description: 'AGT_SETUP_PASSWORD is still set and should be removed (AUTH-6).' }),
+  setupPasswordSet: Type.Boolean({ description: 'AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is still set and should be removed (AUTH-6).' }),
   version: Type.String({ description: 'The app version (VER-2).' }),
 });
 
@@ -174,12 +181,23 @@ export const AdminStats = object({
   orphanedTagReferences: Type.Integer(),
 });
 
-const SettingSource = Type.Union([Type.Literal('file'), Type.Literal('dashboard'), Type.Literal('default')]);
-const settingView = <T extends TSchema>(value: T) => object({ key: Type.String(), value, source: SettingSource });
+const LegacySettingSource = Type.Union([Type.Literal('file'), Type.Literal('dashboard'), Type.Literal('default')]);
+const settingView = <T extends TSchema>(value: T) => object({ key: Type.String(), value, source: LegacySettingSource });
+const SettingValue = Type.Union([Type.String(), Type.Number(), Type.Boolean()]);
+
+export const SettingState = object({
+  key: Type.String({ description: 'Dotted key, as in config.yaml (`site.title`).' }),
+  value: SettingValue,
+  source: Type.Union([Type.Literal('config'), Type.Literal('dashboard'), Type.Literal('default')]),
+  locked: Type.Boolean({ description: 'Set in config.yaml, so the dashboard cannot change it.' }),
+  default: SettingValue,
+  description: Type.String(),
+});
 
 export const AdminSettings = object({
-  version: Type.Integer(),
-  settings: object({
+  states: Type.Array(SettingState, { description: 'Every dashboard setting with its effective value and source (CFG-7).' }),
+  version: Type.Integer({ deprecated: true, description: 'Always 1; settings no longer carry a version. Removed in 3.0.0.' }),
+  settings: Type.Object({
     applicationName: settingView(Type.String()),
     applicationSubtitle: settingView(Type.String()),
     defaultVisibility: settingView(Visibility),
@@ -187,7 +205,7 @@ export const AdminSettings = object({
     backupMaxBytes: settingView(Type.Integer()),
     backupMaxEntries: settingView(Type.Integer()),
     backupMaxUncompressedBytes: settingView(Type.Integer()),
-  }),
+  }, { additionalProperties: false, ...{ deprecated: true, description: 'The 1.x view; use `states`. Removed in 3.0.0.' } }),
 });
 
 const DiffLine = object({ kind: Type.Union([Type.Literal(' '), Type.Literal('-'), Type.Literal('+')]), text: Type.String() });
@@ -294,16 +312,19 @@ export const UserUpdateBody = object({
 });
 export const UserPasswordBody = object({ password: text() });
 
-const settingInput = <T extends TSchema>(schema: T) => Type.Optional(nullable(schema));
+const legacyInput = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()], { deprecated: true, description: 'Deprecated 1.x field; use `values`. Removed in 3.0.0.' }));
 export const SettingsWriteBody = object({
-  version: Type.Integer(),
-  applicationName: settingInput(Type.String()),
-  applicationSubtitle: settingInput(Type.String()),
-  defaultVisibility: settingInput(Visibility),
-  allowPublicBrowsing: settingInput(Type.Boolean()),
-  backupMaxBytes: settingInput(Type.Integer()),
-  backupMaxEntries: settingInput(Type.Integer()),
-  backupMaxUncompressedBytes: settingInput(Type.Integer()),
-}, 'Only the submitted settings change; `null` resets a backup limit to its default.');
+  values: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
+    description: 'Dotted setting keys with their new values; `null` resets a key to its default (CFG-8).',
+  })),
+  version: Type.Optional(Type.Integer({ deprecated: true, description: 'Deprecated 1.x field; use `values`. Removed in 3.0.0.' })),
+  applicationName: legacyInput(Type.String()),
+  applicationSubtitle: legacyInput(Type.String()),
+  defaultVisibility: legacyInput(Visibility),
+  allowPublicBrowsing: legacyInput(Type.Boolean()),
+  backupMaxBytes: legacyInput(Type.Integer()),
+  backupMaxEntries: legacyInput(Type.Integer()),
+  backupMaxUncompressedBytes: legacyInput(Type.Integer()),
+}, 'Send `values`. The whole request is refused if a key is unknown, set in config.yaml, or invalid.');
 
 export const RestoreActionQuery = object({ action: Type.Optional(text('`preview` or `restore`.')) });

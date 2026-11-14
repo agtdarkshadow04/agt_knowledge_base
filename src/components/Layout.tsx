@@ -25,7 +25,7 @@ export function Layout() {
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="site-header">
         <div className="header-inner">
-          <Link to="/" className="brand" aria-label={`${settings.applicationName} home`}>
+          <Link to="/" className="brand" aria-label={`${settings.site.title} home`}>
             <span className="brand-mark" aria-hidden="true">
               {!logoFailed ? (
                 <img src="/assets/agt-icon.png" alt="" onError={() => setLogoFailed(true)} />
@@ -34,8 +34,8 @@ export function Layout() {
               )}
             </span>
             <span className="brand-copy">
-              <strong><span className="desktop-only">{settings.applicationName}</span><span className="mobile-only">AGT</span></strong>
-              <small><span className="desktop-only">{settings.applicationSubtitle}</span><span className="mobile-only">Archives</span></small>
+              <strong><span className="desktop-only">{settings.site.title}</span><span className="mobile-only">AGT</span></strong>
+              <small><span className="desktop-only">{settings.site.subtitle}</span><span className="mobile-only">Archives</span></small>
             </span>
           </Link>
 

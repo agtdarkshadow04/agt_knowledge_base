@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, mock } from 'node:test';
 import { buildBackupArchive, readBackupArchive, type BackupRow } from '../backup-archive.js';
-import { BackupService, backupTables, unbackedTables, upgradePlan } from '../backup-service.js';
+import { BackupService, backupTables, legacyTables, unbackedTables, upgradePlan } from '../backup-service.js';
 import { parseConfig, type AppConfig } from '../config.js';
 import { migrations as schemaMigrations } from '../migrations.js';
 import type { SettingsService } from '../settings-service.js';
@@ -22,7 +22,9 @@ const columns: Record<string, string[]> = {
   tags: ['id', 'name', 'color'],
   articles: ['id', 'title', 'tag_ids'],
   article_revisions: ['article_id', 'version'],
+  // Dropped by the explicit-target 016; until then backups carry it (legacyTables).
   application_settings: ['singleton', 'application_name', 'application_subtitle'],
+  settings: ['key', 'value', 'created_at', 'updated_at'],
   admin: ['id', 'username', 'password_hash'],
   admin_sessions: ['token_hash', 'expires_at'],
 };
@@ -35,6 +37,10 @@ function tables(overrides: Record<string, BackupRow[]> = {}): Record<string, Bac
     articles: [{ id: 'a1', title: 'Portal Guide', tag_ids: [] }],
     article_revisions: [{ article_id: 'a1', version: 1 }],
     application_settings: [{ singleton: true, application_name: 'Backup Archive', application_subtitle: 'From the backup' }],
+    settings: [
+      { key: 'site.title', value: 'Backup Archive', created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z' },
+      { key: 'backup.maxEntries', value: 20, created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z' },
+    ],
     admin: [{ id: true, username: 'atlas', password_hash: 'scrypt$x$y' }],
     ...overrides,
   };
@@ -74,7 +80,10 @@ function fakeClient(options: FakeOptions = {}) {
       const table = /\."([a-z_]+)" source/.exec(sql)?.[1] ?? '';
       return { rows: [{ rows: tables()[table] ?? [] }] };
     }
-    if (sql.includes('to_jsonb(settings)')) return { rows: [{ row: { application_name: 'Live Archive' } }] };
+    if (sql.startsWith('SELECT key FROM "kb_restore_')) {
+      const locked = params?.[0] as string[];
+      return { rows: (tables().settings as Array<{ key: string }>).filter((row) => locked.includes(row.key)).map(({ key }) => ({ key })) };
+    }
     return { rows: [], rowCount: 0 };
   });
   const client = { query, release: mock.fn() };
@@ -87,7 +96,7 @@ function statements(client: ReturnType<typeof fakeClient>) {
 }
 
 const settings = {
-  getEffective: mock.fn(async () => ({ backupMaxBytes: 10 * 1024 * 1024, backupMaxEntries: 16, backupMaxUncompressedBytes: 10 * 1024 * 1024 })),
+  values: mock.fn(async () => ({ 'backup.maxZipBytes': 10 * 1024 * 1024, 'backup.maxEntries': 16, 'backup.maxUncompressedBytes': 10 * 1024 * 1024 })),
 } as unknown as SettingsService;
 
 let backupsDir: string;
@@ -121,7 +130,11 @@ describe('BackupService', () => {
   it('covers every table the migrations create except Admin sessions', () => {
     const created = schemaMigrations.flatMap((migration) => [...migration.sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)/g)]
       .map((match) => match[1]));
-    assert.deepEqual([...new Set(created)].sort(), [...backupTables, ...unbackedTables].sort());
+    assert.deepEqual([...new Set(created)].sort(), [...backupTables, ...unbackedTables, ...legacyTables].sort());
+    // A legacy table is one a contract migration drops.
+    for (const table of legacyTables) {
+      assert.ok(schemaMigrations.some((migration) => migration.requiresExplicitTarget && migration.sql.includes(`DROP TABLE ${table};`)), table);
+    }
     assert.ok((backupTables).includes('admin'));
     assert.ok(!(backupTables as readonly string[]).includes('admin_sessions'));
   });
@@ -134,7 +147,8 @@ describe('BackupService', () => {
     assert.equal(result.filename, 'agt-kb-backup-20261107-061500.zip');
     assert.equal(statements(client)[0], 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const contents = await readBackupArchive(result.archive, { maxBytes: 1e8, maxEntries: 16, maxUncompressedBytes: 1e8 });
-    assert.deepEqual(Object.keys(contents.database.tables), [...backupTables]);
+    // application_settings exists until 016 runs, so this schema version still has it.
+    assert.deepEqual(Object.keys(contents.database.tables), [...backupTables, ...legacyTables]);
     assert.ok(!('admin_sessions' in contents.database.tables));
     assertMatches(contents.manifest, { appVersion: match.any(String), migrations: current });
     assert.equal(contents.configText, 'server:\n  port: 3001\n');
@@ -253,16 +267,30 @@ describe('BackupService', () => {
     assert.equal(readFileSync(join(configDir, 'config.yaml'), 'utf8'), 'server:\n  port: 4000\n');
   });
 
-  it('keeps settings that config.yaml defines and lists them in the report', async () => {
+  it('drops restored settings that config.yaml locks and lists them in the report (CFG-8)', async () => {
     const client = fakeClient();
-    useConfig('site:\n  applicationName: File Archive\n');
+    useConfig('site:\n  title: File Archive\nbackup:\n  maxEntries: 30\naccess:\n  allowPublicBrowsing: false\n');
 
     const report = await service().restore(await archive());
 
-    assert.deepEqual(report.ignoredSettings, ['site.applicationName']);
-    const keep = client.query.mock.calls.find(({ arguments: [sql] }) => sql.startsWith('UPDATE "public"."application_settings"'))!.arguments;
-    assert.ok((keep[0]).includes('SET ("application_name") = ('));
-    assert.deepEqual(JSON.parse(String((keep[1] as unknown[])[0])), { application_name: 'Live Archive' });
+    assert.deepEqual(report.ignoredSettings, ['site.title', 'backup.maxEntries']);
+    const lookup = client.query.mock.calls.find(({ arguments: [sql] }) => sql.startsWith('SELECT key FROM "kb_restore_'))!.arguments;
+    assert.deepEqual(lookup[1], [['site.title', 'access.allowPublicBrowsing', 'backup.maxEntries']]);
+    const sql = statements(client);
+    const drop = client.query.mock.calls.find(({ arguments: [statement] }) => statement.startsWith('DELETE FROM "public"."settings"'))!.arguments;
+    assert.deepEqual(drop[1], [['site.title', 'backup.maxEntries']]);
+    // After the restored rows are copied, inside the same transaction.
+    assert.ok(sql.indexOf(drop[0]) > sql.findIndex((statement) => statement.startsWith('INSERT INTO "public"."settings"')));
+    assert.ok(sql.indexOf(drop[0]) < sql.lastIndexOf('COMMIT'));
+  });
+
+  it('never writes a legacy table on restore, though backups carry it while it exists', async () => {
+    const client = fakeClient();
+    const { archive: exported } = await service().export();
+    const contents = await readBackupArchive(exported, { maxBytes: 1e8, maxEntries: 16, maxUncompressedBytes: 1e8 });
+    assert.ok('application_settings' in contents.database.tables);
+    await service().restore(await archive());
+    assert.equal(statements(client).some((statement) => statement.startsWith('INSERT INTO "public"."application_settings"')), false);
   });
 
   it('aborts the restore when the pre-restore backup cannot be written', async () => {
@@ -277,11 +305,15 @@ describe('BackupService', () => {
     consoleError.mock.restore();
   });
 
-  it('requires exactly one Admin and one settings row before touching the database', async () => {
+  it('requires exactly one Admin before touching the database', async () => {
     fakeClient();
     await rejectsMatching(service().preview(await archive({ tables: tables({ admin: [] }) })), { error: 'invalid_backup', legacyCode: 'INVALID_BACKUP', message: match.stringContaining('exactly one Admin') });
-    await rejectsMatching(service().preview(await archive({ tables: tables({ application_settings: [] }) })), { error: 'invalid_backup', legacyCode: 'INVALID_BACKUP' });
     assert.equal((database.connect).mock.callCount(), 0);
+  });
+
+  it('accepts a backup without dashboard settings', async () => {
+    fakeClient();
+    assertMatches(await service().preview(await archive({ tables: tables({ settings: [] }) })), { counts: { settings: 0 } });
   });
 
   it('rejects rows or tables that do not match the backup\'s schema version', async () => {

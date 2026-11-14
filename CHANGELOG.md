@@ -34,6 +34,36 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   `GET /api/member/articles` and `GET /api/admin/articles` return `{ items, nextCursor, total }` with up to `limit`
   (default 50) articles; pass `nextCursor` as `cursor` for the next page. Clients that send `page` still get the 1.x
   response with `page`, `pageSize` and `totalPages`, until 3.0.0 ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
+- **The API listens on port 8081 instead of 3001** (`server.port`, the app's registered port), and on `127.0.0.1`
+  unless `server.host` or `AGT_KNOWLEDGE_BASE_SERVER_HOST` says otherwise; the Docker image sets `0.0.0.0` and the
+  bundled Nginx forwards to `api:8081`. If your `config.yaml` sets `server.port: 3001`, remove it; if you run your own
+  proxy in front of the `api` container, point it at port 8081. The public port of the Compose stack is unchanged.
+- **Configuration keys and environment variables have their spec names.** The 1.x names still work until 3.0.0 and
+  each one used logs a deprecation warning at startup, so nothing has to change now. To silence the warnings:
+  - in `config.yaml`, rename `site.applicationName` → `site.title`, `site.applicationSubtitle` → `site.subtitle`,
+    `backup.maxBytes` → `backup.maxZipBytes`, `adminSession.secureCookie` → `session.secureCookie`; remove
+    `adminSession.ttlHours`, `rateLimits.adminLogin` and `rateLimits.adminPassword` unless you need values other than
+    `session.ttlHours` and `rateLimits.login`; remove `server.frontendOrigin` behind a TLS proxy that `trustProxy`
+    trusts (the Admin cookie is then still `Secure`);
+  - in `.env`, rename `AGT_SETUP_PASSWORD` → `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD`;
+  - with Docker Compose, set `database.user` in `config.yaml` to your `POSTGRES_USER` (`postgres` unless you set it;
+    `agt` if you copied `docker.env.example`), and `database.name` if you changed `POSTGRES_DB`;
+  - outside Docker, replace `DATABASE_URL` or `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DATABASE_SSL` with
+    `database.*` in `config.yaml`, `DB_PASSWORD` with `AGT_KNOWLEDGE_BASE_DB_PASSWORD`, `CONFIG_FILE` with
+    `AGT_KNOWLEDGE_BASE_CONFIG_FILE`, `LOCAL_USER_PASSWORD` with `AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD`, and remove
+    `AUTH_MODE`.
+- **Member sign-in is limited to 10 attempts per 15 minutes** per client address by default (`rateLimits.login`;
+  1.x allowed 5 per minute), and Admin sign-in and the Admin password change now use `rateLimits.login` too, each
+  with its own counter. Backup restore uploads are limited to 120 per 15 minutes (`rateLimits.adminUploads`).
+- **`session.ttlHours` now also sets the Admin session lifetime** unless the deprecated `adminSession.ttlHours` is set.
+- **Dashboard settings move to a `settings` table** (migration `015_settings_table`). Settings you changed in the
+  dashboard are copied; settings still at their 1.x defaults stay at the defaults. Once 2.0.0 runs, drop the old
+  table with `docker compose run --rm -e MIGRATION_TARGET_ID=016_drop_application_settings migrate`.
+- **API clients: settings.** `GET /api/settings/public` returns the public settings grouped by `config.yaml` key
+  (`site`, `articles`, `access`). `GET /api/admin/settings` adds `states` (one entry per setting with `key`, `value`,
+  `source`, `locked`, `default` and `description`), and `PUT /api/admin/settings` takes `{ "values": { key: value | null } }`.
+  `GET /api/settings`, the 1.x admin settings fields and the `version` check are deprecated; settings no longer
+  carry a version, so a deprecated 1.x settings write no longer answers `409 conflict`.
 
 ### Added
 
@@ -44,6 +74,11 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   `POST /api/admin/login`, `POST /api/admin/logout`, `GET /api/admin/session` and `POST /api/admin/password`
   ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
 - The admin dashboard header shows the app version, which `GET /api/admin/session` now returns ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
+- `GET /api/settings/public` (CFG-10), and the dashboard settings `site.supportUrl` (the support link, shown in the
+  Settings tab) and `server.logLevel`, `storage.dataDir`, `database.*` and `rateLimits.adminUploads` in `config.yaml`
+  (CFG-5).
+- `PUT /api/admin/settings` refuses a key that is not a dashboard setting with `400 unknown_setting`, and an invalid
+  value with `400 invalid_setting`, naming the key in `params.key` (CFG-8).
 - Article lists show a **Load more** button instead of page numbers, so pages never repeat or skip articles while
   others are edited ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
 
@@ -60,6 +95,17 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 - The admin panel's **API** tab renders the generated OpenAPI document instead of hand-written files ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
 - The API server serves the member UI and the admin panel; Nginx only forwards to it ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
+- `config.yaml` is validated with a TypeBox schema; an error names the key and the problem, for example
+  `Invalid config.yaml: server.prot: Unexpected property` (CFG-3). A missing file now logs a warning.
+- Only the CFG-2 environment variables are read, all with the `AGT_KNOWLEDGE_BASE_` prefix: `_SETUP_PASSWORD`,
+  `_DB_PASSWORD`, `_CONFIG_FILE` (default `./config.yaml`), `_DATABASE_HOST`, `_SERVER_HOST` and `_STATIC_DIR`, plus
+  `LOCAL_AUTH_SECRET` until member sessions change and the recovery command's `_LOCAL_USER_PASSWORD`. The database
+  name, user, port and TLS setting come from `database.*` in `config.yaml`.
+- `server.trustProxy` also accepts a proxy IP or CIDR, or a list of them.
+- Settings precedence (config file, then dashboard, then default) is computed in one place, `settingStates()`; a
+  backup restore drops the restored dashboard settings whose keys `config.yaml` sets and lists them in its report.
+- The server sends CORS headers only when the deprecated `server.frontendOrigin` is set; the site itself is
+  same-origin.
 
 ### Deprecated
 
@@ -71,6 +117,22 @@ These keep working unchanged and are removed in 3.0.0 ([#51](https://github.com/
 - The `code` and `issues` properties of error bodies: use `error` and `fields`.
 - The `page` and `pageSize` parameters of the article lists, and the `page`, `pageSize` and `totalPages` fields they
   return: use `limit`, `cursor` and `nextCursor`.
+
+These keep working and are removed in 3.0.0; each one used logs a warning at startup:
+
+- The `config.yaml` keys `site.applicationName`, `site.applicationSubtitle`, `backup.maxBytes`,
+  `adminSession.secureCookie` (renamed to `site.title`, `site.subtitle`, `backup.maxZipBytes`,
+  `session.secureCookie`), `adminSession.ttlHours`, `rateLimits.adminLogin`, `rateLimits.adminPassword` and
+  `server.frontendOrigin`.
+- The environment variables `AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_PASSWORD`, `LOCAL_USER_PASSWORD` (renamed with
+  the `AGT_KNOWLEDGE_BASE_` prefix), `DATABASE_URL`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DATABASE_SSL`
+  (replaced by `database.*` in `config.yaml`) and `AUTH_MODE`.
+
+These keep working unchanged and are removed in 3.0.0:
+
+- `GET /api/settings`: use `GET /api/settings/public`.
+- The `version` and `settings` fields of `GET`/`PUT /api/admin/settings` responses, and the 1.x fields of the
+  `PUT` body: use `states` and `values`.
 
 ### Removed
 

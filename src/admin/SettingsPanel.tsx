@@ -2,25 +2,31 @@ import { type FormEvent, useEffect, useState } from 'react';
 import { LoadingState } from '../components/States';
 import { agtVisibilityOptions, legacyVisibilityOptions, parseArticleVisibility } from '../visibility';
 import { getSettings, updateSettings } from './api';
-import type { AdminSettingsView, DashboardSettings, SettingName, SettingsWrite } from './types';
+import type { AdminSettingsView, DashboardSettings, SettingKey, SettingState, SettingsWrite } from './types';
 
-type Draft = { [Name in SettingName]: DashboardSettings[Name] | null };
+type Draft = { [Key in SettingKey]: DashboardSettings[Key] | null };
 
-const limitNames = ['backupMaxBytes', 'backupMaxEntries', 'backupMaxUncompressedBytes'] as const;
+const limitKeys = ['backup.maxZipBytes', 'backup.maxUncompressedBytes', 'backup.maxEntries'] as const;
+
+function stateMap(view: AdminSettingsView) {
+  return Object.fromEntries(view.states.map((state) => [state.key, state])) as { [Key in SettingKey]: SettingState<Key> };
+}
 
 function draftFrom(view: AdminSettingsView): Draft {
-  const draft = Object.fromEntries(Object.entries(view.settings).map(([name, setting]) => [name, setting.value])) as Draft;
+  const draft = Object.fromEntries(view.states.map((state) => [state.key, state.value])) as Draft;
   // Backup limits left at their defaults show as empty ("use the default").
-  for (const name of limitNames) if (view.settings[name].source === 'default') draft[name] = null;
+  for (const state of view.states) {
+    if ((limitKeys as readonly string[]).includes(state.key) && state.source === 'default') draft[state.key] = null;
+  }
   return draft;
 }
 
-function SourceNote({ view, name }: { view: AdminSettingsView; name: SettingName }) {
-  const setting = view.settings[name];
-  if (setting.source === 'file') {
-    return <small className="field-help setting-source">Set in the configuration file (<code>{setting.key}</code>)</small>;
+/** Where a value comes from; a key config.yaml sets is read-only (CFG-9). */
+function SourceNote({ state }: { state: SettingState }) {
+  if (state.locked) {
+    return <small className="field-help setting-source">Set in the configuration file (<code>{state.key}</code>)</small>;
   }
-  return <small className="field-help setting-source">{setting.source === 'default' ? 'Default' : 'Set in the dashboard'} · <code>{setting.key}</code></small>;
+  return <small className="field-help setting-source">{state.source === 'default' ? 'Default' : 'Set in the dashboard'} · <code>{state.key}</code></small>;
 }
 
 export function SettingsPanel() {
@@ -41,10 +47,11 @@ export function SettingsPanel() {
 
   if (!view || !draft) return error ? <div className="inline-alert" role="alert">{error}</div> : <LoadingState message="Loading settings…" />;
 
-  const locked = (name: SettingName) => view.settings[name].source === 'file';
-  const update = <Name extends SettingName>(name: Name, value: Draft[Name]) => {
+  const states = stateMap(view);
+  const initial = draftFrom(view);
+  const update = <Key extends SettingKey>(key: Key, value: Draft[Key]) => {
     setSaved(false);
-    setDraft({ ...draft, [name]: value });
+    setDraft({ ...draft, [key]: value });
   };
 
   async function save(event: FormEvent) {
@@ -52,13 +59,13 @@ export function SettingsPanel() {
     if (!view || !draft) return;
     setBusy(true);
     setError('');
-    // Only dashboard-editable values are sent: the API rejects file-defined keys.
-    const input: SettingsWrite = { version: view.version };
-    for (const name of Object.keys(draft) as SettingName[]) {
-      if (!locked(name)) Object.assign(input, { [name]: draft[name] });
+    // Only changed, unlocked keys are sent: the API refuses keys config.yaml sets.
+    const values: SettingsWrite['values'] = {};
+    for (const key of Object.keys(draft) as SettingKey[]) {
+      if (!states[key].locked && draft[key] !== initial[key]) Object.assign(values, { [key]: draft[key] });
     }
     try {
-      const next = await updateSettings(input);
+      const next = await updateSettings({ values });
       setView(next);
       setDraft(draftFrom(next));
       setSaved(true);
@@ -67,19 +74,35 @@ export function SettingsPanel() {
     } finally { setBusy(false); }
   }
 
-  const limitField = (name: typeof limitNames[number], label: string) => (
+  const textField = (key: 'site.title' | 'site.subtitle' | 'site.supportUrl', label: string, options: { maxLength: number; multiline?: boolean; type?: string }) => {
+    const props = {
+      value: draft[key] ?? '',
+      maxLength: options.maxLength,
+      readOnly: states[key].locked,
+      required: true,
+      onChange: (event: { target: { value: string } }) => update(key, event.target.value),
+    };
+    return (
+      <label className="field"><span>{label}</span>
+        {options.multiline ? <textarea {...props} /> : <input type={options.type ?? 'text'} {...props} />}
+        <SourceNote state={states[key]} />
+      </label>
+    );
+  };
+
+  const limitField = (key: typeof limitKeys[number], label: string) => (
     <label className="field">
       <span>{label}</span>
       <input
         type="number"
         min={1}
         step={1}
-        value={draft[name] ?? ''}
-        placeholder={`Default: ${view.settings[name].source === 'default' ? view.settings[name].value.toLocaleString() : 'server default'}`}
-        readOnly={locked(name)}
-        onChange={(event) => update(name, event.target.value === '' ? null : Number(event.target.value))}
+        value={draft[key] ?? ''}
+        placeholder={`Default: ${states[key].default.toLocaleString()}`}
+        readOnly={states[key].locked}
+        onChange={(event) => update(key, event.target.value === '' ? null : Number(event.target.value))}
       />
-      <SourceNote view={view} name={name} />
+      <SourceNote state={states[key]} />
     </label>
   );
 
@@ -90,30 +113,25 @@ export function SettingsPanel() {
       {error && <div className="inline-alert" role="alert">{error}</div>}
       {saved && <div className="inline-notice" role="status">Settings saved.</div>}
       <form className="stack-form" onSubmit={(event) => void save(event)}>
-        <label className="field"><span>Application name</span>
-          <input value={draft.applicationName ?? ''} maxLength={80} readOnly={locked('applicationName')} onChange={(event) => update('applicationName', event.target.value)} required />
-          <SourceNote view={view} name="applicationName" />
-        </label>
-        <label className="field"><span>Subtitle or description</span>
-          <textarea value={draft.applicationSubtitle ?? ''} maxLength={240} readOnly={locked('applicationSubtitle')} onChange={(event) => update('applicationSubtitle', event.target.value)} required />
-          <SourceNote view={view} name="applicationSubtitle" />
-        </label>
+        {textField('site.title', 'Application name', { maxLength: 100 })}
+        {textField('site.subtitle', 'Subtitle or description', { maxLength: 240, multiline: true })}
+        {textField('site.supportUrl', 'Support link', { maxLength: 2000, type: 'url' })}
         <label className="field"><span>Default article visibility</span>
-          <select value={String(draft.defaultVisibility)} disabled={locked('defaultVisibility')} onChange={(event) => update('defaultVisibility', parseArticleVisibility(event.target.value))}>
+          <select value={String(draft['articles.defaultVisibility'])} disabled={states['articles.defaultVisibility'].locked} onChange={(event) => update('articles.defaultVisibility', parseArticleVisibility(event.target.value))}>
             <optgroup label="AGT standard">{agtVisibilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup>
             <optgroup label="Legacy">{legacyVisibilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup>
           </select>
-          <SourceNote view={view} name="defaultVisibility" />
+          <SourceNote state={states['articles.defaultVisibility']} />
         </label>
         <label className="check-field">
-          <input type="checkbox" checked={Boolean(draft.allowPublicBrowsing)} disabled={locked('allowPublicBrowsing')} onChange={(event) => update('allowPublicBrowsing', event.target.checked)} />
+          <input type="checkbox" checked={Boolean(draft['access.allowPublicBrowsing'])} disabled={states['access.allowPublicBrowsing'].locked} onChange={(event) => update('access.allowPublicBrowsing', event.target.checked)} />
           Allow unauthenticated visitors to browse public articles
         </label>
-        <SourceNote view={view} name="allowPublicBrowsing" />
+        <SourceNote state={states['access.allowPublicBrowsing']} />
         <h3>Backup limits</h3>
-        {limitField('backupMaxBytes', 'Largest backup upload (bytes)')}
-        {limitField('backupMaxEntries', 'Most entries in a backup archive')}
-        {limitField('backupMaxUncompressedBytes', 'Largest uncompressed backup (bytes)')}
+        {limitField('backup.maxZipBytes', 'Largest backup upload (bytes)')}
+        {limitField('backup.maxEntries', 'Most entries in a backup archive')}
+        {limitField('backup.maxUncompressedBytes', 'Largest uncompressed backup (bytes)')}
         <div className="dialog-actions">
           <button className="button button-primary" disabled={busy} type="submit">Save settings</button>
           <button className="button button-secondary" disabled={busy} type="button" onClick={() => { setDraft(draftFrom(view)); setSaved(false); }}>Cancel</button>

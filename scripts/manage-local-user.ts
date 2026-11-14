@@ -1,6 +1,7 @@
-import { createDatabase, databaseSettingsFromEnv } from '../server/db.js';
+import { createDatabase } from '../server/db.js';
 import { hashPassword } from '../server/local-auth.js';
 import { roles, type Role } from '../server/domain.js';
+import { envValue, loadStartup } from '../server/startup.js';
 
 function arg(name: string) {
   const index = process.argv.indexOf(`--${name}`);
@@ -14,7 +15,7 @@ function arg(name: string) {
 function fail(message: string): never {
   console.error(message);
   console.error('Usage: --username <name> --display-name <name> [--email <address>] --role <Editor|Moderator> --confirm');
-  console.error('Provide the password through LOCAL_USER_PASSWORD.');
+  console.error('Provide the password through AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD.');
   process.exit(2);
 }
 
@@ -22,7 +23,8 @@ const username = arg('username')?.trim().toLowerCase();
 const displayName = arg('display-name')?.trim();
 const email = arg('email')?.trim().toLowerCase();
 const role = arg('role') as Role | undefined;
-const password = process.env.LOCAL_USER_PASSWORD;
+const warnings: string[] = [];
+const password = envValue(process.env, 'LOCAL_USER_PASSWORD', warnings, 'LOCAL_USER_PASSWORD');
 
 if (!process.argv.includes('--confirm')) fail('--confirm is required.');
 if (!username || !/^[a-z0-9_.-]{3,64}$/.test(username)) fail('Username must be 3-64 lowercase letters, numbers, dots, underscores, or hyphens.');
@@ -31,11 +33,19 @@ if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) 
 if (!role || !roles.includes(role)) fail('Role must be Editor or Moderator. The installation Admin is managed at /admin, not here.');
 if (!password || password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password)
   || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
-  fail('LOCAL_USER_PASSWORD must contain at least 12 characters, including uppercase, lowercase, a number, and a symbol.');
+  fail('AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD must contain at least 12 characters, including uppercase, lowercase, a number, and a symbol.');
 }
 
 const passwordHash = await hashPassword(password);
-const db = createDatabase(databaseSettingsFromEnv(process.env));
+let startup;
+try {
+  startup = loadStartup(process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+for (const warning of [...warnings, ...startup.warnings]) console.warn(warning);
+const db = createDatabase(startup.database);
 const pool = await db.pool();
 try {
   await pool.query(

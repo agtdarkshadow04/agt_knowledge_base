@@ -7,12 +7,11 @@ import { HttpError, invalidField } from './http.js';
 import { PostgresArticleRepository } from './postgres-article-repository.js';
 import type { AppContext } from './context.js';
 import type { ApiRequest, ApiResponse } from './routes.js';
-import { SettingsService } from './settings-service.js';
+import { SettingsService, type SettingsWrite } from './settings-service.js';
 import {
   parseAdminPasswordWrite,
   parseAdminUserCreate,
   parseAdminUserUpdate,
-  parseApplicationSettingsWrite,
   parseListQuery,
   parseUserListQuery,
 } from '../src/lib/validation.js';
@@ -67,7 +66,7 @@ export function createAdminRequestHandler(
       case 'GET /api/admin/settings':
         return json(200, await settingsService.getAdminView());
       case 'PUT /api/admin/settings':
-        return json(200, await settingsService.update(parseApplicationSettingsWrite(parseBody(request))));
+        return json(200, await settingsService.update(parseBody(request) as SettingsWrite));
       case 'GET /api/admin/backup': {
         const backup = await backupService.export();
         return {

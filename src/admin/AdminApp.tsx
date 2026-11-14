@@ -62,11 +62,11 @@ function SetupScreen({ status, onComplete }: { status: SetupStatus; onComplete(s
       <h1 id="admin-setup-title">Create the Admin account</h1>
       {!status.setupPasswordConfigured ? (
         <div className="inline-alert" role="alert">
-          Setup is disabled. Set <code>AGT_SETUP_PASSWORD</code> in the server&apos;s <code>.env</code>, restart the stack, and reload this page.
+          Setup is disabled. Set <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code> in the server&apos;s <code>.env</code>, restart the stack, and reload this page.
         </div>
       ) : (
         <>
-          <p>Enter the one-time setup password from <code>AGT_SETUP_PASSWORD</code>, then choose the Admin username and a new password. The Admin manages members and the installation; it cannot write articles.</p>
+          <p>Enter the one-time setup password from <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code>, then choose the Admin username and a new password. The Admin manages members and the installation; it cannot write articles.</p>
           {error && <div className="inline-alert" role="alert">{error}</div>}
           <form className="stack-form" onSubmit={(event) => void submit(event)}>
             <label className="field"><span>Setup password</span><input name="setupPassword" type="password" autoComplete="off" required /></label>
@@ -137,7 +137,7 @@ function Dashboard({ session, onSessionChange, onSignedOut }: {
       </header>
       {session.setupPasswordSet && (
         <div className="inline-alert" role="alert">
-          <code>AGT_SETUP_PASSWORD</code> is still set on the server. It is no longer needed: remove it from <code>.env</code> and restart the stack.
+          <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code> is still set on the server. It is no longer needed: remove it from <code>.env</code> and restart the stack.
         </div>
       )}
       <nav className="admin-tabs" aria-label="Administration sections">

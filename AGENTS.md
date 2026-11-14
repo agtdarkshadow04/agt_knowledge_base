@@ -41,8 +41,8 @@ npm run lint        # tsc -b over the app, node and server projects (strict, no 
 npm test            # test:client (src/lib/*.test.ts) + test:server (server/test/*.test.ts) + test:components
 npm run test:components  # Vitest + jsdom for the React components (~25 s)
 npm run build       # Vite build → dist/, server bundle → dist-server/index.mjs
-npm run dev:server  # build and run the API on :3001 (needs PostgreSQL and the variables in .env)
-npm run dev         # Vite dev server on :5173, proxies /api/ to :3001
+npm run dev:server  # build and run the API on 127.0.0.1:8081 (needs PostgreSQL and the variables in .env.local)
+npm run dev         # Vite dev server on :5173, proxies /api/ to :8081
 npm run db:migrate  # apply migrations (only when explicitly asked; never against a real database otherwise)
 ```
 
@@ -63,22 +63,23 @@ the install-script check (STACK-7) and `npm run check`, and builds both Docker i
 | --- | --- |
 | `docs/agt-webapp-spec.md` | Pinned copy of the AGT Web Application Specification v6.0.0 (tag `v6.0.0`). Never edit; `.gitattributes` keeps it byte-identical |
 | `CHANGELOG.md` | Release notes (Keep a Changelog 1.1.0), newest first (VER-9) |
-| `server/index.ts` | Entry point and the only reader of `process.env`: loads `config.yaml` (`CONFIG_FILE`), builds the `AppContext`, listens, shuts down on SIGTERM/SIGINT |
+| `server/index.ts` | Entry point and the only server file that reads `process.env`: builds the `AppContext` from `loadStartup()`, logs deprecation warnings, listens, shuts down on SIGTERM/SIGINT |
+| `server/startup.ts` | `loadStartup(env)`: the CFG-2 `AGT_KNOWLEDGE_BASE_*` variables (and their deprecated 1.x names), `config.yaml` loading and the database settings, for `server/index.ts` and `scripts/` |
 | `server/app.ts` | `buildApp(context, options)`: the Fastify app without `listen()` — route registration, the one authentication `onRequest` hook (rate limits, CSRF, member token, Admin cookie), body limits, the single error handler, and the sign-in/setup/session/logout/password routes it serves itself |
-| `server/context.ts` | `AppContext`: config, config file text, database, setup password, member-token secret, version |
+| `server/context.ts` | `AppContext` (config, config file text, database, setup password, member-token secret, version) and the settings precedence: `setting()`, `settingStates()`, `settingValues()`, `lockedSettingKeys()` (CFG-7) |
 | `server/http.ts` | `HttpError(statusCode, error, message, { fields, params, legacyCode })` and `errorReply()`, the one mapping from errors to the API-6 error body |
 | `server/routes.ts` | Route table: path under `/api/`, auth mode, `operationId`, tag, summary, TypeBox schemas, rate limit, and `replacedBy` for deprecated 1.x paths; the `ApiRequest`/`ApiResponse` types |
 | `server/schemas.ts` | TypeBox request and response schemas of every route, `ErrorBody`/`FieldError`, and `errorCodes` (every code the server sends) |
 | `server/openapi.ts` | `@fastify/swagger` registration and the `SECURITY` values each route declares (API-11) |
 | `server/pagination.ts` | Opaque article-list cursors (API-8) |
-| `server/config.ts` | `config.yaml` loading and its Zod schema (unknown keys are errors) |
+| `server/config.ts` | `config.yaml`: its TypeBox schema with the CFG-5 keys (unknown keys are errors), the deprecated 1.x key names, and `EDITABLE_SETTINGS` (CFG-6) |
 | `server/auth.ts` | `authenticate()`, the only place a member bearer token becomes a user; `requireActor` / `requireAdminSession` |
-| `server/admin-auth.ts` | Admin setup (`AGT_SETUP_PASSWORD`), sign-in and SHA-256-hashed cookie sessions |
+| `server/admin-auth.ts` | Admin setup (`AGT_KNOWLEDGE_BASE_SETUP_PASSWORD`), sign-in and SHA-256-hashed cookie sessions |
 | `server/local-auth.ts` | Password hashing and `LocalAuthService` (member sign-in, signed member tokens) |
 | `server/handler.ts`, `server/admin-handler.ts` | Public/member and `/admin/*` route dispatchers built from the context. The Admin handler never reads `request.actor` |
-| `server/*-service.ts` | Domain logic, built with the context. `settings-service.ts` resolves config-file-wins settings; `backup-service.ts` + `backup-archive.ts` export, preview and restore ZIP backups |
+| `server/*-service.ts` | Domain logic, built with the context. `settings-service.ts` reads and writes the `settings` table (CFG-8) and the public settings; `backup-service.ts` + `backup-archive.ts` export, preview and restore ZIP backups |
 | `server/domain.ts` | Types, visibility access rules, domain `HttpError` subclasses; re-exports the shared types from `src/lib/api.ts` |
-| `server/db.ts` | `Database` (lazily created `pg.Pool`) and `databaseSettingsFromEnv()` |
+| `server/db.ts` | `Database` (lazily created `pg.Pool`) and `createDatabase()` |
 | `server/repository.ts`, `server/postgres-article-repository.ts` | Repository interfaces and all article/tag SQL (`admin-service.ts` holds the member-account SQL) |
 | `server/migrations.ts`, `server/migrations-runner.ts`, `migrations/*.sql` | Inline migration SQL that actually runs, its runner, and reviewable SQL copies |
 | `server/rate-limit.ts`, `server/line-diff.ts` | Rate limiter (keyed by Fastify's `request.ip`, which honours `server.trustProxy`), revision diff |
@@ -108,9 +109,11 @@ the install-script check (STACK-7) and `npm run check`, and builds both Docker i
   unused symbols. Server and scripts import relative files with a `.js` extension
   (`import { HttpError } from './http.js';`); frontend imports under `src/` are extensionless, and files in `src/lib/`
   that the server imports use `.js` too.
-- **Server structure (SRV-1..SRV-3):** only `server/index.ts` reads `process.env` or decides where the config file
-  lives. Everything else gets what it needs from the `AppContext` passed to `buildApp()` (services take the context, or
-  the parts of it they use, in their constructor); never add a module-level pool, config cache or `process.env` read.
+- **Server structure (SRV-1..SRV-3):** only the entry points (`server/index.ts`, `scripts/*.ts`) read `process.env`,
+  and they pass it to `loadStartup()` in `server/startup.ts`, which alone interprets variables and decides where the
+  config file lives. A new environment variable must be in the CFG-2 set or an `AGT_KNOWLEDGE_BASE_<NAME>` secret.
+  Everything else gets what it needs from the `AppContext` passed to `buildApp()` (services take the context, or the
+  parts of it they use, in their constructor); never add a module-level pool, config cache or `process.env` read.
 - Request input is checked twice: the route's TypeBox schema (types, required properties, no undeclared properties;
   `removeAdditional` and `coerceTypes` are off, so nothing is silently dropped or converted), then the semantic Zod
   parsers in `src/lib/validation.ts` (shared with the browser; never duplicate a rule). Signal failures by throwing
@@ -164,9 +167,12 @@ the install-script check (STACK-7) and `npm run check`, and builds both Docker i
   on `request.actor` and never inspect tokens. The `onRequest` hook in `app.ts` verifies the Admin cookie for `auth: 'admin'` routes and
   passes `request.admin`. Bearer tokens are ignored on admin routes and the Admin cookie on member routes; never let
   one grant the other.
-- **Configuration:** non-secret settings live in `config.yaml` (document every key in `config.example.yaml`); secrets
-  stay in environment variables. Dashboard-editable keys resolve file → `application_settings` → default in
-  `settings-service.ts`, and a key the file defines must never be changeable through any API, migration or restore.
+- **Configuration:** non-secret settings live in `config.yaml` (document every key, commented out, in
+  `config.example.yaml`; `server/test/config.test.ts` checks it); secrets stay in environment variables. Renaming a
+  key adds it to `renamedKeys` in `server/config.ts` until the next major (VER-10). A dashboard-editable setting is an
+  `EDITABLE_SETTINGS` entry (schema, default, description) plus its `config.yaml` key and the `CHECK` list of the
+  `settings` table (a new migration); it resolves config file → `settings` table → default only in `settingStates()`,
+  and a key the file defines must never be changeable through any API, migration or restore.
 - **Security (do not weaken, WF-4):** the API is the authorization boundary; UI hiding is never access control.
   Never commit `.env` files, secrets, database URLs or credentials; `VITE_*` values are public. Markdown is rendered
   without raw HTML and the API rejects HTML/JSX/MDX imports: never enable raw HTML or execute content as MDX, and
@@ -196,13 +202,13 @@ marked **To fix** names the #48 phase, or the major release, that removes it; de
 | STACK-1, TEST-1, TEST-3 | **To fix (Phase 10):** the React component tests (`src/**/*.test.tsx`) run in Vitest + jsdom + Testing Library (`npm run test:components`, part of `npm test`), with the dev dependencies `vitest`, `jsdom` and `@testing-library/*`; `package.json` also has the scripts `test:components`, `build:scripts` and `db:migrate` | The spec's client tests run in plain Node without a DOM. Phase 10's Playwright suite (TEST-6) replaces these tests; removing them earlier would lose coverage (TEST-5) |
 | SRV-4 | **To fix (Phase 5):** SQL also lives in `admin-auth.ts`, `local-auth.ts`, `admin-service.ts`, `settings-service.ts`, `backup-service.ts` and `migrations-runner.ts`, not only in the repository | Predates the spec |
 | REPO-1, FE-6, FE-8 | **To fix (Phases 4–10):** the layout still has `scripts/`, `migrations/*.sql` mirrored into `server/migrations.ts` (Phase 5), `src/services/`, `src/pages/` and logic outside `src/lib/` such as `src/visibility.ts` (Phase 8), `nginx.conf` and `docker.env.example` (Phase 10); server files are named after the current pipeline (`handler.ts`, `admin-handler.ts`, `admin-auth.ts`, `local-auth.ts`) rather than `adminRoutes.ts`, `session.ts`, `passwords.ts` (Phase 4); forms do not validate with `src/lib/validation.ts` yet (Phase 8) | Predates the spec |
-| API-1, API-2, API-3, API-6, API-8 | **To fix (3.0.0):** the 1.x paths `/api/admin/setup/status`, `/api/admin/setup`, `/api/admin/auth/login`, `/logout`, `/session` and `PUT /api/admin/auth/password` still work next to their API-1 replacements; error bodies still carry the 1.x `code` and `issues` beside `error`/`fields`; article lists still accept `page`/`pageSize` and then return `page`, `pageSize`, `totalPages`; admin user create/replace return the user, not `{ user, notices }`, a member's password is set with `PUT …/password`, not an action `POST`, and article flags change with `PATCH …/protection`, `/pinning`, `/verification`; public article responses use the member schema, which includes the `createdBy`/`modifiedBy` user IDs | Each is a rename or removal that VER-10 lets a major version make only after a deprecation period; all are deprecated in 2.0.0 (`deprecated: true` in OpenAPI, `CHANGELOG.md`) |
-| CFG-1, CFG-3..CFG-10 | **To fix (Phase 3):** a Zod config schema (not TypeBox) with non-standard keys (`server.frontendOrigin`, `adminSession.*`, `backup.maxBytes`, `rateLimits.adminLogin`/`adminPassword`, `site.applicationName`, …); `server.port` defaults to `3001`, not 8081; settings in `application_settings`, not `settings`; no `EDITABLE_SETTINGS`/`settingStates()`, `unknown_setting`/`invalid_setting`/`defined_in_config` codes or `GET /api/settings/public` | Predates the spec |
-| CFG-2, NAME-2, DEP-4 | **To fix (Phase 3):** environment variables `LOCAL_AUTH_SECRET`, `AGT_SETUP_PASSWORD`, `DB_*`, `DATABASE_URL`, `DATABASE_SSL`, `POSTGRES_*`, `CONFIG_FILE`, `AUTH_MODE`, `MIGRATION_TARGET_ID`, `APP_*` instead of the CFG-2 set with the `AGT_KNOWLEDGE_BASE_` prefix; `docker.env.example` beside `.env.example`; npm package, volumes (`agt-postgres`, `agt-backups`), images, backup file name (`agt-kb-backup-…`) and `localStorage` keys (`agt-*`) do not follow NAME-2 | Predates the spec |
+| API-1, API-2, API-3, API-6, API-8 | **To fix (3.0.0):** the 1.x paths `/api/admin/setup/status`, `/api/admin/setup`, `/api/admin/auth/login`, `/logout`, `/session` and `PUT /api/admin/auth/password` still work next to their API-1 replacements; error bodies still carry the 1.x `code` and `issues` beside `error`/`fields`; article lists still accept `page`/`pageSize` and then return `page`, `pageSize`, `totalPages`; admin user create/replace return the user, not `{ user, notices }`, a member's password is set with `PUT …/password`, not an action `POST`, and article flags change with `PATCH …/protection`, `/pinning`, `/verification`; public article responses use the member schema, which includes the `createdBy`/`modifiedBy` user IDs; `GET /api/settings` and the 1.x `version`/`settings` fields of `/api/admin/settings` still work next to `GET /api/settings/public`, `states` and `values`. CFG-2, CFG-5: the 1.x `config.yaml` keys (`site.applicationName`, `site.applicationSubtitle`, `backup.maxBytes`, `adminSession.*`, `rateLimits.adminLogin`/`adminPassword`, `server.frontendOrigin`) and environment variables (`AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_*`, `DATABASE_URL`, `DATABASE_SSL`, `LOCAL_USER_PASSWORD`, `AUTH_MODE`) are still read, with a startup warning, and Compose still passes `DB_NAME`/`DB_USER` | Each is a rename or removal that VER-10 lets a major version make only after a deprecation period; all are deprecated in 2.0.0 (`deprecated: true` in OpenAPI, startup warnings, `CHANGELOG.md`) |
+| CFG-5, CFG-6 | **To fix (Phases 6, 7, 10):** the `backup.*` limits keep their 1.x ranges and defaults (`maxZipBytes` at most 1 GiB, default 100 MB; `maxUncompressedBytes` at most 500 MB, default 256 MB; `maxEntries` 3–10000, default 16) while backups are a JSON dump parsed in memory, and `database.previewName` is not used yet (Phase 6); no `logs.*` keys (Phase 7); `server.trustProxy` also accepts a number of proxy hops, for the Compose stack's Nginx (Phase 10) | The spec's 8 GiB uncompressed limit needs the `pg_dump` format; the hop count goes with Nginx |
+| CFG-2, NAME-2, DEP-3, DEP-4 | **To fix (Phases 4–10):** `LOCAL_AUTH_SECRET` is not `AGT_KNOWLEDGE_BASE_`-prefixed (Phase 4 removes it); `MIGRATION_TARGET_ID` (Phase 5); Compose reads `POSTGRES_*` and `APP_*` from `.env` and passes `POSTGRES_PASSWORD` to the server as `AGT_KNOWLEDGE_BASE_DB_PASSWORD`, with `docker.env.example` beside `.env.example` and no `.env.db` (Phase 10, with the DEP-3 database role in Phase 5); volumes (`agt-postgres`, `agt-backups`) and images (Phase 10), the backup file name `agt-kb-backup-…` (Phase 6) and `localStorage` keys `agt-*` (Phase 8) do not follow NAME-2 | Predates the spec; renaming Compose variables and volumes needs the Phase 10 stack |
 | AUTH-2, AUTH-3 | **To fix (Phase 4):** scrypt runs with default parameters and stores `scrypt$salt$hash`, not the fixed options and `scrypt$N$r$p$salt$hash` with a format check before any scrypt call; usernames are lower-cased and limited to 3–64 of `[a-z0-9_.-]` instead of stored as entered after trimming (1–64 code points) | Predates the spec; existing hashes need a rehash path. Passwords are already 12–1024 characters (the extra character-class rules tighten AUTH-3) |
 | AUTH-5, AUTH-6, AUTH-8, AUTH-9 | **To fix (Phase 4):** setup is not at `/api/setup`, has no startup length check (SRV-8), and answers `403 SETUP_DISABLED` instead of `503 setup_password_missing`; the AUTH-6 reminders are incomplete; the Admin cookie is not `agt_knowledge_base_session` with `Path=/`, and its table is `admin_sessions`, not `sessions` | Predates the spec |
 | AUTH-8, FE-3, SEC-5 | **To fix (Phase 4):** members use HMAC-signed bearer tokens (`LOCAL_AUTH_SECRET`) kept in `localStorage`, without CSRF headers, instead of the cookie sessions in the AUTH-1 row | Predates the spec; a security fix, so it may skip the deprecation period (VER-10) |
-| SEC-1..SEC-4, SEC-6, API-9 | **To fix (Phase 4):** the API sends `Access-Control-Allow-*` headers for `server.frontendOrigin` and answers every `OPTIONS` request with `204`; no Content-Security-Policy, `X-Frame-Options`, `Referrer-Policy` or COOP; public reads send `Cache-Control: public, max-age=30`; the web port is published on `0.0.0.0:8080` by default; no `deploy/Caddyfile.example` or plain-HTTP warning | Predates the spec |
+| SEC-1..SEC-4, SEC-6, API-9 | **To fix (Phase 4):** the API sends `Access-Control-Allow-*` headers when the deprecated `server.frontendOrigin` is set, and answers every `OPTIONS` request with `204`; no Content-Security-Policy, `X-Frame-Options`, `Referrer-Policy` or COOP; public reads send `Cache-Control: public, max-age=30`; the Compose web port is published on `0.0.0.0:8080` by default (the server itself defaults to `127.0.0.1:8081`); no `deploy/Caddyfile.example` or plain-HTTP warning | Predates the spec |
 | SEC-7 | **To fix (Phase 4):** a hand-written rate limiter (`server/rate-limit.ts`), not `@fastify/rate-limit` with per-route limits and `429 rate_limited` bodies | Predates the spec |
 | SEC-12, SEC-13 | **To fix (Phase 4):** Markdown is rendered by `MarkdownContent.tsx` with `rehype-sanitize`, not one `src/components/Markdown.tsx` with a remark plugin that turns raw HTML into text and an http/https-only `urlTransform`; external links and images do not yet follow SEC-12/SEC-13 attributes | Predates the spec |
 | DATA-3, DATA-4, DATA-11 | **To fix (Phase 5):** migrations are inline SQL in `server/migrations.ts`, not `server/migrations/NNNN_*.sql`; a separate `migrate` job runs them instead of startup under the BAK-12 migration lock, and a newer schema does not stop the server (SRV-8); contract migrations wait for `MIGRATION_TARGET_ID`; `public` still holds the function `merge_preserved_orphan_tag_ids` (and the 006 triggers where 007 has not run); Compose connects as the `postgres` superuser and there is no `rolsuper` check or preview database | Predates the spec |

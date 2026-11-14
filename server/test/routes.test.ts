@@ -79,6 +79,7 @@ describe('route table', () => {
   it('keeps public reads public and requires authentication everywhere else', async () => {
     const publicRoutes = [
       ['POST', '/api/auth/login'],
+      ['GET', '/api/settings/public'],
       ['GET', '/api/settings'],
       ['GET', '/api/articles'],
       ['GET', `/api/articles/${articleId}`],
@@ -129,18 +130,20 @@ describe('route table', () => {
     }
   });
 
-  it('rate-limits member sign-in, Admin sign-in, setup, and Admin password changes', () => {
+  it('rate-limits member sign-in, Admin sign-in, setup, Admin password changes and backup uploads', () => {
     const rateLimit = (key: string) => apiRoutes.find((entry) => entry.routeKey === key)?.rateLimit;
     assert.equal(rateLimit('POST /api/auth/login'), 'login');
     assert.equal(rateLimit('POST /api/admin/login'), 'adminLogin');
     assert.equal(rateLimit('POST /api/setup'), 'setup');
     assert.equal(rateLimit('POST /api/admin/password'), 'adminPassword');
+    assert.equal(rateLimit('POST /api/admin/backup/restore'), 'adminUploads');
     // Each deprecated path shares its replacement's limit.
     assert.equal(rateLimit('POST /api/admin/auth/login'), 'adminLogin');
     assert.equal(rateLimit('POST /api/admin/setup'), 'setup');
     assert.equal(rateLimit('PUT /api/admin/auth/password'), 'adminPassword');
     assert.deepEqual(apiRoutes.filter((entry) => entry.rateLimit).map((entry) => entry.routeKey).sort(), [
       'POST /api/admin/auth/login',
+      'POST /api/admin/backup/restore',
       'POST /api/admin/login',
       'POST /api/admin/password',
       'POST /api/admin/setup',
@@ -179,11 +182,13 @@ describe('route table', () => {
     assert.equal(new Set(routeKeys).size, routeKeys.length);
     assert.equal(member.every((key) => isAdmin(key) === false), true);
     assert.equal(admin.every((key) => isAdmin(key) === true), true);
-    const canonical = apiRoutes.filter((entry) => !entry.replacedBy).map((entry) => entry.routeKey);
+    const canonical = apiRoutes.filter((entry) => !entry.replacedBy || entry.ownHandler).map((entry) => entry.routeKey);
     assert.deepEqual(canonical.filter((key) => !serverRoutes.includes(key)).sort(), [...member, ...admin].sort());
     const served = handledRoutes('server/app.ts');
     assert.deepEqual(served.sort(), [...serverRoutes].sort());
-    // A deprecated path is served by the handler of its replacement.
-    for (const entry of apiRoutes.filter((candidate) => candidate.replacedBy)) assert.equal(entry.handlerKey, entry.replacedBy, entry.routeKey);
+    // A deprecated path is served by the handler of its replacement, unless its response differs (ownHandler).
+    for (const entry of apiRoutes.filter((candidate) => candidate.replacedBy)) {
+      assert.equal(entry.handlerKey, entry.ownHandler ? entry.routeKey : entry.replacedBy, entry.routeKey);
+    }
   });
 });

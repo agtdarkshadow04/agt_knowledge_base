@@ -13,12 +13,11 @@ export interface SessionUser {
   role: UserRole;
 }
 
+/** The settings the public UI needs, from `GET /api/settings/public`, grouped as in config.yaml. */
 export interface ApplicationSettings {
-  applicationName: string;
-  applicationSubtitle: string;
-  defaultVisibility: ArticleVisibility;
-  allowPublicBrowsing: boolean;
-  version: number;
+  site: { title: string; subtitle: string; supportUrl: string };
+  articles: { defaultVisibility: ArticleVisibility };
+  access: { allowPublicBrowsing: boolean };
 }
 
 export interface CanonicalTag {

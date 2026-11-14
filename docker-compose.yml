@@ -23,12 +23,16 @@ services:
       target: api
     command: ['node', 'server/scripts/migrate.js']
     environment: &database-environment
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-agt_knowledge_base}
+      AGT_KNOWLEDGE_BASE_DATABASE_HOST: postgres
+      AGT_KNOWLEDGE_BASE_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      # The database name and user belong in config.yaml (database.name,
+      # database.user). Until 3.0.0 these deprecated variables carry the values
+      # from .env for installations that have not set them there; config.yaml wins,
+      # and the server logs a deprecation warning only when it uses one.
+      DB_NAME: ${POSTGRES_DB:-}
       DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      DATABASE_SSL: 'false'
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,11 +49,13 @@ services:
       LOCAL_AUTH_SECRET: ${LOCAL_AUTH_SECRET:?Set LOCAL_AUTH_SECRET in .env}
       # One-time password for creating the Admin at /admin. Remove it from .env
       # once setup is complete; it is ignored after the Admin exists.
+      AGT_KNOWLEDGE_BASE_SETUP_PASSWORD: ${AGT_KNOWLEDGE_BASE_SETUP_PASSWORD:-}
+      # Deprecated 1.x name, read only when the line above is empty (until 3.0.0).
       AGT_SETUP_PASSWORD: ${AGT_SETUP_PASSWORD:-}
     volumes:
       # Non-secret settings; create it with: cp config.example.yaml config.yaml
       - ./config.yaml:/app/config.yaml:ro
-      # Pre-restore backups (storage.backupsDir).
+      # Pre-restore backups (storage.dataDir/storage.backupsDir).
       - agt-backups:/app/data/backups
     depends_on:
       migrate:

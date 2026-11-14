@@ -102,13 +102,13 @@ export function EditorPage() {
     if (!isNew || draft.title || draft.content || draft.tagIds.length || baseline !== serializeDraft(emptyDraft)) return;
     const next = {
       ...emptyDraft,
-      visibility: isModeratorOnlyVisibility(settings.defaultVisibility) && user?.role !== 'Moderator'
+      visibility: isModeratorOnlyVisibility(settings.articles.defaultVisibility) && user?.role !== 'Moderator'
         ? 'Internal'
-        : settings.defaultVisibility,
+        : settings.articles.defaultVisibility,
     };
     setDraft(next);
     setBaseline(serializeDraft(next));
-  }, [baseline, draft.content, draft.tagIds.length, draft.title, isNew, settings.defaultVisibility, user?.role]);
+  }, [baseline, draft.content, draft.tagIds.length, draft.title, isNew, settings.articles.defaultVisibility, user?.role]);
 
   useEffect(() => {
     const controller = new AbortController();
