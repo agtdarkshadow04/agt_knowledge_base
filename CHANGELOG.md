@@ -35,13 +35,13 @@ recorded here until the first release.
 - The API now runs on Fastify 5 instead of a hand-written Node.js HTTP server, with the same routes, authentication,
   CSRF checks, rate limits, body limits and error bodies. Unexpected errors are logged as JSON lines on standard
   output and always answer `500 INTERNAL_ERROR` with the same message. The Docker images now use Node.js 26
-  ([#48](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/48)).
+  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
 - Building or developing from source needs Node.js 26 and npm 11.20 or newer within npm 11; `npm ci` stops with an
   engine error on older versions. The API is started for development with `npm run dev:server` instead of
   `npm run api:dev`, and `npm run check` runs every check
-  ([#48](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/48)).
+  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
 
 ### Security
 
 - Updated `zod` and the `dompurify` dependency of `html2pdf.js` to versions without known vulnerabilities
-  ([#48](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/48)).
+  ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
