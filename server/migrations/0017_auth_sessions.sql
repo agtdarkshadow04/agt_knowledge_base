@@ -1,5 +1,3 @@
-BEGIN;
-
 -- AUTH-2: 1.x hashes (scrypt$<salt base64url>$<hash base64url>, Node's default
 -- N=16384, r=8, p=1) become the six-field format with standard base64. The
 -- server rehashes them with the current profile on the next successful sign-in.
@@ -38,5 +36,3 @@ CREATE TABLE member_sessions (
 
 CREATE INDEX member_sessions_user_idx ON member_sessions (user_id);
 CREATE INDEX member_sessions_expires_idx ON member_sessions (expires_at);
-
-COMMIT;

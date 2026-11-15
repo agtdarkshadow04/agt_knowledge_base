@@ -1,7 +1,7 @@
 import packageJson from '../package.json' with { type: 'json' };
 import { buildApp } from './app.js';
 import type { AppContext } from './context.js';
-import { createDatabase } from './db.js';
+import { createDatabase, runMigrations } from './db.js';
 import { AdminAuthService, setupPasswordVariable } from './session.js';
 import { envPrefix, loadStartup, type Startup } from './startup.js';
 
@@ -65,6 +65,13 @@ async function main() {
     app.log.info(`Loaded configuration from ${context.configFile.path}.`);
   }
   for (const warning of startup.warnings) app.log.warn(warning);
+  if (env.MIGRATION_TARGET_ID) app.log.warn('MIGRATION_TARGET_ID is no longer used: every migration runs at startup. Remove it.');
+  // DATA-4, DATA-11: refuse a superuser role or a newer schema, then migrate, before listening.
+  try {
+    await runMigrations(context.db, { info: (message) => app.log.info({ source: 'migrations' }, message) });
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   if (env.LOCAL_AUTH_SECRET) app.log.warn('LOCAL_AUTH_SECRET is no longer used: members sign in with cookie sessions. Remove it from .env.');
   await checkSetupPassword(context, app.log);
 

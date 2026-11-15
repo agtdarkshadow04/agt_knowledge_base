@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type {
   Actor,
@@ -12,14 +13,14 @@ import type {
   Viewer,
   TagOrphan,
   TagWrite,
-} from './domain.js';
+} from '../domain.js';
 import {
   articleVisibilityFromFilter,
   InvalidTagIdsError as InvalidTagIds,
   TagNameConflictError as TagNameConflict,
-} from './domain.js';
-import type { Database } from './db.js';
-import type { ArticleRepository, TagRepository } from './repository.js';
+} from '../domain.js';
+import type { Database } from '../db.js';
+import type { ArticleRepository, TagRepository } from '../repository.js';
 
 interface ArticleRow {
   id: string;
@@ -35,7 +36,7 @@ interface ArticleRow {
   created_at: Date | string;
   created_by: string;
   created_by_name: string;
-  modified_at: Date | string;
+  updated_at: Date | string;
   modified_by: string;
   modified_by_name: string;
   version: number;
@@ -72,7 +73,7 @@ const baseSelect = `
   a.id, a.title, a.content, a.tag_ids, ${resolvedTags('a')} AS tags,
   a.visibility, a.is_pinned, a.is_protected, a.is_verified,
   a.created_at, a.created_by, creator.display_name AS created_by_name,
-  a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
+  a.updated_at, a.modified_by, editor.display_name AS modified_by_name,
   a.version
 `;
 
@@ -100,7 +101,7 @@ function toArticle(row: ArticleRow): ArticleRecord {
     createdAt: iso(row.created_at),
     createdBy: row.created_by,
     createdByName: row.created_by_name,
-    modifiedAt: iso(row.modified_at),
+    modifiedAt: iso(row.updated_at),
     modifiedBy: row.modified_by,
     modifiedByName: row.modified_by_name,
     version: row.version,
@@ -141,7 +142,8 @@ async function upsertActor(client: pg.PoolClient, actor: Actor) {
      ON CONFLICT (user_id) DO UPDATE
        SET display_name = EXCLUDED.display_name,
            email = EXCLUDED.email,
-           last_seen_at = now()`,
+           last_seen_at = now(),
+           updated_at = now()`,
     [actor.sub, actor.displayName, actor.email ?? null],
   );
 }
@@ -151,7 +153,7 @@ async function recordRevision(client: pg.PoolClient, id: string) {
     `INSERT INTO article_revisions (
        article_id, version, title, content, tag_ids, visibility, is_pinned, is_protected, is_verified, revised_at, revised_by
      )
-     SELECT id, version, title, content, tag_ids, visibility, is_pinned, is_protected, is_verified, modified_at, modified_by
+     SELECT id, version, title, content, tag_ids, visibility, is_pinned, is_protected, is_verified, updated_at, modified_by
      FROM articles
      WHERE id = $1`,
     [id],
@@ -168,6 +170,30 @@ async function recordRevision(client: pg.PoolClient, id: string) {
        )`,
     [id],
   );
+}
+
+/**
+ * The tag IDs an update stores: the submitted IDs, with every ID the article
+ * already refers to that is no longer in the catalog kept in its place, so an
+ * edit never silently drops an unresolved reference (a Moderator removes those
+ * explicitly). Formerly the merge_preserved_orphan_tag_ids function (DATA-11).
+ */
+export function mergeOrphanTagIds(existing: readonly string[], catalog: ReadonlySet<string>, submitted: readonly string[]) {
+  const merged: string[] = [];
+  let next = 0;
+  for (const id of existing) {
+    if (!catalog.has(id)) merged.push(id);
+    else if (next < submitted.length) merged.push(submitted[next++]);
+  }
+  return [...merged, ...submitted.slice(next)];
+}
+
+async function mergedTagIds(client: pg.PoolClient, articleId: string, submitted: string[]) {
+  const current = await client.query<{ tag_ids: string[] }>('SELECT tag_ids FROM articles WHERE id = $1 FOR UPDATE', [articleId]);
+  const existing = current.rows[0]?.tag_ids ?? [];
+  if (!existing.length) return submitted;
+  const known = await client.query<{ id: string }>('SELECT id FROM tags WHERE id = ANY($1::uuid[])', [existing]);
+  return mergeOrphanTagIds(existing, new Set(known.rows.map((row) => row.id)), submitted);
 }
 
 async function lockTagIds(client: pg.PoolClient, tagIds: string[]) {
@@ -202,10 +228,10 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
     ];
     const where = conditions.join(' AND ');
     // The sort column, and its value as exact text for the cursor (timestamps keep their microseconds).
-    const sortColumns = { createdAt: 'a.created_at', modifiedAt: 'a.modified_at', title: 'lower(a.title)' } as const;
+    const sortColumns = { createdAt: 'a.created_at', modifiedAt: 'a.updated_at', title: 'lower(a.title)' } as const;
     const sortKeys = {
       createdAt: `to_char(a.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
-      modifiedAt: `to_char(a.modified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+      modifiedAt: `to_char(a.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
       title: 'lower(a.title)',
     } as const;
     const column = sortColumns[query.sort];
@@ -242,7 +268,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
            a.tag_ids, ${resolvedTags('a')} AS tags,
            a.visibility, a.is_pinned, a.is_protected, a.is_verified,
            a.created_at, a.created_by, creator.display_name AS created_by_name,
-           a.modified_at, a.modified_by, editor.display_name AS modified_by_name,
+           a.updated_at, a.modified_by, editor.display_name AS modified_by_name,
            a.version, ${sortKeys[query.sort]} AS sort_key
          FROM articles a
          JOIN app_users creator ON creator.user_id = a.created_by
@@ -269,7 +295,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
         createdAt: iso(row.created_at),
         createdBy: row.created_by,
         createdByName: row.created_by_name,
-        modifiedAt: iso(row.modified_at),
+        modifiedAt: iso(row.updated_at),
         modifiedBy: row.modified_by,
         modifiedByName: row.modified_by_name,
         version: row.version,
@@ -329,10 +355,10 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       await upsertActor(client, actor);
       await lockTagIds(client, input.tagIds);
       const inserted = await client.query<{ id: string }>(
-        `INSERT INTO articles (title, content, tag_ids, visibility, created_by, modified_by)
-         VALUES ($1, $2, $3::uuid[], $4::jsonb, $5, $5)
+        `INSERT INTO articles (id, title, content, tag_ids, visibility, created_by, modified_by)
+         VALUES ($6, $1, $2, $3::uuid[], $4::jsonb, $5, $5)
          RETURNING id`,
-        [input.title, input.content, input.tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub],
+        [input.title, input.content, input.tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub, randomUUID()],
       );
       await recordRevision(client, inserted.rows[0].id);
       await client.query('COMMIT');
@@ -350,21 +376,22 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       await client.query('BEGIN');
       await upsertActor(client, actor);
       await lockTagIds(client, input.tagIds);
+      const tagIds = await mergedTagIds(client, id, input.tagIds);
       const updated = await client.query<{ id: string }>(
         `UPDATE articles
          SET title = $1,
              content = $2,
-             tag_ids = merge_preserved_orphan_tag_ids(articles.tag_ids, $3::uuid[]),
+             tag_ids = $3::uuid[],
              visibility = $4::jsonb,
              modified_by = $5,
-             modified_at = now(),
+             updated_at = now(),
              version = version + 1
          WHERE id = $6
            AND version = $7
            AND (NOT is_protected OR $8::boolean)
            AND ($8::boolean OR $4::jsonb IN ('"Public"'::jsonb, '"Internal"'::jsonb, '0'::jsonb, '1'::jsonb))
          RETURNING id`,
-        [input.title, input.content, input.tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub, id, input.version, actor.role === 'Moderator'],
+        [input.title, input.content, tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub, id, input.version, actor.role === 'Moderator'],
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
@@ -385,7 +412,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
         `UPDATE articles
          SET is_protected = $1,
              modified_by = $2,
-             modified_at = now(),
+             updated_at = now(),
              version = version + 1
          WHERE id = $3 AND version = $4
          RETURNING id`,
@@ -410,7 +437,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
         `UPDATE articles
          SET is_pinned = $1,
              modified_by = $2,
-             modified_at = now(),
+             updated_at = now(),
              version = version + 1
          WHERE id = $3 AND version = $4
          RETURNING id`,
@@ -435,7 +462,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
         `UPDATE articles
          SET is_verified = $1,
              modified_by = $2,
-             modified_at = now(),
+             updated_at = now(),
              version = version + 1
          WHERE id = $3 AND version = $4
          RETURNING id`,
@@ -466,7 +493,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
              is_protected = r.is_protected,
              is_verified = r.is_verified,
              modified_by = $4,
-             modified_at = now(),
+             updated_at = now(),
              version = a.version + 1
          FROM article_revisions r
          WHERE a.id = $1
@@ -522,7 +549,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
         `UPDATE articles
          SET tag_ids = array_remove(tag_ids, $2::uuid),
              modified_by = $3,
-             modified_at = now(),
+             updated_at = now(),
              version = version + 1
          WHERE id = $1`,
         [id, tagId, actor.sub],
@@ -558,10 +585,10 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
     const pool = await this.db.pool();
     try {
       const result = await pool.query<CanonicalTag>(
-        `INSERT INTO tags (name, color)
-         VALUES ($1, $2)
+        `INSERT INTO tags (id, name, color)
+         VALUES ($3, $1, $2)
          RETURNING id, name, color`,
-        [input.name, input.color],
+        [input.name, input.color, randomUUID()],
       );
       return result.rows[0];
     } catch (error) {

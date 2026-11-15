@@ -1,5 +1,3 @@
-BEGIN;
-
 LOCK TABLE articles, article_revisions, application_settings IN ACCESS EXCLUSIVE MODE;
 
 DROP INDEX articles_visibility_modified_idx;
@@ -34,6 +32,3 @@ ALTER TABLE application_settings
 
 CREATE INDEX articles_visibility_modified_idx
   ON articles (visibility, modified_at DESC, id DESC);
-
-INSERT INTO schema_migrations (id) VALUES ('010_agt_visibility');
-COMMIT;

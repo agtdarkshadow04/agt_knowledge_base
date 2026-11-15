@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE TABLE tags (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name varchar(40) NOT NULL,
@@ -311,7 +309,3 @@ FOR EACH ROW EXECUTE FUNCTION bridge_catalog_legacy_tags();
 CREATE TRIGGER tags_legacy_delete_bridge
 AFTER DELETE ON tags
 FOR EACH ROW EXECUTE FUNCTION bridge_catalog_legacy_tags();
-
-INSERT INTO schema_migrations (id) VALUES ('006_canonical_tags_expand');
-
-COMMIT;

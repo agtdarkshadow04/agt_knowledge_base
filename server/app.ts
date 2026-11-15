@@ -15,6 +15,7 @@ import { createRequestHandler, type RequestHandler } from './handler.js';
 import { BodyTooLargeError, errorReply, RateLimitedError } from './http.js';
 import { registerOpenApi, routeSecurity } from './openapi.js';
 import { sharedRateLimitStore } from './rate-limit.js';
+import { ping } from './repository.js';
 import {
   apiRoutes,
   defaultMaxBodyBytes,
@@ -332,7 +333,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
 
     switch (route.handlerKey) {
       case 'GET /api/health':
-        await (await context.db.pool()).query('SELECT 1');
+        await ping(context.db);
         return sendJson(reply, 200, { status: 'ok' });
       case 'POST /api/member/login': {
         warnOnPlainHttp(request);

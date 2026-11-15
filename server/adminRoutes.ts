@@ -1,10 +1,10 @@
-import { AdminService } from './admin-service.js';
+import { MemberRepository } from './repository/members.js';
 import { json, noContent, parseBody, pathId } from './api-response.js';
 import { ArticleService } from './article-service.js';
 import { requireAdminSession } from './auth.js';
 import { BackupService } from './backup-service.js';
 import { HttpError, invalidField } from './http.js';
-import { PostgresArticleRepository } from './postgres-article-repository.js';
+import { PostgresArticleRepository } from './repository/articles.js';
 import type { AppContext } from './context.js';
 import type { ApiRequest, ApiResponse } from './routes.js';
 import { SettingsService, type SettingsWrite } from './settings-service.js';
@@ -87,7 +87,7 @@ export function createAdminRequestHandler(
   context: Pick<AppContext, 'config' | 'configFile' | 'db' | 'version'>,
 ): AdminRequestHandler {
   const articleService = new ArticleService(new PostgresArticleRepository(context.db));
-  const adminService = new AdminService(context);
+  const members = new MemberRepository(context);
   const settingsService = new SettingsService(context);
   const backupService = new BackupService(context, settingsService);
 
@@ -95,19 +95,19 @@ export function createAdminRequestHandler(
     requireAdminSession(request);
     switch (request.routeKey) {
       case 'GET /api/admin/users':
-        return json(200, await adminService.listUsers(parseUserListQuery(request.query)));
+        return json(200, await members.listUsers(parseUserListQuery(request.query)));
       case 'POST /api/admin/users':
-        return json(201, await adminService.createUser(parseAdminUserCreate(parseBody(request))));
+        return json(201, await members.createUser(parseAdminUserCreate(parseBody(request))));
       case 'PUT /api/admin/users/{userId}':
-        return json(200, await adminService.updateUser(userId(request), parseAdminUserUpdate(parseBody(request))));
+        return json(200, await members.updateUser(userId(request), parseAdminUserUpdate(parseBody(request))));
       case 'PUT /api/admin/users/{userId}/password':
-        await adminService.setPassword(userId(request), parseAdminPasswordWrite(parseBody(request)).password);
+        await members.setPassword(userId(request), parseAdminPasswordWrite(parseBody(request)).password);
         return noContent();
       case 'DELETE /api/admin/users/{userId}':
-        await adminService.deleteUser(userId(request));
+        await members.deleteUser(userId(request));
         return noContent();
       case 'GET /api/admin/stats':
-        return json(200, await adminService.getStats());
+        return json(200, await members.getStats());
       case 'GET /api/admin/articles':
         return json(200, await articleService.listAll(parseListQuery(request.query)));
       case 'GET /api/admin/settings':

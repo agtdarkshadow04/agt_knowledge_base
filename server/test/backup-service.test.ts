@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, mock } from 'node:test';
 import { buildBackupArchive, readBackupArchive, type BackupRow } from '../backup-archive.js';
-import { BackupService, backupTables, legacyTables, unbackedTables, upgradePlan } from '../backup-service.js';
+import { BackupService, backupTables, unbackedTables, upgradePlan } from '../backup-service.js';
 import { parseConfig, type AppConfig } from '../config.js';
-import { migrations as schemaMigrations } from '../migrations.js';
+import { MIGRATIONS, migrationId } from '../db.js';
+
+const schemaMigrations = MIGRATIONS.map((migration) => ({ ...migration, id: migrationId(migration) }));
 import type { SettingsService } from '../settings-service.js';
 import { assertMatches, fakeDatabase, match, rejectsMatching, testContext } from './helpers.js';
 
@@ -14,7 +16,7 @@ type QueryFn = (sql: string, params?: unknown[]) => Promise<unknown>;
 
 const database = { connect: mock.fn(async (): Promise<unknown> => undefined) };
 
-const current = schemaMigrations.filter((migration) => !migration.requiresExplicitTarget).map((migration) => migration.id);
+const current = schemaMigrations.map((migration) => migration.id);
 
 const columns: Record<string, string[]> = {
   app_users: ['user_id', 'display_name'],
@@ -22,8 +24,6 @@ const columns: Record<string, string[]> = {
   tags: ['id', 'name', 'color'],
   articles: ['id', 'title', 'tag_ids'],
   article_revisions: ['article_id', 'version'],
-  // Dropped by the explicit-target 016; until then backups carry it (legacyTables).
-  application_settings: ['singleton', 'application_name', 'application_subtitle'],
   settings: ['key', 'value', 'created_at', 'updated_at'],
   admin: ['id', 'username', 'password_hash'],
   sessions: ['token_hash', 'expires_at'],
@@ -37,7 +37,6 @@ function tables(overrides: Record<string, BackupRow[]> = {}): Record<string, Bac
     tags: [],
     articles: [{ id: 'a1', title: 'Portal Guide', tag_ids: [] }],
     article_revisions: [{ article_id: 'a1', version: 1 }],
-    application_settings: [{ singleton: true, application_name: 'Backup Archive', application_subtitle: 'From the backup' }],
     settings: [
       { key: 'site.title', value: 'Backup Archive', created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z' },
       { key: 'backup.maxEntries', value: 20, created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z' },
@@ -65,7 +64,7 @@ function fakeClient(options: FakeOptions = {}) {
   const query = mock.fn<QueryFn>(async (sql, params) => {
     const failure = options.failOn?.(sql);
     if (failure) throw Object.assign(new Error(failure.message), failure);
-    if (sql.startsWith('SELECT id FROM schema_migrations')) return { rows: current.map((id) => ({ id })) };
+    if (sql.startsWith('SELECT version FROM schema_migrations')) return { rows: MIGRATIONS.map(({ version }) => ({ version })) };
     if (sql.includes('current_schema()')) return { rows: [{ schema: 'public' }] };
     if (sql.includes('information_schema.columns')) {
       const only = params?.[1] as string[] | null;
@@ -137,11 +136,10 @@ describe('BackupService', () => {
         created.add(to);
       }
     }
-    assert.deepEqual([...created].sort(), [...backupTables, ...unbackedTables, ...legacyTables].sort());
-    // A legacy table is one a contract migration drops.
-    for (const table of legacyTables) {
-      assert.ok(schemaMigrations.some((migration) => migration.requiresExplicitTarget && migration.sql.includes(`DROP TABLE ${table};`)), table);
+    for (const migration of schemaMigrations) {
+      for (const [, table] of migration.sql.matchAll(/DROP TABLE ([a-z_]+);/g)) created.delete(table);
     }
+    assert.deepEqual([...created].sort(), [...backupTables, ...unbackedTables].sort());
     assert.ok((backupTables).includes('admin'));
     assert.ok(!(backupTables as readonly string[]).includes('sessions'));
     assert.ok(!(backupTables as readonly string[]).includes('member_sessions'));
@@ -155,8 +153,7 @@ describe('BackupService', () => {
     assert.equal(result.filename, 'agt-kb-backup-20261107-061500.zip');
     assert.equal(statements(client)[0], 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const contents = await readBackupArchive(result.archive, { maxBytes: 1e8, maxEntries: 16, maxUncompressedBytes: 1e8 });
-    // application_settings exists until 016 runs, so this schema version still has it.
-    assert.deepEqual(Object.keys(contents.database.tables), [...backupTables, ...legacyTables]);
+    assert.deepEqual(Object.keys(contents.database.tables), [...backupTables]);
     assert.ok(!('sessions' in contents.database.tables));
     assert.ok(!('member_sessions' in contents.database.tables));
     assertMatches(contents.manifest, { appVersion: match.any(String), migrations: current });
@@ -240,7 +237,9 @@ describe('BackupService', () => {
   it('refuses newer, unknown, and diverging backups', async () => {
     assert.throws(() => upgradePlan([...current, '999_future'], current), /newer or different version/);
     assert.throws(() => upgradePlan(current, current.slice(0, -1)), /newer version/);
-    assert.throws(() => upgradePlan(['001_initial', '003_article_pinning'], current), /diverges/);
+    // A 1.x backup without the contract migrations that once needed an explicit target gets them now, in order.
+    const later = ['007_canonical_tags_contract', '014_admin_account_contract', '016_drop_application_settings', '017_auth_sessions', '018_spec_storage'];
+    assert.deepEqual(upgradePlan(current.filter((id) => !later.includes(id)), current), later);
     assert.deepEqual(upgradePlan(current.slice(0, 3), current), current.slice(3));
     assert.deepEqual(upgradePlan(current, current), []);
 
@@ -291,15 +290,6 @@ describe('BackupService', () => {
     // After the restored rows are copied, inside the same transaction.
     assert.ok(sql.indexOf(drop[0]) > sql.findIndex((statement) => statement.startsWith('INSERT INTO "public"."settings"')));
     assert.ok(sql.indexOf(drop[0]) < sql.lastIndexOf('COMMIT'));
-  });
-
-  it('never writes a legacy table on restore, though backups carry it while it exists', async () => {
-    const client = fakeClient();
-    const { archive: exported } = await service().export();
-    const contents = await readBackupArchive(exported, { maxBytes: 1e8, maxEntries: 16, maxUncompressedBytes: 1e8 });
-    assert.ok('application_settings' in contents.database.tables);
-    await service().restore(await archive());
-    assert.equal(statements(client).some((statement) => statement.startsWith('INSERT INTO "public"."application_settings"')), false);
   });
 
   it('aborts the restore when the pre-restore backup cannot be written', async () => {

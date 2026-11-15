@@ -1,4 +1,5 @@
 import { createDatabase } from '../server/db.js';
+import { MemberRepository } from '../server/repository/members.js';
 import { hashPassword } from '../server/passwords.js';
 import { roles, type Role } from '../server/domain.js';
 import { envValue, loadStartup } from '../server/startup.js';
@@ -46,22 +47,8 @@ try {
 }
 for (const warning of [...warnings, ...startup.warnings]) console.warn(warning);
 const db = createDatabase(startup.database);
-const pool = await db.pool();
 try {
-  await pool.query(
-    `INSERT INTO local_users (username, password_hash, display_name, email, role)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (username) DO UPDATE
-       SET password_hash = EXCLUDED.password_hash,
-           display_name = EXCLUDED.display_name,
-           email = EXCLUDED.email,
-           role = EXCLUDED.role,
-           is_active = true,
-           updated_at = now()`,
-    [username, passwordHash, displayName, email ?? null, role],
-  );
-  // A reset password ends every session of that member (AUTH-4).
-  await pool.query('DELETE FROM member_sessions WHERE user_id = (SELECT id FROM local_users WHERE username = $1)', [username]);
+  await new MemberRepository({ db }).recover({ username, displayName, email, role, passwordHash });
   console.log(`Member ${role} account ${username} is ready.`);
 } finally {
   await db.close();

@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS app_users (
@@ -32,11 +30,3 @@ CREATE INDEX IF NOT EXISTS articles_tags_idx ON articles USING gin(tags);
 CREATE INDEX IF NOT EXISTS articles_modified_idx ON articles (modified_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS articles_created_idx ON articles (created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS articles_title_idx ON articles (lower(title), id);
-
-CREATE TABLE IF NOT EXISTS schema_migrations (
-  id text PRIMARY KEY,
-  applied_at timestamptz NOT NULL DEFAULT now()
-);
-
-INSERT INTO schema_migrations (id) VALUES ('001_initial') ON CONFLICT DO NOTHING;
-COMMIT;

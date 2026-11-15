@@ -1,11 +1,3 @@
-BEGIN;
-
--- Moves the super administrator out of local_users into the single-row admin
--- table and adds Admin sessions. Member roles are renamed (Admin -> Moderator,
--- Standard -> Editor) and every member session is revoked. The super-admin's
--- user_id stays in app_users, so authorship and history are kept. Migration
--- 014_admin_account_contract later drops the unused is_super_admin column.
-
 LOCK TABLE local_users IN ACCESS EXCLUSIVE MODE;
 
 CREATE TABLE admin (
@@ -42,5 +34,3 @@ SET role = CASE role WHEN 'Admin' THEN 'Moderator' ELSE 'Editor' END,
 
 ALTER TABLE local_users
   ADD CONSTRAINT local_users_role_check CHECK (role IN ('Editor', 'Moderator'));
-
-COMMIT;
