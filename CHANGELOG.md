@@ -92,11 +92,11 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   a superuser** (DATA-11). A new Compose volume gets the role from `deploy/postgres-init/10-app-role.sh`. **An
   existing 1.x database needs it once**: download a backup, stop the stack, add a new `AGT_KNOWLEDGE_BASE_DB_PASSWORD`
   to `.env`, run `deploy/upgrade-database-role.sql` as the superuser, then start 2.0 (README, *Upgrading to 2.0*).
-  `POSTGRES_PASSWORD` is now only the superuser's, and the deprecated `DB_USER`/`DB_NAME` are no longer passed by Compose.
+  `POSTGRES_PASSWORD` is now only the superuser's, and the deprecated `DB_USER`/`DB_NAME` are no longer passed by Compose ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 - **Migrations run when the server starts; the `migrate` service is gone.** Start with
   `docker compose up -d --build --remove-orphans`. The 1.x contract migrations that waited for `MIGRATION_TARGET_ID`
   (`007`, `014`, `016`) now run automatically; `MIGRATION_TARGET_ID` and `npm run db:migrate` no longer exist. A
-  database with a migration the server does not know (a newer schema) stops it with a clear message.
+  database with a migration the server does not know (a newer schema) stops it with a clear message ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 
 ### Added
 
@@ -127,9 +127,9 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 - Migrations are numbered files `server/migrations/NNNN_<name>.sql`, applied at startup under a PostgreSQL advisory
   lock and recorded in `schema_migrations (version, name, applied_at)`, which the server converts from the 1.x table
-  (DATA-3, DATA-4, DATA-11).
+  (DATA-3, DATA-4, DATA-11) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 - `deploy/postgres-init/10-app-role.sh` and `deploy/upgrade-database-role.sql`, which create the database role and
-  the restore preview database `agt_knowledge_base_preview` (DEP-3).
+  the restore preview database `agt_knowledge_base_preview` (DEP-3) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 
 ### Changed
 
@@ -175,8 +175,8 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 - Migration `0018_spec_storage`: the server merges orphaned tag IDs itself, so the last database function and the
   `pgcrypto` extension are gone; new rows get `crypto.randomUUID()` IDs from the server instead of column defaults,
   and incoming IDs must be UUIDv4 (DATA-6, DATA-11); `varchar(n)` columns are `text` with the same length checks;
-  `articles.modified_at` is renamed `updated_at`, and `app_users` and both session tables gain `updated_at` (DATA-8).
-- All SQL lives in `server/repository/` (SRV-4), except the backup code that Phase 6 replaces.
+  `articles.modified_at` is renamed `updated_at`, and `app_users` and both session tables gain `updated_at` (DATA-8) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+- All SQL lives in `server/repository/` (SRV-4), except the backup code that Phase 6 replaces ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 
 ### Deprecated
 
@@ -226,7 +226,7 @@ These keep working and are removed in 3.0.0:
 - The error codes `setup_disabled`, `setup_already_completed` and `invalid_current_password`, which no release had
   sent (the 1.x `code` values stay) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 
-- The `migrate` Compose service, `scripts/migrate.ts`, `npm run db:migrate` and `MIGRATION_TARGET_ID`.
+- The `migrate` Compose service, `scripts/migrate.ts`, `npm run db:migrate` and `MIGRATION_TARGET_ID` ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 
 ### Security
 
