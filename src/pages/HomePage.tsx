@@ -10,7 +10,7 @@ import type { ArticleListResponse, ArticleSort, ArticleVisibilityFilter, Canonic
 import { agtVisibilityOptions, legacyVisibilityOptions, visibilityFilterValue } from '../visibility';
 
 export function HomePage() {
-  const { user, getToken } = useAuth();
+  const { user } = useAuth();
   const { settings } = useAppSettings();
   const viewerSub = user?.sub;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -53,8 +53,7 @@ export function HomePage() {
       setError('');
       setMoreError('');
       try {
-        const token = viewerSub ? await getToken() : undefined;
-        setResult(await listArticles(params, controller.signal, token));
+        setResult(await listArticles(params, controller.signal, Boolean(viewerSub)));
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === 'AbortError') return;
         setError(cause instanceof Error ? cause.message : 'The archive could not be loaded.');
@@ -64,7 +63,7 @@ export function HomePage() {
     }
     void load();
     return () => controller.abort();
-  }, [getToken, params, reloadKey, settings.access.allowPublicBrowsing, viewerSub]);
+  }, [params, reloadKey, settings.access.allowPublicBrowsing, viewerSub]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -77,8 +76,7 @@ export function HomePage() {
       setTagsLoading(true);
       setTagsError('');
       try {
-        const token = viewerSub ? await getToken() : undefined;
-        setTags(await listTags('', controller.signal, token));
+        setTags(await listTags('', controller.signal, Boolean(viewerSub)));
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === 'AbortError') return;
         setTagsError(cause instanceof Error ? cause.message : 'Tags could not be loaded.');
@@ -88,7 +86,7 @@ export function HomePage() {
     }
     void loadTagCatalog();
     return () => controller.abort();
-  }, [getToken, settings.access.allowPublicBrowsing, tagsReloadKey, viewerSub]);
+  }, [settings.access.allowPublicBrowsing, tagsReloadKey, viewerSub]);
 
   const updateParam = useCallback((key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -103,8 +101,7 @@ export function HomePage() {
     setLoadingMore(true);
     setMoreError('');
     try {
-      const token = viewerSub ? await getToken() : undefined;
-      const next = await listArticles({ ...params, cursor: result.nextCursor }, undefined, token);
+      const next = await listArticles({ ...params, cursor: result.nextCursor }, undefined, Boolean(viewerSub));
       setResult((current) => current && { ...next, items: [...current.items, ...next.items] });
     } catch (cause) {
       setMoreError(cause instanceof Error ? cause.message : 'More articles could not be loaded.');

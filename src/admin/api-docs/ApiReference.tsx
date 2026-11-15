@@ -1,17 +1,17 @@
 import { Gauge, KeyRound, LockKeyhole, LockOpen, ShieldCheck, ShieldHalf } from 'lucide-react';
-import { MarkdownContent } from '../../components/MarkdownContent';
+import { Markdown } from '../../components/Markdown';
 import type { ApiDocument, ApiOperation, AuthMode, SchemaField } from '../../lib/openapi';
 
 /**
- * Renders a parsed OpenAPI document. Descriptions go through MarkdownContent
- * (react-markdown + rehype-sanitize, no raw HTML); everything else is text.
+ * Renders a parsed OpenAPI document. Descriptions go through the one Markdown
+ * component (SEC-12, raw HTML shown as text); everything else is text.
  * Shared by the member API page and the admin panel's API tab, so it must not
  * import from src/admin/.
  */
 
 const authLabels: Record<AuthMode, { label: string; icon: typeof LockOpen }> = {
   none: { label: 'Public', icon: LockOpen },
-  member: { label: 'Member token', icon: KeyRound },
+  member: { label: 'Member session', icon: KeyRound },
   admin: { label: 'Admin session', icon: LockKeyhole },
 };
 
@@ -44,7 +44,7 @@ function FieldTable({ fields, caption, showLocation = false }: {
               {showLocation && <td>{field.location}</td>}
               <td><code>{field.type}</code></td>
               <td>
-                {field.description && <MarkdownContent content={field.description} />}
+                {field.description && <Markdown content={field.description} />}
                 {field.constraints.length > 0 && (
                   <ul className="api-constraints">
                     {field.constraints.map((constraint) => <li key={constraint}>{constraint}</li>)}
@@ -83,7 +83,7 @@ function Operation({ operation }: { operation: ApiOperation }) {
           {operation.deprecated && <span className="api-badge api-deprecated">Deprecated</span>}
         </div>
       </header>
-      {operation.description && <MarkdownContent content={operation.description} />}
+      {operation.description && <Markdown content={operation.description} />}
 
       {operation.parameters.length > 0 && (
         <section className="api-subsection">
@@ -115,7 +115,7 @@ function Operation({ operation }: { operation: ApiOperation }) {
                 <tr key={response.status}>
                   <td><span className={`api-status api-status-${response.status[0]}xx`}>{response.status}</span></td>
                   <td>
-                    {response.description && <MarkdownContent content={response.description} />}
+                    {response.description && <Markdown content={response.description} />}
                     {response.errorCodes.length > 0 && (
                       <ul className="api-error-codes" aria-label="Error codes">
                         {response.errorCodes.map((code) => <li key={code}><code>{code}</code></li>)}
@@ -156,12 +156,12 @@ export function ApiReference({ document }: { document: ApiDocument }) {
       </nav>
 
       <div className="api-content">
-        {document.description && <section className="api-intro"><MarkdownContent content={document.description} /></section>}
+        {document.description && <section className="api-intro"><Markdown content={document.description} /></section>}
 
         {document.groups.map((group) => (
           <section key={group.slug} id={group.slug} className="api-group" aria-labelledby={`${group.slug}-title`}>
             <h2 id={`${group.slug}-title`}>{group.name}</h2>
-            {group.description && <MarkdownContent content={group.description} />}
+            {group.description && <Markdown content={group.description} />}
             {group.operations.map((operation) => <Operation key={operation.id} operation={operation} />)}
           </section>
         ))}
@@ -173,7 +173,7 @@ export function ApiReference({ document }: { document: ApiDocument }) {
               <article key={schema.name} id={`schema-${schema.name}`} className="api-operation api-schema" aria-labelledby={`schema-${schema.name}-title`}>
                 <h3 id={`schema-${schema.name}-title`}>{schema.name}</h3>
                 <p className="api-media"><code>{schema.type}</code></p>
-                {schema.description && <MarkdownContent content={schema.description} />}
+                {schema.description && <Markdown content={schema.description} />}
                 {schema.fields.length > 0 && <FieldTable fields={schema.fields} caption={`Fields of ${schema.name}`} />}
               </article>
             ))}

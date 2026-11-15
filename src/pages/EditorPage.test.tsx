@@ -7,7 +7,6 @@ import { EditorPage } from './EditorPage';
 const mocks = vi.hoisted(() => ({
   createArticle: vi.fn(),
   getArticle: vi.fn(),
-  getToken: vi.fn(async () => 'token'),
   listTags: vi.fn(),
   updateArticle: vi.fn(),
 }));
@@ -15,7 +14,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
     user: { sub: 'author', username: 'apollo', displayName: 'Apollo', role: 'Editor' },
-    getToken: mocks.getToken,
   }),
 }));
 
@@ -54,7 +52,6 @@ describe('EditorPage', () => {
     mocks.createArticle.mockResolvedValue({ id: 'article-1', title: 'Portal Guide', tags: [portalTag, guideTag], content: '# Portal Guide\n\nSafe instructions.', visibility: 'Internal', version: 1 });
     mocks.getArticle.mockReset();
     mocks.getArticle.mockResolvedValue({ id: 'article-1', title: 'Portal Guide', tags: [portalTag], content: '# Portal Guide\n\nCurrent instructions.', visibility: 'Internal', isProtected: false, version: 1 });
-    mocks.getToken.mockClear();
     mocks.listTags.mockReset();
     mocks.listTags.mockResolvedValue([portalTag, guideTag]);
     mocks.updateArticle.mockReset();
@@ -134,7 +131,7 @@ describe('EditorPage', () => {
       title: 'Portal Guide',
       tagIds: [portalTag.id, guideTag.id],
       visibility: 'Internal',
-    }), 'token');
+    }));
     expect(await screen.findByText('Saved article')).toBeInTheDocument();
   });
 
@@ -160,7 +157,6 @@ describe('EditorPage', () => {
     expect(mocks.updateArticle).toHaveBeenCalledWith(
       'article-1',
       expect.objectContaining({ title: 'Updated Portal Guide', version: 1 }),
-      'token',
     );
     expect(await screen.findByText('Saved article')).toBeInTheDocument();
   });

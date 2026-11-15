@@ -2,7 +2,7 @@ import packageJson from '../package.json' with { type: 'json' };
 import { buildApp } from './app.js';
 import type { AppContext } from './context.js';
 import { createDatabase } from './db.js';
-import { assertLocalAuthSecret } from './local-auth.js';
+import { AdminAuthService, setupPasswordVariable } from './session.js';
 import { envPrefix, loadStartup, type Startup } from './startup.js';
 
 /**
@@ -17,6 +17,26 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+/**
+ * AUTH-5 and AUTH-6: while no Admin exists, a set setup password must be at
+ * most 1024 characters; once one exists, a still-set password is warned about
+ * at every start.
+ */
+async function checkSetupPassword(context: AppContext, log: { warn(message: string): void }) {
+  if (context.setupPassword === null) return;
+  let adminExists: boolean;
+  try {
+    adminExists = await new AdminAuthService(context).adminExists();
+  } catch (error) {
+    fail(`${setupPasswordVariable} is set, but the database could not be checked for an Admin account: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (adminExists) {
+    log.warn(`The Admin account exists but ${setupPasswordVariable} is still set. Remove it from .env and restart.`);
+  } else if (context.setupPassword.length > 1024) {
+    fail(`${setupPasswordVariable} is longer than 1024 characters. Set a shorter value in .env and restart.`);
+  }
+}
+
 async function main() {
   const env = process.env;
   let startup: Startup;
@@ -28,7 +48,6 @@ async function main() {
       configFile: { path: startup.configFile.path, text: startup.configFile.text },
       db: createDatabase(startup.database),
       setupPassword: startup.setupPassword,
-      localAuthSecret: assertLocalAuthSecret(env.LOCAL_AUTH_SECRET),
       version: packageJson.version,
     };
   } catch (error) {
@@ -46,9 +65,8 @@ async function main() {
     app.log.info(`Loaded configuration from ${context.configFile.path}.`);
   }
   for (const warning of startup.warnings) app.log.warn(warning);
-  if (context.setupPassword !== null) {
-    app.log.warn(`${envPrefix}SETUP_PASSWORD is set. It is only needed until the Admin account exists: remove it from .env and restart.`);
-  }
+  if (env.LOCAL_AUTH_SECRET) app.log.warn('LOCAL_AUTH_SECRET is no longer used: members sign in with cookie sessions. Remove it from .env.');
+  await checkSetupPassword(context, app.log);
 
   let closing = false;
   async function shutdown(signal: string) {

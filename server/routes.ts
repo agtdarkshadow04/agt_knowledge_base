@@ -31,8 +31,8 @@ export interface ApiResponse {
 
 /**
  * - `none`: no credentials are checked (public reads, member sign-in, Admin setup and sign-in).
- * - `member`: a member bearer token is required; admin cookies are ignored.
- * - `admin`: an Admin session cookie is required; bearer tokens are ignored.
+ * - `member`: the member session cookie is required; the Admin cookie is ignored.
+ * - `admin`: the Admin session cookie is required; the member cookie is ignored.
  */
 export type RouteAuth = 'none' | 'member' | 'admin';
 /** Rate-limit buckets, each counted separately; `rateLimitRule()` in app.ts maps them to `rateLimits.*`. */
@@ -75,8 +75,9 @@ const moderatorOnly = 'Moderators only.';
 const routes: RouteDefinition[] = [
   { method: 'GET', path: '/api/health', auth: 'none', operationId: 'getHealth', tag: 'public', summary: 'Check that the API and its database answer.', response: { 200: S.Health } },
 
-  { method: 'POST', path: '/api/auth/login', auth: 'none', rateLimit: 'login', operationId: 'createMemberSession', tag: 'auth', summary: 'Sign in a member and return a bearer token.', body: S.Credentials, response: { 200: S.MemberLogin } },
-  { method: 'GET', path: '/api/auth/session', auth: 'member', operationId: 'getMemberSession', tag: 'auth', summary: 'Return the signed-in member.', response: { 200: S.MemberUser } },
+  { method: 'POST', path: '/api/member/login', auth: 'none', rateLimit: 'login', operationId: 'createMemberSession', tag: 'auth', summary: 'Sign in a member by username or email and set the member session cookie.', body: S.Credentials, response: { 200: S.MemberUser } },
+  { method: 'POST', path: '/api/member/logout', auth: 'member', operationId: 'deleteMemberSession', tag: 'auth', summary: 'Sign the member out and clear the member session cookie.', response: { 204: S.NoContent } },
+  { method: 'GET', path: '/api/member/session', auth: 'member', operationId: 'getMemberSession', tag: 'auth', summary: 'Return the signed-in member.', response: { 200: S.MemberUser } },
   { method: 'GET', path: '/api/settings/public', auth: 'none', operationId: 'getPublicSettings', tag: 'public', summary: 'Return the settings the public UI needs.', response: { 200: S.PublicSettings } },
 
   { method: 'GET', path: '/api/articles', auth: 'none', operationId: 'listPublicArticles', tag: 'articles', summary: 'List public articles, newest pinned first, one page at a time.', querystring: S.ArticleListQuery, response: { 200: S.ArticleList } },
@@ -155,7 +156,7 @@ export const apiRoutes: readonly CompiledRoute[] = routes.map((route) => {
     routeKey: `${route.method} ${route.path}`,
     handlerKey: route.ownHandler ? `${route.method} ${route.path}` : route.replacedBy ?? `${route.method} ${route.path}`,
     admin,
-    csrf: route.method !== 'GET' && (admin || route.path === '/api/setup'),
+    csrf: route.method !== 'GET' && (admin || route.path === '/api/setup' || route.auth === 'member' || route.path.startsWith('/api/member/')),
   };
 });
 

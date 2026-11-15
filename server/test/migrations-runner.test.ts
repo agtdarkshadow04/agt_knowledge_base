@@ -30,7 +30,8 @@ const backupLimits = migrations.find((migration) => migration.id === '013_backup
 const adminContract = migrations.find((migration) => migration.id === '014_admin_account_contract')!;
 const settingsTable = migrations.find((migration) => migration.id === '015_settings_table')!;
 const settingsContract = migrations.find((migration) => migration.id === '016_drop_application_settings')!;
-const defaultLevel = ['008_local_auth', '009_admin', '010_agt_visibility', '011_rename_user_key', '012_admin_account', '013_backup_limit_settings', '015_settings_table'];
+const authSessions = migrations.find((migration) => migration.id === '017_auth_sessions')!;
+const defaultLevel = ['008_local_auth', '009_admin', '010_agt_visibility', '011_rename_user_key', '012_admin_account', '013_backup_limit_settings', '015_settings_table', '017_auth_sessions'];
 
 describe('targeted migrations', () => {
   beforeEach(() => {
@@ -135,7 +136,7 @@ describe('targeted migrations', () => {
   it('renames the user key by default without applying the explicit-only contract', async () => {
     for (const id of ['006_canonical_tags_expand', '008_local_auth', '009_admin', '010_agt_visibility']) database.applied.add(id);
 
-    assert.deepEqual(await runMigrations(), { applied: ['011_rename_user_key', '012_admin_account', '013_backup_limit_settings', '015_settings_table'] });
+    assert.deepEqual(await runMigrations(), { applied: ['011_rename_user_key', '012_admin_account', '013_backup_limit_settings', '015_settings_table', '017_auth_sessions'] });
     assert.ok(!(renameUserKey.requiresExplicitTarget));
     assert.ok((renameUserKey.sql).includes('ALTER TABLE app_users RENAME COLUMN cognito_sub TO user_id'));
     assert.ok(!(database.client.query.mock.calls.map(({ arguments: [sql] }) => sql)).includes(contract.sql));
@@ -144,7 +145,7 @@ describe('targeted migrations', () => {
   it('moves the super administrator to the admin table and renames member roles by default', async () => {
     for (const id of ['006_canonical_tags_expand', '008_local_auth', '009_admin', '010_agt_visibility', '011_rename_user_key']) database.applied.add(id);
 
-    assert.deepEqual(await runMigrations(), { applied: ['012_admin_account', '013_backup_limit_settings', '015_settings_table'] });
+    assert.deepEqual(await runMigrations(), { applied: ['012_admin_account', '013_backup_limit_settings', '015_settings_table', '017_auth_sessions'] });
     assert.ok(!(adminAccount.requiresExplicitTarget));
     const sql = adminAccount.sql;
     assert.ok((sql).includes('CREATE TABLE admin ('));
@@ -171,8 +172,8 @@ describe('targeted migrations', () => {
   });
 
   it('copies changed 1.x settings into the settings table by default and drops the old table only when targeted', async () => {
-    for (const id of ['006_canonical_tags_expand', ...defaultLevel.slice(0, -1)]) database.applied.add(id);
-    assert.deepEqual(await runMigrations(), { applied: ['015_settings_table'] });
+    for (const id of ['006_canonical_tags_expand', ...defaultLevel.slice(0, -2)]) database.applied.add(id);
+    assert.deepEqual(await runMigrations(), { applied: ['015_settings_table', '017_auth_sessions'] });
     assert.ok(!settingsTable.requiresExplicitTarget);
     assert.ok(settingsTable.sql.includes('CREATE TABLE settings ('));
     assert.ok(settingsTable.sql.includes("('backup.maxZipBytes', to_jsonb(source.backup_max_bytes))"));
@@ -188,8 +189,23 @@ describe('targeted migrations', () => {
     assert.deepEqual(allowed, settingKeys);
   });
 
+  it('rewrites 1.x password hashes into the AUTH-2 format and moves sessions to sessions and member_sessions', () => {
+    const sql = authSessions.sql;
+    assert.ok(!authSessions.requiresExplicitTarget);
+    for (const table of ['admin', 'local_users']) {
+      assert.match(sql, new RegExp(`UPDATE ${table}\\s+SET password_hash = 'scrypt\\$16384\\$8\\$1\\$'`), table);
+    }
+    assert.ok(sql.includes("WHERE password_hash ~ '^scrypt\\$[A-Za-z0-9_-]{22}\\$[A-Za-z0-9_-]{86}$'"));
+    assert.ok(sql.includes("translate(split_part(password_hash, '$', 2), '-_', '+/') || '==$'"));
+    assert.ok(sql.includes('ALTER TABLE admin_sessions RENAME TO sessions'));
+    assert.ok(sql.indexOf('DELETE FROM admin_sessions') < sql.indexOf('RENAME TO sessions'));
+    assert.ok(sql.includes('CREATE TABLE member_sessions ('));
+    assert.ok(sql.includes('REFERENCES local_users (id) ON DELETE CASCADE'));
+    assert.ok(sql.includes('CHECK (char_length(username) BETWEEN 1 AND 64'));
+  });
+
   it('keeps reviewable SQL copies of the inline migrations', () => {
-    for (const migration of [adminAccount, backupLimits, adminContract, settingsTable, settingsContract]) {
+    for (const migration of [adminAccount, backupLimits, adminContract, settingsTable, settingsContract, authSessions]) {
       const file = readFileSync(`migrations/${migration.id}.sql`, 'utf8');
       assert.equal(file.startsWith('BEGIN;'), true);
       assert.equal(file.trimEnd().endsWith('COMMIT;'), true);

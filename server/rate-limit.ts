@@ -1,34 +1,43 @@
-export interface RateLimitRule {
-  max: number;
-  windowMinutes: number;
+/**
+ * The store behind `@fastify/rate-limit` (SEC-7). The plugin's own in-memory
+ * store keeps a separate map per route; this one is shared, and the plugin
+ * appends each route's `groupId` (its rate-limit bucket) to the key, so a
+ * deprecated path and its replacement count against the same limit. It is a
+ * fixed window per client address and bucket, kept in memory: limits reset
+ * when the server restarts.
+ */
+
+interface Window {
+  current: number;
+  startedAt: number;
+  length: number;
 }
 
-export type RateLimitResult = { allowed: true } | { allowed: false; retryAfterSeconds: number };
+type IncrCallback = (error: Error | null, result: { current: number; ttl: number }) => void;
 
-/**
- * A fixed-window, in-memory limiter keyed by bucket and client address. It
- * lives in the single API process, so limits reset when the API restarts.
- */
-export class RateLimiter {
-  private readonly windows = new Map<string, { count: number; resetAt: number }>();
+/** A store class for the plugin's `store` option; `now` is replaceable in tests. */
+export function sharedRateLimitStore(now: () => number = Date.now) {
+  const windows = new Map<string, Window>();
 
-  constructor(private readonly now: () => number = Date.now) {}
+  function prune(at: number) {
+    for (const [key, window] of windows) if (window.startedAt + window.length <= at) windows.delete(key);
+  }
 
-  hit(bucket: string, client: string, rule: RateLimitRule): RateLimitResult {
-    const now = this.now();
-    const key = `${bucket}\u0000${client}`;
-    let window = this.windows.get(key);
-    if (!window || window.resetAt <= now) {
-      window = { count: 0, resetAt: now + rule.windowMinutes * 60_000 };
-      this.windows.set(key, window);
+  return class SharedRateLimitStore {
+    incr(key: string, callback: IncrCallback, timeWindow = 60_000) {
+      const at = now();
+      let window = windows.get(key);
+      if (!window || window.startedAt + timeWindow <= at) {
+        window = { current: 0, startedAt: at, length: timeWindow };
+        windows.set(key, window);
+      }
+      window.current += 1;
+      if (windows.size > 10_000) prune(at);
+      callback(null, { current: window.current, ttl: window.startedAt + timeWindow - at });
     }
-    window.count += 1;
-    if (this.windows.size > 10_000) this.prune(now);
-    if (window.count <= rule.max) return { allowed: true };
-    return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((window.resetAt - now) / 1000)) };
-  }
 
-  private prune(now: number) {
-    for (const [key, window] of this.windows) if (window.resetAt <= now) this.windows.delete(key);
-  }
+    child() {
+      return this;
+    }
+  };
 }

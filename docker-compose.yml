@@ -46,7 +46,6 @@ services:
     restart: unless-stopped
     environment:
       <<: *database-environment
-      LOCAL_AUTH_SECRET: ${LOCAL_AUTH_SECRET:?Set LOCAL_AUTH_SECRET in .env}
       # One-time password for creating the Admin at /admin. Remove it from .env
       # once setup is complete; it is ignored after the Admin exists.
       AGT_KNOWLEDGE_BASE_SETUP_PASSWORD: ${AGT_KNOWLEDGE_BASE_SETUP_PASSWORD:-}
@@ -68,7 +67,9 @@ services:
       target: web
     restart: unless-stopped
     ports:
-      - '${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8080}:80'
+      # Loopback only by default (SEC-4): the stack speaks plain HTTP. Put a TLS
+      # proxy in front (README, HTTPS) before setting APP_BIND_ADDRESS=0.0.0.0.
+      - '${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8080}:80'
     depends_on:
       - api
 

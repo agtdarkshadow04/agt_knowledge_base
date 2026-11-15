@@ -2,14 +2,14 @@ import type { ArticleVisibility, UserRole } from '../types';
 
 export interface AdminSession {
   username: string;
-  /** AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is still set on the server and should be removed. */
-  setupPasswordSet: boolean;
+  /** AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is still set on the server and should be removed (AUTH-6). */
+  setupPasswordStillSet: boolean;
   /** The app version, shown in the dashboard header (VER-2). */
   version: string;
 }
 
 export interface SetupStatus {
-  required: boolean;
+  adminExists: boolean;
   setupPasswordConfigured: boolean;
 }
 

@@ -1,27 +1,10 @@
 import { HttpError } from './http.js';
 import type { Actor } from './domain.js';
-import type { LocalAuthService, LocalSessionUser } from './local-auth.js';
 import type { ApiRequest } from './routes.js';
+import type { MemberUser } from './session.js';
 
-export type AuthenticatedUser = Omit<LocalSessionUser, 'sessionVersion'>;
-
-/**
- * Resolves a member bearer token to the signed-in user, or throws if it is
- * invalid. This is the only place the API turns member credentials into an
- * identity, so an additional provider (such as OIDC) belongs here. The
- * installation Admin authenticates separately, with the cookie session in
- * `admin-auth.ts`, and never becomes an `Actor`.
- */
-export async function authenticate(localAuth: Pick<LocalAuthService, 'verifyToken'>, token: string): Promise<AuthenticatedUser> {
-  const user = await localAuth.verifyToken(token);
-  return {
-    sub: user.sub,
-    username: user.username,
-    displayName: user.displayName,
-    email: user.email,
-    role: user.role,
-  };
-}
+/** The signed-in member, as the session cookie lookup in `server/session.ts` returns it. */
+export type AuthenticatedUser = MemberUser;
 
 export function toActor(user: AuthenticatedUser): Actor {
   return {

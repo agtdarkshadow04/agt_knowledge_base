@@ -5,13 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HomePage } from './HomePage';
 
 const mocks = vi.hoisted(() => ({
-  getToken: vi.fn(async () => 'token'),
   listArticles: vi.fn(),
   listTags: vi.fn(),
 }));
 
 vi.mock('../auth/AuthContext', () => ({
-  useAuth: () => ({ user: null, getToken: mocks.getToken }),
+  useAuth: () => ({ user: null }),
 }));
 
 vi.mock('../services/api', async (importOriginal) => {
@@ -42,7 +41,7 @@ describe('HomePage', () => {
     await waitFor(() => expect(mocks.listArticles).toHaveBeenCalledWith(
       expect.objectContaining({ visibility: 'public', pinned: 'pinned', verification: 'verified' }),
       expect.any(AbortSignal),
-      undefined,
+      false,
     ));
   });
 
@@ -54,7 +53,7 @@ describe('HomePage', () => {
     await waitFor(() => expect(mocks.listArticles).toHaveBeenCalledWith(
       expect.objectContaining({ verification: 'all' }),
       expect.any(AbortSignal),
-      undefined,
+      false,
     ));
   });
 
@@ -69,7 +68,7 @@ describe('HomePage', () => {
     await waitFor(() => expect(mocks.listArticles).toHaveBeenCalledWith(
       expect.objectContaining({ visibility: '0' }),
       expect.any(AbortSignal),
-      undefined,
+      false,
     ));
   });
 
@@ -85,7 +84,7 @@ describe('HomePage', () => {
     await waitFor(() => expect(mocks.listArticles).toHaveBeenLastCalledWith(
       expect.objectContaining({ tagId: '10000000-0000-4000-8000-000000000001' }),
       expect.any(AbortSignal),
-      undefined,
+      false,
     ));
   });
 
@@ -119,7 +118,7 @@ describe('HomePage', () => {
     expect(await screen.findByText('2 results • 2 shown')).toBeInTheDocument();
     expect(screen.getByText('First article')).toBeInTheDocument();
     expect(screen.getByText('Second article')).toBeInTheDocument();
-    expect(mocks.listArticles).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'cursor-1', limit: 12 }), undefined, undefined);
+    expect(mocks.listArticles).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'cursor-1', limit: 12 }), undefined, false);
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
   });
 });

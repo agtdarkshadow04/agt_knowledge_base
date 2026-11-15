@@ -1,27 +1,29 @@
 import fastifySwagger from '@fastify/swagger';
 import type { FastifyInstance } from 'fastify';
-import { adminSessionCookie } from './admin-auth.js';
+import { adminSessionCookie, memberSessionCookie } from './session.js';
 import type { CompiledRoute } from './routes.js';
 import { ErrorBodySchema, FieldErrorSchema } from './schemas.js';
 
 /** What each route really requires (API-11, AUTH-9, SEC-5); one value per kind of route. */
 export const SECURITY = {
-  /** Public reads, and member sign-in. */
+  /** Public reads. */
   none: [],
-  /** Admin setup and sign-in: the CSRF header, no session. */
+  /** Admin setup, Admin sign-in and member sign-in: the CSRF header, no session. */
   csrfOnly: [{ csrfHeader: [] }],
   /** Admin reads. */
   adminRead: [{ sessionCookie: [] }],
   /** Admin writes, logout included. */
   adminWrite: [{ sessionCookie: [], csrfHeader: [] }],
-  /** Member routes: a bearer token (AUTH-1 deviation; cookie sessions in Phase 4 of #48). */
-  member: [{ memberBearer: [] }],
+  /** Member reads (AUTH-1 deviation). */
+  memberRead: [{ memberSessionCookie: [] }],
+  /** Member writes, logout included (AUTH-1 deviation, SEC-5). */
+  memberWrite: [{ memberSessionCookie: [], csrfHeader: [] }],
 } as const;
 
 /** The `security` value of a route, from its auth mode and CSRF requirement. */
 export function routeSecurity(route: Pick<CompiledRoute, 'auth' | 'csrf' | 'method'>) {
   if (route.auth === 'admin') return route.method === 'GET' ? SECURITY.adminRead : SECURITY.adminWrite;
-  if (route.auth === 'member') return SECURITY.member;
+  if (route.auth === 'member') return route.method === 'GET' ? SECURITY.memberRead : SECURITY.memberWrite;
   return route.csrf ? SECURITY.csrfOnly : SECURITY.none;
 }
 
@@ -44,7 +46,7 @@ export function registerOpenApi(app: FastifyInstance, version: string) {
         securitySchemes: {
           sessionCookie: { type: 'apiKey', in: 'cookie', name: adminSessionCookie, description: 'The Admin session.' },
           csrfHeader: { type: 'apiKey', in: 'header', name: 'x-agt-request', description: 'Must be "1".' },
-          memberBearer: { type: 'http', scheme: 'bearer', description: 'The token from POST /api/auth/login.' },
+          memberSessionCookie: { type: 'apiKey', in: 'cookie', name: memberSessionCookie, description: 'A member session, from POST /api/member/login.' },
         },
       },
       tags: [

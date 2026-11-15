@@ -3,20 +3,13 @@ import type { ApiRequest, ApiResponse } from './routes.js';
 
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function json(statusCode: number, body: unknown, publiclyCacheable = false): ApiResponse {
-  return {
-    statusCode,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': statusCode === 200 && publiclyCacheable ? 'public, max-age=30' : 'no-store',
-      'x-content-type-options': 'nosniff',
-    },
-    body,
-  };
+export function json(statusCode: number, body: unknown): ApiResponse {
+  return { statusCode, headers: { 'content-type': 'application/json; charset=utf-8' }, body };
 }
 
+/** Every API response gets the SEC-2 and SEC-3 headers from the app's onRequest hook. */
 export function noContent(): ApiResponse {
-  return { statusCode: 204, headers: { 'cache-control': 'no-store' } };
+  return { statusCode: 204, headers: {} };
 }
 
 /** The parsed JSON body; Fastify has already parsed it and checked it against the route schema. */

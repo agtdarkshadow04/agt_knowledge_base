@@ -2,7 +2,7 @@ import { BadgeCheck, Clock3, Download, Edit3, FileText, History, LockKeyhole, Pi
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { extractHeadings, MarkdownContent } from '../components/MarkdownContent';
+import { extractHeadings, Markdown } from '../components/Markdown';
 import { ErrorState, LoadingState } from '../components/States';
 import { allowDownloadsChangedEvent, storedAllowDownloadsSetting } from '../components/SettingsModal';
 import { TagChip } from '../components/TagChip';
@@ -28,7 +28,7 @@ function downloadFilename(title: string, extension: 'md' | 'pdf') {
 export function ArticlePage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { user, getToken } = useAuth();
+  const { user } = useAuth();
   const viewerSub = user?.sub;
   const articleBodyRef = useRef<HTMLElement>(null);
   const [article, setArticle] = useState<Article | null>(null);
@@ -41,10 +41,10 @@ export function ArticlePage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    try { setArticle(await getArticle(id, undefined, viewerSub ? await getToken() : undefined)); }
+    try { setArticle(await getArticle(id, undefined, Boolean(viewerSub))); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Article not found.'); }
     finally { setLoading(false); }
-  }, [getToken, id, viewerSub]);
+  }, [id, viewerSub]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -118,8 +118,7 @@ export function ArticlePage() {
     setActionBusy(true);
     setError('');
     try {
-      const token = await getToken();
-      setArticle(await setArticleProtection(article.id, !article.isProtected, article.version, token));
+      setArticle(await setArticleProtection(article.id, !article.isProtected, article.version));
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Protection status could not be changed.'); }
     finally { setActionBusy(false); }
   }
@@ -129,8 +128,7 @@ export function ArticlePage() {
     setActionBusy(true);
     setError('');
     try {
-      const token = await getToken();
-      setArticle(await setArticlePinned(article.id, !article.isPinned, article.version, token));
+      setArticle(await setArticlePinned(article.id, !article.isPinned, article.version));
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Pin status could not be changed.'); }
     finally { setActionBusy(false); }
   }
@@ -140,8 +138,7 @@ export function ArticlePage() {
     setActionBusy(true);
     setError('');
     try {
-      const token = await getToken();
-      setArticle(await setArticleVerified(article.id, !article.isVerified, article.version, token));
+      setArticle(await setArticleVerified(article.id, !article.isVerified, article.version));
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Verification status could not be changed.'); }
     finally { setActionBusy(false); }
   }
@@ -150,7 +147,7 @@ export function ArticlePage() {
     if (!article || !isModerator || !window.confirm(`Permanently delete “${article.title}”?`)) return;
     setActionBusy(true);
     try {
-      await deleteArticle(article.id, article.version, await getToken());
+      await deleteArticle(article.id, article.version);
       navigate('/');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Article could not be deleted.');
@@ -227,7 +224,7 @@ export function ArticlePage() {
             <ol>{headings.map((heading) => <li className={`depth-${heading.depth}`} key={heading.id}><a href={`#${heading.id}`}>{heading.text}</a></li>)}</ol>
           </aside>
         )}
-        <article className="article-body" ref={articleBodyRef}><MarkdownContent content={article.content} /></article>
+        <article className="article-body" ref={articleBodyRef}><Markdown content={article.content} /></article>
       </div>
     </div>
   );

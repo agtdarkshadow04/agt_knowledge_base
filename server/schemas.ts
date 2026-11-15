@@ -22,9 +22,10 @@ export const errorCodes = [
   'invalid_request', 'validation_failed', 'unknown_setting',
   'invalid_setting', 'no_changes', 'tag_not_orphaned', 'invalid_backup',
   'unauthorized', 'invalid_credentials', 'invalid_setup_password',
-  'csrf', 'forbidden', 'public_browsing_closed', 'setup_disabled', 'invalid_current_password',
+  'csrf', 'forbidden', 'public_browsing_closed',
   'not_found',
-  'conflict', 'defined_in_config', 'setup_already_completed',
+  'conflict', 'defined_in_config', 'setup_complete',
+  'setup_password_missing',
   'file_too_large', 'body_too_large',
   'rate_limited',
   'internal', 'pre_restore_backup_failed',
@@ -139,13 +140,16 @@ export const MemberUser = object({
   role: Role,
 });
 
-export const MemberLogin = object({ token: Type.String({ description: 'Bearer token for the member routes.' }), user: MemberUser });
-
-export const SetupStatus = object({ required: Type.Boolean(), setupPasswordConfigured: Type.Boolean() });
+export const SetupStatus = object({
+  adminExists: Type.Boolean(),
+  setupPasswordConfigured: Type.Boolean({ description: 'AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is set (AUTH-5).' }),
+  required: Type.Boolean({ deprecated: true, description: 'The 1.x name of `!adminExists`. Removed in 3.0.0.' }),
+});
 
 export const AdminSession = object({
   username: Type.String(),
-  setupPasswordSet: Type.Boolean({ description: 'AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is still set and should be removed (AUTH-6).' }),
+  setupPasswordStillSet: Type.Boolean({ description: 'AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is still set and should be removed (AUTH-6).' }),
+  setupPasswordSet: Type.Boolean({ deprecated: true, description: 'The 1.x name of `setupPasswordStillSet`. Removed in 3.0.0.' }),
   version: Type.String({ description: 'The app version (VER-2).' }),
 });
 
@@ -252,9 +256,16 @@ export const ArticleTagParams = object({ id: Id, tagId: Id });
 export const RevisionParams = object({ id: Id, version: Type.String({ description: 'A revision version, a positive integer.' }) });
 export const UserIdParams = object({ userId: Id });
 
-export const Credentials = object({ username: text(), password: text() });
-export const AdminSetupBody = object({ setupPassword: text(), username: text(), password: text(), passwordConfirmation: text() });
-export const AdminPasswordBody = object({ currentPassword: text(), password: text(), passwordConfirmation: text() });
+// AUTH-5: passwords at most 1024 characters, usernames at most 64 (254 for a member's email address).
+const password = (description?: string) => Type.String({ maxLength: 1024, ...(description ? { description } : {}) });
+export const Credentials = object({ username: Type.String({ maxLength: 254, description: 'The Admin username, or a member\'s username or email address.' }), password: password() });
+export const AdminSetupBody = object({
+  setupPassword: password('AGT_KNOWLEDGE_BASE_SETUP_PASSWORD.'),
+  username: Type.String({ maxLength: 64, description: '1–64 characters after trimming.' }),
+  password: password('12–1024 characters with a lowercase letter, an uppercase letter, a number and a symbol; not the setup password.'),
+  passwordConfirmation: Type.Optional(password('When sent, must equal `password`.')),
+});
+export const AdminPasswordBody = object({ currentPassword: password(), password: password(), passwordConfirmation: Type.Optional(password('When sent, must equal `password`.')) });
 
 export const ArticleWriteBody = object({
   title: text('3–180 characters.'),

@@ -26,7 +26,8 @@ const columns: Record<string, string[]> = {
   application_settings: ['singleton', 'application_name', 'application_subtitle'],
   settings: ['key', 'value', 'created_at', 'updated_at'],
   admin: ['id', 'username', 'password_hash'],
-  admin_sessions: ['token_hash', 'expires_at'],
+  sessions: ['token_hash', 'expires_at'],
+  member_sessions: ['token_hash', 'user_id', 'expires_at'],
 };
 
 function tables(overrides: Record<string, BackupRow[]> = {}): Record<string, BackupRow[]> {
@@ -127,16 +128,23 @@ describe('BackupService', () => {
     database.connect.mock.resetCalls();
   });
 
-  it('covers every table the migrations create except Admin sessions', () => {
-    const created = schemaMigrations.flatMap((migration) => [...migration.sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)/g)]
-      .map((match) => match[1]));
-    assert.deepEqual([...new Set(created)].sort(), [...backupTables, ...unbackedTables, ...legacyTables].sort());
+  it('covers every table the migrations create except sessions', () => {
+    const created = new Set(schemaMigrations.flatMap((migration) => [...migration.sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)/g)]
+      .map((match) => match[1])));
+    for (const migration of schemaMigrations) {
+      for (const [, from, to] of migration.sql.matchAll(/ALTER TABLE ([a-z_]+) RENAME TO ([a-z_]+)/g)) {
+        created.delete(from);
+        created.add(to);
+      }
+    }
+    assert.deepEqual([...created].sort(), [...backupTables, ...unbackedTables, ...legacyTables].sort());
     // A legacy table is one a contract migration drops.
     for (const table of legacyTables) {
       assert.ok(schemaMigrations.some((migration) => migration.requiresExplicitTarget && migration.sql.includes(`DROP TABLE ${table};`)), table);
     }
     assert.ok((backupTables).includes('admin'));
-    assert.ok(!(backupTables as readonly string[]).includes('admin_sessions'));
+    assert.ok(!(backupTables as readonly string[]).includes('sessions'));
+    assert.ok(!(backupTables as readonly string[]).includes('member_sessions'));
   });
 
   it('exports a ZIP of every table from one read-only snapshot, with config.yaml and a manifest', async () => {
@@ -149,7 +157,8 @@ describe('BackupService', () => {
     const contents = await readBackupArchive(result.archive, { maxBytes: 1e8, maxEntries: 16, maxUncompressedBytes: 1e8 });
     // application_settings exists until 016 runs, so this schema version still has it.
     assert.deepEqual(Object.keys(contents.database.tables), [...backupTables, ...legacyTables]);
-    assert.ok(!('admin_sessions' in contents.database.tables));
+    assert.ok(!('sessions' in contents.database.tables));
+    assert.ok(!('member_sessions' in contents.database.tables));
     assertMatches(contents.manifest, { appVersion: match.any(String), migrations: current });
     assert.equal(contents.configText, 'server:\n  port: 3001\n');
     const articleDump = client.query.mock.calls.find(({ arguments: [sql] }) => sql.includes('"public"."articles" source'))!.arguments;
@@ -249,7 +258,7 @@ describe('BackupService', () => {
     assert.deepEqual(readdirSync(backupsDir), [report.preRestoreBackup]);
     const sql = statements(client);
     const truncate = sql.find((statement) => statement.startsWith('TRUNCATE "public"'))!;
-    for (const table of [...backupTables, 'admin_sessions']) assert.ok((truncate).includes(`"public"."${table}"`));
+    for (const table of [...backupTables, 'sessions', 'member_sessions']) assert.ok((truncate).includes(`"public"."${table}"`));
     const copies = sql.filter((statement) => /^INSERT INTO "public"/.test(statement));
     assert.deepEqual(copies.map((statement) => /INSERT INTO "public"\."([a-z_]+)"/.exec(statement)![1]), [...backupTables]);
     assert.ok(!copies.find((statement) => statement.includes('"articles"'))!.includes('search_vector'));

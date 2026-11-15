@@ -62,7 +62,7 @@ function SetupScreen({ status, onComplete }: { status: SetupStatus; onComplete(s
       <h1 id="admin-setup-title">Create the Admin account</h1>
       {!status.setupPasswordConfigured ? (
         <div className="inline-alert" role="alert">
-          Setup is disabled. Set <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code> in the server&apos;s <code>.env</code>, restart the stack, and reload this page.
+          Setup is unavailable: <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code> is not set. Set it in <code>.env</code> and restart.
         </div>
       ) : (
         <>
@@ -135,7 +135,7 @@ function Dashboard({ session, onSessionChange, onSignedOut }: {
           <button className="icon-button" type="button" onClick={() => void leave()} title="Sign out"><LogOut aria-hidden="true" /><span className="sr-only">Sign out</span></button>
         </div>
       </header>
-      {session.setupPasswordSet && (
+      {session.setupPasswordStillSet && (
         <div className="inline-alert" role="alert">
           <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code> is still set on the server. It is no longer needed: remove it from <code>.env</code> and restart the stack.
         </div>
@@ -167,7 +167,7 @@ export function AdminApp() {
   const load = useCallback(async () => {
     try {
       const status = await getSetupStatus();
-      if (status.required) { setPhase({ name: 'setup', status }); return; }
+      if (!status.adminExists) { setPhase({ name: 'setup', status }); return; }
       const session = await getSession();
       setPhase(session ? { name: 'dashboard', session } : { name: 'login' });
     } catch (cause) {

@@ -1,5 +1,5 @@
 import { createDatabase } from '../server/db.js';
-import { hashPassword } from '../server/local-auth.js';
+import { hashPassword } from '../server/passwords.js';
 import { roles, type Role } from '../server/domain.js';
 import { envValue, loadStartup } from '../server/startup.js';
 
@@ -60,6 +60,8 @@ try {
            updated_at = now()`,
     [username, passwordHash, displayName, email ?? null, role],
   );
+  // A reset password ends every session of that member (AUTH-4).
+  await pool.query('DELETE FROM member_sessions WHERE user_id = (SELECT id FROM local_users WHERE username = $1)', [username]);
   console.log(`Member ${role} account ${username} is ready.`);
 } finally {
   await db.close();
