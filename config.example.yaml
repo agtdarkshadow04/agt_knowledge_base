@@ -39,7 +39,8 @@ database:
   # host: localhost             # default: AGT_KNOWLEDGE_BASE_DATABASE_HOST if set (the Compose stack sets it)
   # port: 5432
   # name: agt_knowledge_base
-  # Scratch database for the restore preview (reserved for a later 2.x release).
+  # Scratch database for the restore preview (BAK-3), owned by the app role.
+  # Every preview empties it; never point it at a database with data in it.
   # previewName: agt_knowledge_base_preview
   # user: agt_knowledge_base
   # Connect with TLS and verify the server certificate.
@@ -75,13 +76,13 @@ site:
   # supportUrl: https://www.nms-agt.com/support
 
 backup:
-  # Largest backup upload in bytes (1 MiB to 1 GiB). A TLS proxy in front of
-  # the stack must accept request bodies at least this large.
-  # maxZipBytes: 104857600
-  # Largest total uncompressed size of an uploaded backup (1 MiB to 500 MB).
-  # maxUncompressedBytes: 268435456
-  # Most entries an uploaded archive may contain (3 to 10000).
-  # maxEntries: 16
+  # Largest backup upload in bytes (1024 to 2147483648, 2 GiB). A TLS proxy in
+  # front of the stack must accept request bodies at least this large.
+  # maxZipBytes: 209715200
+  # Largest total uncompressed size of an uploaded backup (1024 to 8589934592, 8 GiB).
+  # maxUncompressedBytes: 1073741824
+  # Most entries an uploaded archive may contain (1 to 100000).
+  # maxEntries: 10000
   preRestore:
     # Config file only: pre-restore backups to keep. Unset keeps every one.
     # keep: 10

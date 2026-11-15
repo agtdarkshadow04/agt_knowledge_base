@@ -1,8 +1,10 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, mock } from 'node:test';
 import { settingKeys } from '../config.js';
-import { applyMigrationSql, migrationId, migrationsById, MIGRATIONS, runMigrations, withTransaction } from '../db.js';
+import { CONTROL_MIGRATIONS, createDatabase, dataWriteScope, lockKey, migrationId, MIGRATIONS, runMigrations, withTransaction } from '../db.js';
 import { fakeDatabase, match, rejectsMatching } from './helpers.js';
 
 type QueryFn = (sql: string, values?: unknown[]) => Promise<unknown>;
@@ -10,16 +12,38 @@ type QueryFn = (sql: string, values?: unknown[]) => Promise<unknown>;
 const byName = (name: string) => MIGRATIONS.find((migration) => migration.name === name)!;
 
 /** A fake database for the runner: the role, the version table and what was applied. */
-function fakeServer(options: { superuser?: boolean; columns?: string[]; applied?: number[]; failOn?: string } = {}) {
-  const state = { columns: options.columns ?? ['version', 'name', 'applied_at'], applied: [...(options.applied ?? [])] };
+function fakeServer(options: {
+  superuser?: boolean;
+  columns?: string[];
+  applied?: number[];
+  controlApplied?: number[];
+  failOn?: string;
+  /** States `control.operation` reports, one per read; the last one repeats. */
+  states?: string[];
+  marker?: string;
+} = {}) {
+  const state = {
+    columns: options.columns ?? ['version', 'name', 'applied_at'],
+    applied: [...(options.applied ?? [])],
+    controlApplied: [...(options.controlApplied ?? [])],
+    states: [...(options.states ?? ['idle'])],
+  };
+  const versions = (list: number[]) => ({ rows: [...list].sort((a, b) => a - b).map((version) => ({ version })), rowCount: list.length });
   const query = mock.fn<QueryFn>(async (sql, values) => {
     if (options.failOn && sql === options.failOn) throw new Error('migration failed');
     if (sql.startsWith('SELECT rolsuper')) return { rows: [{ rolsuper: options.superuser ?? false }], rowCount: 1 };
     if (sql.includes('information_schema.columns')) return { rows: state.columns.map((column_name) => ({ column_name })), rowCount: state.columns.length };
-    if (sql.startsWith('SELECT version FROM schema_migrations')) {
-      return { rows: [...state.applied].sort((a, b) => a - b).map((version) => ({ version })), rowCount: state.applied.length };
-    }
+    if (sql.startsWith('SELECT version FROM schema_migrations')) return versions(state.applied);
+    if (sql.startsWith('SELECT version FROM control.schema_migrations')) return versions(state.controlApplied);
     if (sql.startsWith('INSERT INTO schema_migrations (version, name)')) state.applied.push(values![0] as number);
+    if (sql.startsWith('INSERT INTO control.schema_migrations (version, name)')) state.controlApplied.push(values![0] as number);
+    if (sql.startsWith('SELECT state, pre_restore_backup FROM control.operation')) {
+      return { rows: [{ state: state.states[0] === 'restore_failed' ? 'restore_failed' : 'idle', pre_restore_backup: 'pre-restore-backup-x.zip' }], rowCount: 1 };
+    }
+    if (sql.startsWith('SELECT state FROM control.operation')) {
+      const current = state.states.length > 1 ? state.states.shift()! : state.states[0];
+      return { rows: [{ state: current }], rowCount: 1 };
+    }
     return { rows: [], rowCount: 0 };
   });
   const client = { query, release: mock.fn() };
@@ -38,14 +62,23 @@ describe('MIGRATIONS (DATA-3)', () => {
     });
   });
 
-  it('keeps the 1.x ids that backup manifests use', () => {
+  it('keeps the 1.x ids that the deprecated preview field reports', () => {
     assert.equal(migrationId(MIGRATIONS[0]), '001_initial');
     assert.equal(migrationId(byName('auth_sessions')), '017_auth_sessions');
-    assert.deepEqual(migrationsById(['002_article_revisions']), [MIGRATIONS[1]]);
-    assert.throws(() => migrationsById(['999_unknown']), /Unknown migration 999_unknown\./);
   });
 
-  it('never schema-qualifies objects, so restore can replay migrations in a staging schema', () => {
+  it('lists every server/migrations/control/NNNN_<name>.sql file in CONTROL_MIGRATIONS, the first exactly as BAK-12 gives it', () => {
+    const files = readdirSync('server/migrations/control').filter((file) => file.endsWith('.sql')).sort();
+    assert.deepEqual(CONTROL_MIGRATIONS.map((migration) => `${String(migration.version).padStart(4, '0')}_${migration.name}.sql`), files);
+    const sql = CONTROL_MIGRATIONS[0].sql;
+    assert.ok(sql.includes("state text NOT NULL CHECK (state IN ('idle', 'backup', 'restore', 'restore_failed'))"));
+    assert.ok(sql.includes("INSERT INTO control.operation (id, state, generation) VALUES (1, 'idle', 0);"));
+    for (const column of ['generation bigint NOT NULL', 'owner uuid', 'pre_restore_backup text', 'admin_session_hash text', 'admin_username text', 'admin_session_expires_at timestamptz']) {
+      assert.ok(sql.includes(column), column);
+    }
+  });
+
+  it('never schema-qualifies objects or sets search_path (DATA-11)', () => {
     for (const migration of MIGRATIONS) {
       assert.doesNotMatch(migration.sql, /\bpublic\./i, migration.name);
       assert.doesNotMatch(migration.sql, /search_path/i, migration.name);
@@ -100,11 +133,6 @@ describe('MIGRATIONS (DATA-3)', () => {
     assert.ok(sql.includes('REFERENCES local_users (id) ON DELETE CASCADE'));
   });
 
-  it('replays migration SQL on an open transaction without recording it', async () => {
-    const client = { query: mock.fn(async (_sql: string) => ({ rows: [], rowCount: 0 })) };
-    await applyMigrationSql(client, ['001_initial', '002_article_revisions']);
-    assert.deepEqual(client.query.mock.calls.map(({ arguments: [sql] }) => sql), [MIGRATIONS[0].sql, MIGRATIONS[1].sql]);
-  });
 });
 
 describe('runMigrations (DATA-4, DATA-11)', () => {
@@ -118,9 +146,18 @@ describe('runMigrations (DATA-4, DATA-11)', () => {
     const sql = server.statements();
     const lock = sql.indexOf("SELECT pg_advisory_lock(0, hashtext('agt_knowledge_base_migrations'))");
     assert.ok(lock > sql.findIndex((statement) => statement.startsWith('SELECT rolsuper')));
-    assert.ok(sql.findIndex((statement) => statement.startsWith('CREATE TABLE schema_migrations (')) > lock);
-    assert.equal(sql.filter((statement) => statement === 'BEGIN').length, MIGRATIONS.length);
-    assert.equal(sql.filter((statement) => statement === 'COMMIT').length, MIGRATIONS.length);
+    // BAK-12 startup: the control schema and its migrations first, under the migration lock.
+    const controlSchema = sql.indexOf('CREATE SCHEMA IF NOT EXISTS control');
+    assert.ok(controlSchema > lock);
+    assert.ok(sql.indexOf(CONTROL_MIGRATIONS[0].sql) > controlSchema);
+    // App migrations run while the write lock is held shared and the state is idle.
+    const writeLock = sql.indexOf(`SELECT pg_advisory_lock_shared${lockKey('writes')}`);
+    assert.ok(writeLock > sql.indexOf(CONTROL_MIGRATIONS[0].sql));
+    assert.ok(sql.indexOf('SELECT state FROM control.operation WHERE id = 1') > writeLock);
+    assert.ok(sql.findIndex((statement) => statement.startsWith('CREATE TABLE schema_migrations (')) > writeLock);
+    assert.ok(sql.indexOf(`SELECT pg_advisory_unlock_shared${lockKey('writes')}`) > sql.indexOf(MIGRATIONS.at(-1)!.sql));
+    assert.equal(sql.filter((statement) => statement === 'BEGIN').length, MIGRATIONS.length + CONTROL_MIGRATIONS.length);
+    assert.equal(sql.filter((statement) => statement === 'COMMIT').length, MIGRATIONS.length + CONTROL_MIGRATIONS.length);
     assert.equal(sql.at(-1), "SELECT pg_advisory_unlock(0, hashtext('agt_knowledge_base_migrations'))");
     assert.equal(server.client.release.mock.callCount(), 1);
     const insert = server.client.query.mock.calls.find(({ arguments: [statement] }) => statement.startsWith('INSERT INTO schema_migrations'))!;
@@ -129,7 +166,7 @@ describe('runMigrations (DATA-4, DATA-11)', () => {
 
   it('applies only pending migrations, including 1.x contract migrations that waited for an explicit target', async () => {
     const applied = MIGRATIONS.map((migration) => migration.version).filter((version) => ![7, 14, 16, 18].includes(version));
-    server = fakeServer({ applied });
+    server = fakeServer({ applied, controlApplied: [1] });
     assert.deepEqual((await runMigrations(server.db)).applied, [7, 14, 16, 18]);
     const sql = server.statements();
     assert.ok(sql.indexOf(byName('canonical_tags_contract').sql) < sql.indexOf(byName('spec_storage').sql));
@@ -151,18 +188,80 @@ describe('runMigrations (DATA-4, DATA-11)', () => {
   });
 
   it('refuses a database whose schema is newer than this version (SRV-8)', async () => {
-    server = fakeServer({ applied: [...MIGRATIONS.map((migration) => migration.version), MIGRATIONS.length + 1] });
+    server = fakeServer({ controlApplied: [1], applied: [...MIGRATIONS.map((migration) => migration.version), MIGRATIONS.length + 1] });
     await rejectsMatching(runMigrations(server.db), { name: 'StartupCheckError', message: match.stringMatching(/newer than this version/) });
     assert.ok(!server.statements().includes('BEGIN'));
     assert.equal(server.statements().at(-1), "SELECT pg_advisory_unlock(0, hashtext('agt_knowledge_base_migrations'))");
   });
 
   it('rolls back a failing migration, records nothing for it and releases the lock', async () => {
-    server = fakeServer({ applied: MIGRATIONS.slice(0, -1).map((migration) => migration.version), failOn: byName('spec_storage').sql });
+    server = fakeServer({ controlApplied: [1], applied: MIGRATIONS.slice(0, -1).map((migration) => migration.version), failOn: byName('spec_storage').sql });
     await assert.rejects(runMigrations(server.db), /migration failed/);
     assert.ok(server.statements().includes('ROLLBACK'));
     assert.ok(!server.state.applied.includes(MIGRATIONS.length));
     assert.equal(server.statements().at(-1), "SELECT pg_advisory_unlock(0, hashtext('agt_knowledge_base_migrations'))");
+  });
+});
+
+describe('the BAK-12 startup steps', () => {
+  it('refuses a control schema newer than this version (SRV-8)', async () => {
+    const server = fakeServer({ controlApplied: [1, 2] });
+    await rejectsMatching(runMigrations(server.db), { name: 'StartupCheckError', message: match.stringMatching(/control schema is newer/) });
+    assert.ok(!server.statements().some((statement) => statement.includes('pg_advisory_lock_shared')));
+  });
+
+  it('waits while a backup or restore runs, releasing the write lock between attempts', async () => {
+    const server = fakeServer({ controlApplied: [1], applied: MIGRATIONS.map((migration) => migration.version), states: ['backup', 'restore', 'idle'] });
+    const sleep = mock.fn(async (_milliseconds: number) => undefined);
+    await runMigrations(server.db, { sleep });
+    assert.equal(sleep.mock.callCount(), 2);
+    const sql = server.statements();
+    assert.equal(sql.filter((statement) => statement === `SELECT pg_advisory_lock_shared${lockKey('writes')}`).length, 3);
+    assert.equal(sql.filter((statement) => statement === `SELECT pg_advisory_unlock_shared${lockKey('writes')}`).length, 3);
+  });
+
+  it('refuses to start after a failed restore, naming what is missing (BAK-11)', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'agt-marker-'));
+    const marker = join(directory, 'restore-failed.json');
+    try {
+      const failedState = fakeServer({ controlApplied: [1], states: ['restore_failed'] });
+      await rejectsMatching(runMigrations(failedState.db, { restoreFailedMarker: marker }), {
+        name: 'StartupCheckError',
+        message: match.stringMatching(/restore_failed.*marker file .* is missing.*pre-restore-backup-x\.zip.*README/),
+      });
+      assert.ok(!failedState.statements().some((statement) => statement.includes('pg_advisory_lock_shared')));
+
+      writeFileSync(marker, '{}');
+      const markerOnly = fakeServer({ controlApplied: [1] });
+      await rejectsMatching(runMigrations(markerOnly.db, { restoreFailedMarker: marker }), {
+        name: 'StartupCheckError',
+        message: match.stringMatching(/marker file .* records a failed restore, but control\.operation is not restore_failed/),
+      });
+      const both = fakeServer({ controlApplied: [1], states: ['restore_failed'] });
+      await rejectsMatching(runMigrations(both.db, { restoreFailedMarker: marker }), { message: match.stringMatching(/could not be rolled back/) });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('data-write scope (BAK-12)', () => {
+  it('runs a repository\'s own transaction as a savepoint on the write\'s client', async () => {
+    const statements: string[] = [];
+    const client = { query: mock.fn(async (sql: string) => { statements.push(sql); return { rows: [], rowCount: 0 }; }), release: mock.fn() };
+    const db = createDatabase({ host: 'localhost', port: 5432, database: 'x', user: 'x', password: 'x', ssl: false });
+    await dataWriteScope.run({ client: client as never }, async () => {
+      await withTransaction(await db.pool(), async (inner) => { await inner.query('UPDATE tags SET name = $1', ['x']); });
+      await assert.rejects(withTransaction(await db.pool(), async () => { throw new Error('conflict'); }), /conflict/);
+      await (await db.pool()).query('SELECT 1');
+    });
+    assert.deepEqual(statements, [
+      'SAVEPOINT data_write_1', 'UPDATE tags SET name = $1', 'RELEASE SAVEPOINT data_write_1',
+      'SAVEPOINT data_write_1', 'ROLLBACK TO SAVEPOINT data_write_1', 'RELEASE SAVEPOINT data_write_1',
+      'SELECT 1',
+    ]);
+    assert.equal(client.release.mock.callCount(), 0);
+    await db.close();
   });
 });
 

@@ -1,4 +1,5 @@
 import type { Role } from '../domain.js';
+import { assertDataWrite } from '../dataWrite.js';
 
 /**
  * The SQL of the Admin account, member sign-in and both session tables
@@ -47,11 +48,13 @@ export async function adminAccount(sql: Sql, lock = false): Promise<AdminRow | u
 
 /** Creates the Admin; false when one already exists. */
 export async function insertAdmin(sql: Sql, username: string, passwordHash: string) {
+  assertDataWrite();
   const inserted = await sql.query('INSERT INTO admin (username, password_hash) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING', [username, passwordHash]);
   return Boolean(inserted.rowCount);
 }
 
 export async function updateAdminPassword(sql: Sql, passwordHash: string) {
+  assertDataWrite();
   await sql.query('UPDATE admin SET password_hash = $1, updated_at = now()', [passwordHash]);
 }
 
@@ -70,6 +73,11 @@ export async function adminForSession(sql: Sql, tokenHash: string) {
   return result.rows[0];
 }
 
+/** When an unexpired Admin session ends, for the BAK-11 recovery session. */
+export async function adminSessionExpiry(sql: Sql, tokenHash: string): Promise<Date | undefined> {
+  return (await sql.query<{ expires_at: Date }>('SELECT expires_at FROM sessions WHERE token_hash = $1 AND expires_at > now()', [tokenHash])).rows[0]?.expires_at;
+}
+
 export async function deleteAdminSession(sql: Sql, tokenHash: string) {
   await sql.query('DELETE FROM sessions WHERE token_hash = $1', [tokenHash]);
 }
@@ -86,6 +94,7 @@ export async function activeMemberByLogin(sql: Sql, identifier: string): Promise
 }
 
 export async function updateMemberPassword(sql: Sql, memberId: string, passwordHash: string) {
+  assertDataWrite();
   await sql.query('UPDATE local_users SET password_hash = $2, updated_at = now() WHERE id = $1', [memberId, passwordHash]);
 }
 

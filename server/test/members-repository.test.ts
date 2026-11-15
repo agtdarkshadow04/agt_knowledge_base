@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, mock } from 'node:test';
 import { MemberRepository } from '../repository/members.js';
-import { assertCalledWith, assertMatches, fakeDatabase, rejectsMatching } from './helpers.js';
+import { assertCalledWith, assertMatches, dataWriteIt, fakeDatabase, rejectsMatching } from './helpers.js';
 
 type Query = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -34,6 +34,12 @@ function fakeClient(rows = [editorRow]) {
 }
 
 describe('MemberRepository', () => {
+  it('refuses to write outside withDataWrite(), so an undeclared route fails in tests (BAK-8)', async () => {
+    fakeClient();
+    await assert.rejects(service().deleteUser(editorRow.id), /outside withDataWrite\(\)/);
+    assert.equal(database.connect.mock.callCount(), 0);
+  });
+
   beforeEach(() => {
     database.connect.mock.restore();
     database.connect.mock.resetCalls();
@@ -41,7 +47,7 @@ describe('MemberRepository', () => {
     database.query.mock.resetCalls();
   });
 
-  it('promotes a member to Moderator and signs them out when their role changes', async () => {
+  dataWriteIt('promotes a member to Moderator and signs them out when their role changes', async () => {
     const query = fakeClient();
 
     assertMatches(await service().updateUser(editorRow.id, {
@@ -59,19 +65,19 @@ describe('MemberRepository', () => {
     assert.ok(sql.indexOf('DELETE FROM member_sessions WHERE user_id = $1') < sql.indexOf('COMMIT'));
   });
 
-  it('keeps sessions when nothing security-relevant changes', async () => {
+  dataWriteIt('keeps sessions when nothing security-relevant changes', async () => {
     const query = fakeClient();
     await service().updateUser(editorRow.id, { username: 'apollo', displayName: 'Apollo Renamed', role: 'Editor', isActive: true });
     assert.equal(query.mock.calls.some(({ arguments: [sql] }) => sql.startsWith('DELETE FROM member_sessions')), false);
   });
 
-  it('ends every session when the Admin sets a member\'s password (AUTH-4)', async () => {
+  dataWriteIt('ends every session when the Admin sets a member\'s password (AUTH-4)', async () => {
     const query = fakeClient();
     await service().setPassword(editorRow.id, 'Replacement123!');
     assertCalledWith(query, 'DELETE FROM member_sessions WHERE user_id = $1', [editorRow.id]);
   });
 
-  it('generates the ID of a new member with crypto.randomUUID() (DATA-6)', async () => {
+  dataWriteIt('generates the ID of a new member with crypto.randomUUID() (DATA-6)', async () => {
     const query = fakeClient();
     await service().createUser({ username: 'hermes', displayName: 'Hermes', role: 'Editor', password: 'Permanent123!' });
     const insert = query.mock.calls.find(({ arguments: [sql] }) => sql.includes('INSERT INTO local_users'))!;
@@ -79,7 +85,7 @@ describe('MemberRepository', () => {
     assert.match(String((insert.arguments[1] as unknown[])[5]), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
-  it('recovers a member from the CLI: upserts, activates and ends their sessions', async () => {
+  dataWriteIt('recovers a member from the CLI: upserts, activates and ends their sessions', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 1, rows: [] }));
     await service().recover({ username: 'hermes', displayName: 'Hermes', role: 'Moderator', passwordHash: 'scrypt$hash' });
     const upsert = database.query.mock.calls[0].arguments;
@@ -88,7 +94,7 @@ describe('MemberRepository', () => {
     assertCalledWith(database.query, 'DELETE FROM member_sessions WHERE user_id = (SELECT id FROM local_users WHERE username = $1)', ['hermes']);
   });
 
-  it('never returns or references a super-administrator flag', async () => {
+  dataWriteIt('never returns or references a super-administrator flag', async () => {
     database.query.mock.mockImplementation(async (sql: string) => {
       assert.ok(!(sql).includes('is_super_admin'));
       return sql.includes('count(*)') ? { rows: [{ count: '1' }] } : { rows: [editorRow] };
@@ -99,14 +105,14 @@ describe('MemberRepository', () => {
     assertMatches(users.items[0], { username: 'apollo', role: 'Editor' });
   });
 
-  it('reports a missing user without changing anything', async () => {
+  dataWriteIt('reports a missing user without changing anything', async () => {
     const query = fakeClient([]);
     await rejectsMatching(service().deleteUser(editorRow.id), { statusCode: 404, error: 'not_found', legacyCode: 'USER_NOT_FOUND' });
     assert.ok(!query.mock.calls.some(({ arguments: [sql] }) => sql === 'DELETE FROM local_users WHERE id = $1'));
     assertCalledWith(query, 'ROLLBACK');
   });
 
-  it('maps duplicate usernames to a conflict', async () => {
+  dataWriteIt('maps duplicate usernames to a conflict', async () => {
     const query = mock.fn<Query>(async (sql) => {
       if (sql.includes('INSERT INTO local_users')) throw Object.assign(new Error('duplicate'), { code: '23505' });
       return { rowCount: 0, rows: [] };

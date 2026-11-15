@@ -1,3 +1,4 @@
+import { withDataWrite } from '../server/dataWrite.js';
 import { createDatabase } from '../server/db.js';
 import { MemberRepository } from '../server/repository/members.js';
 import { hashPassword } from '../server/passwords.js';
@@ -48,7 +49,8 @@ try {
 for (const warning of [...warnings, ...startup.warnings]) console.warn(warning);
 const db = createDatabase(startup.database);
 try {
-  await new MemberRepository({ db }).recover({ username, displayName, email, role, passwordHash });
+  // A data write like any other: it waits for a running backup and is refused during a restore (BAK-8).
+  await withDataWrite(db, () => new MemberRepository({ db }).recover({ username, displayName, email, role, passwordHash }));
   console.log(`Member ${role} account ${username} is ready.`);
 } finally {
   await db.close();

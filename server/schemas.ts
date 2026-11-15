@@ -8,8 +8,8 @@ import { Type, type TSchema } from '@sinclair/typebox';
  * field a route returns: Fastify's serializer drops undeclared ones.
  */
 
-const object = <T extends Parameters<typeof Type.Object>[0]>(properties: T, description?: string) =>
-  Type.Object(properties, { additionalProperties: false, ...(description ? { description } : {}) });
+const object = <T extends Parameters<typeof Type.Object>[0]>(properties: T, options?: string | { description: string; deprecated?: boolean }) =>
+  Type.Object(properties, { additionalProperties: false, ...(typeof options === 'string' ? { description: options } : options ?? {}) });
 
 const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 
@@ -20,15 +20,18 @@ const Id = Type.String({ description: 'Lowercase UUID. A malformed ID answers 40
 
 export const errorCodes = [
   'invalid_request', 'validation_failed', 'unknown_setting',
-  'invalid_setting', 'no_changes', 'tag_not_orphaned', 'invalid_backup',
+  'invalid_setting', 'no_changes', 'tag_not_orphaned', 'file_required',
   'unauthorized', 'invalid_credentials', 'invalid_setup_password',
   'csrf', 'forbidden', 'public_browsing_closed',
   'not_found',
   'conflict', 'defined_in_config', 'setup_complete',
   'setup_password_missing',
   'file_too_large', 'body_too_large',
+  'multipart_required',
+  'archive_rejected',
   'rate_limited',
-  'internal', 'pre_restore_backup_failed',
+  'internal',
+  'maintenance',
 ] as const;
 
 const fieldCodes = [
@@ -217,7 +220,15 @@ const DiffLine = object({ kind: Type.Union([Type.Literal(' '), Type.Literal('-')
 const restorePreviewFields = {
   createdAt: Timestamp,
   appVersion: Type.String(),
-  migrations: object({ backup: Type.Array(Type.String()), upgrade: Type.Array(Type.String()) }),
+  formatVersion: Type.Integer({ description: 'The archive format version (BAK-7).' }),
+  schemaVersion: object({
+    backup: Type.Integer({ description: 'The schema version of the backup; older ones are migrated by the restore.' }),
+    current: Type.Integer({ description: 'This installation\'s schema version.' }),
+  }),
+  migrations: object(
+    { backup: Type.Array(Type.String()), upgrade: Type.Array(Type.String()) },
+    { deprecated: true, description: 'The 1.x view of `schemaVersion` as migration ids. Removed in 3.0.0.' },
+  ),
   counts: Type.Record(Type.String(), Type.Integer()),
   config: object({
     included: Type.Boolean(),
@@ -225,13 +236,17 @@ const restorePreviewFields = {
     diff: nullable(Type.Array(DiffLine)),
     identical: Type.Boolean(),
   }),
-  ignoredSettings: Type.Array(Type.String()),
+  ignoredSettings: Type.Array(Type.String(), { description: 'Dashboard settings in the backup that config.yaml defines; a restore drops them.' }),
+  warnings: Type.Array(Type.String()),
 };
 
 export const RestorePreview = object(restorePreviewFields);
-export const RestoreReport = object({ ...restorePreviewFields, preRestoreBackup: Type.String() });
+export const RestoreReport = object({
+  ...restorePreviewFields,
+  preRestoreBackup: nullable(Type.String({ description: 'The pre-restore backup in `storage.backupsDir`; null for a recovery restore.' })),
+});
 
-export const Health = object({ status: Type.Literal('ok') });
+export const Health = object({ status: Type.Union([Type.Literal('ok'), Type.Literal('maintenance')], { description: '`maintenance` while a restore runs or has failed (BAK-8).' }) });
 
 export const NoContent = Type.Null({ description: 'No content.' });
 
@@ -240,7 +255,34 @@ const binary = { schema: { type: 'string', format: 'binary' } };
 /** A backup download: the ZIP archive, not JSON. */
 export const BackupArchive = { description: 'The backup ZIP archive.', content: { 'application/zip': binary } } as unknown as TSchema;
 
-/** A backup upload: the request body is the ZIP archive itself. */
+/**
+ * The restore upload (BAK-1): `multipart/form-data` with the `backup` file and
+ * `action`. The parts are read as a stream, so Fastify validates no parsed
+ * body; `RestoreUploadDocument` is what the OpenAPI document shows.
+ */
+export const RestoreUpload = {
+  description: 'The backup ZIP archive and the action.',
+  content: { 'multipart/form-data': { schema: {} } },
+} as unknown as TSchema;
+
+export const RestoreUploadDocument = {
+  description: 'The backup ZIP archive and the action.',
+  required: true,
+  content: {
+    'multipart/form-data': {
+      schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['preview', 'restore'], description: '`preview` validates only; `restore` replaces the data.' },
+          backup: { type: 'string', format: 'binary', description: 'The backup ZIP archive, at most `backup.maxZipBytes`.' },
+        },
+        required: ['action', 'backup'],
+      },
+    },
+  },
+};
+
+/** A deprecated backup upload: the request body is the ZIP archive itself. */
 export const BackupUpload = {
   description: 'The backup ZIP archive.',
   content: { 'application/zip': { schema: {} }, 'application/octet-stream': { schema: {} } },

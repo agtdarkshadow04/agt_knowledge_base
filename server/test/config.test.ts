@@ -155,8 +155,14 @@ describe('EDITABLE_SETTINGS (CFG-6)', () => {
     assert.ok(validSetting('articles.defaultVisibility', 3));
     assert.ok(!validSetting('articles.defaultVisibility', 6));
     assert.ok(!validSetting('access.allowPublicBrowsing', 'yes'));
+    // The CFG-5 ranges.
     assert.ok(!validSetting('backup.maxZipBytes', 10));
-    assert.ok(!validSetting('backup.maxUncompressedBytes', 600 * 1024 * 1024));
+    assert.ok(validSetting('backup.maxZipBytes', 2 * 1024 * 1024 * 1024));
+    assert.ok(!validSetting('backup.maxZipBytes', 2 * 1024 * 1024 * 1024 + 1));
+    assert.ok(validSetting('backup.maxUncompressedBytes', 8 * 1024 * 1024 * 1024));
+    assert.ok(!validSetting('backup.maxUncompressedBytes', 8 * 1024 * 1024 * 1024 + 1));
+    assert.ok(validSetting('backup.maxEntries', 100_000));
+    assert.ok(!validSetting('backup.maxEntries', 0));
     assert.ok(!validSetting('backup.maxEntries', 1.5));
   });
 });

@@ -2,7 +2,7 @@ import fastifySwagger from '@fastify/swagger';
 import type { FastifyInstance } from 'fastify';
 import { adminSessionCookie, memberSessionCookie } from './session.js';
 import type { CompiledRoute } from './routes.js';
-import { ErrorBodySchema, FieldErrorSchema } from './schemas.js';
+import { ErrorBodySchema, FieldErrorSchema, RestoreUploadDocument } from './schemas.js';
 
 /** What each route really requires (API-11, AUTH-9, SEC-5); one value per kind of route. */
 export const SECURITY = {
@@ -56,6 +56,12 @@ export function registerOpenApi(app: FastifyInstance, version: string) {
         { name: 'tags', description: 'The tag catalog.' },
         { name: 'admin', description: 'The admin dashboard: members, statistics, settings and backups.' },
       ],
+    },
+    // A multipart route validates no parsed body; the document shows its form fields.
+    transform: ({ schema, url, route }) => {
+      const apiRoute = (route.config as { apiRoute?: CompiledRoute } | undefined)?.apiRoute;
+      if (!apiRoute?.multipart || !schema) return { schema, url };
+      return { schema: { ...schema, body: RestoreUploadDocument } as typeof schema, url };
     },
     refResolver: { buildLocalReference: (json, _baseUri, _fragment, index) => (typeof json.$id === 'string' ? json.$id : `def-${index}`) },
   });

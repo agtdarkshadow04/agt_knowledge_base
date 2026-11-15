@@ -66,10 +66,10 @@ describe('admin request dispatch', () => {
   });
 
   it('requires a preview or restore action and an archive before reading the backup', async () => {
-    const missingAction = await handleAdminRequest(adminRequest({ routeKey: 'POST /api/admin/backup/restore', rawBody: Buffer.from('PK') }));
+    const missingAction = await handleAdminRequest(adminRequest({ routeKey: 'POST /api/admin/restore', upload: { action: '', file: '/nonexistent' } }));
     assert.equal(missingAction.statusCode, 400);
-    assertMatches(body(missingAction), { error: 'validation_failed', code: 'INVALID_ACTION' });
-    const missingArchive = await handleAdminRequest(adminRequest({ routeKey: 'POST /api/admin/backup/restore', query: { action: 'preview' } }));
+    assertMatches(body(missingAction), { error: 'validation_failed', code: 'INVALID_ACTION', fields: [{ field: 'action' }] });
+    const missingArchive = await handleAdminRequest(adminRequest({ routeKey: 'POST /api/admin/restore' }));
     assert.equal(missingArchive.statusCode, 400);
     assert.equal((database.connect).mock.callCount(), 0);
   });

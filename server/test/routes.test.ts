@@ -1,3 +1,4 @@
+import { asDataWrite } from '../dataWrite.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
@@ -42,7 +43,7 @@ interface Routed {
 async function route(method: string, url: string): Promise<Routed> {
   const pool = { query: async () => ({ rows: [], rowCount: 0 }) };
   const handler = async () => ({ statusCode: 200, headers: { 'content-type': 'application/json' }, body: '{}' });
-  const app = buildApp(testContext({ db: fakeDatabase(pool) }), { handlers: { request: handler, admin: handler } });
+  const app = buildApp(testContext({ db: fakeDatabase(pool) }), { handlers: { request: handler, admin: handler }, dataWrite: asDataWrite });
   let matched: Pick<Routed, 'routeKey' | 'params'> = { routeKey: undefined, params: {} };
   app.addHook('onResponse', async (request) => {
     matched = { routeKey: request.routeOptions.config.apiRoute?.routeKey, params: { ...(request.params as Record<string, string>) } };
@@ -138,6 +139,7 @@ describe('route table', () => {
     assert.equal(rateLimit('POST /api/admin/login'), 'adminLogin');
     assert.equal(rateLimit('POST /api/setup'), 'setup');
     assert.equal(rateLimit('POST /api/admin/password'), 'adminPassword');
+    assert.equal(rateLimit('POST /api/admin/restore'), 'adminUploads');
     assert.equal(rateLimit('POST /api/admin/backup/restore'), 'adminUploads');
     // Each deprecated path shares its replacement's limit.
     assert.equal(rateLimit('POST /api/admin/auth/login'), 'adminLogin');
@@ -148,6 +150,7 @@ describe('route table', () => {
       'POST /api/admin/backup/restore',
       'POST /api/admin/login',
       'POST /api/admin/password',
+      'POST /api/admin/restore',
       'POST /api/admin/setup',
       'POST /api/member/login',
       'POST /api/setup',
@@ -155,10 +158,12 @@ describe('route table', () => {
     ]);
   });
 
-  it('takes the restore body limit from the effective backup.maxBytes setting', () => {
-    const restore = apiRoutes.find((entry) => entry.routeKey === 'POST /api/admin/backup/restore');
-    assertMatches(restore, { maxBodyBytes: 'backup', rawBody: true });
-    for (const entry of apiRoutes.filter((candidate) => candidate !== restore)) {
+  it('takes the restore body limit from the effective backup.maxZipBytes setting', () => {
+    const restore = apiRoutes.find((entry) => entry.routeKey === 'POST /api/admin/restore');
+    const deprecated = apiRoutes.find((entry) => entry.routeKey === 'POST /api/admin/backup/restore');
+    assertMatches(restore, { maxBodyBytes: 'backup', multipart: true, writesData: false });
+    assertMatches(deprecated, { maxBodyBytes: 'backup', rawBody: true, replacedBy: 'POST /api/admin/restore' });
+    for (const entry of apiRoutes.filter((candidate) => candidate !== restore && candidate !== deprecated)) {
       assert.equal(entry.maxBodyBytes, undefined, entry.routeKey);
       assert.equal(entry.rawBody, undefined, entry.routeKey);
     }

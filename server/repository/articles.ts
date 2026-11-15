@@ -21,6 +21,7 @@ import {
 } from '../domain.js';
 import type { Database } from '../db.js';
 import type { ArticleRepository, TagRepository } from '../repository.js';
+import { assertDataWrite } from '../dataWrite.js';
 
 interface ArticleRow {
   id: string;
@@ -348,6 +349,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async create(input: ArticleWrite, actor: Actor) {
+    assertDataWrite();
     const pool = await this.db.pool();
     const client = await pool.connect();
     try {
@@ -370,6 +372,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async update(id: string, input: ArticleWrite & { version: number }, actor: Actor) {
+    assertDataWrite();
     const pool = await this.db.pool();
     const client = await pool.connect();
     try {
@@ -403,6 +406,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async setProtection(id: string, isProtected: boolean, version: number, actor: Actor) {
+    assertDataWrite();
     const pool = await this.db.pool();
     const client = await pool.connect();
     try {
@@ -428,6 +432,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async setPinned(id: string, isPinned: boolean, version: number, actor: Actor) {
+    assertDataWrite();
     const pool = await this.db.pool();
     const client = await pool.connect();
     try {
@@ -453,6 +458,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async setVerified(id: string, isVerified: boolean, version: number, actor: Actor) {
+    assertDataWrite();
     const pool = await this.db.pool();
     const client = await pool.connect();
     try {
@@ -478,6 +484,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async restore(id: string, revisionVersion: number, currentVersion: number, actor: Actor) {
+    assertDataWrite();
     const pool = await this.db.pool();
     const client = await pool.connect();
     try {
@@ -513,6 +520,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async removeOrphanTag(id: string, tagId: string, version: number, actor: Actor): Promise<OrphanCleanupResult> {
+    assertDataWrite();
     const pool = await this.db.pool();
     const client = await pool.connect();
     try {
@@ -564,6 +572,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async delete(id: string, version: number) {
+    assertDataWrite();
     const pool = await this.db.pool();
     const result = await pool.query('DELETE FROM articles WHERE id = $1 AND version = $2', [id, version]);
     return result.rowCount === 1;
@@ -582,6 +591,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async createTag(input: TagWrite) {
+    assertDataWrite();
     const pool = await this.db.pool();
     try {
       const result = await pool.query<CanonicalTag>(
@@ -598,6 +608,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async updateTag(id: string, input: TagWrite) {
+    assertDataWrite();
     const pool = await this.db.pool();
     try {
       const result = await pool.query<CanonicalTag>(
@@ -615,6 +626,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
   }
 
   async deleteTag(id: string) {
+    assertDataWrite();
     const pool = await this.db.pool();
     const result = await pool.query('DELETE FROM tags WHERE id = $1', [id]);
     return result.rowCount === 1;

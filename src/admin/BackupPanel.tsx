@@ -9,7 +9,7 @@ const tableLabels: Record<string, string> = {
   tags: 'Tags',
   articles: 'Articles',
   article_revisions: 'Article revisions',
-  application_settings: 'Application settings',
+  settings: 'Dashboard settings',
   admin: 'Admin account',
 };
 
@@ -38,12 +38,13 @@ function PreviewDetails({ preview }: { preview: RestorePreview }) {
   const { config } = preview;
   return (
     <>
-      <p>Created {new Date(preview.createdAt).toLocaleString()} by version {preview.appVersion}.</p>
-      {preview.migrations.upgrade.length > 0 && (
+      <p>Created {new Date(preview.createdAt).toLocaleString()} by version {preview.appVersion} (database schema {preview.schemaVersion.backup}).</p>
+      {preview.schemaVersion.backup < preview.schemaVersion.current && (
         <div className="inline-notice" role="note">
-          This backup is from an older version. Restoring upgrades it with {preview.migrations.upgrade.length} migration{preview.migrations.upgrade.length === 1 ? '' : 's'}: {preview.migrations.upgrade.join(', ')}.
+          This backup is from an older version. Restoring upgrades its database from schema {preview.schemaVersion.backup} to {preview.schemaVersion.current}.
         </div>
       )}
+      {preview.warnings.map((warning) => <div className="inline-notice" role="note" key={warning}>{warning}</div>)}
       <Counts counts={preview.counts} />
       {preview.ignoredSettings.length > 0 && (
         <div className="inline-notice" role="note">
@@ -122,9 +123,10 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
       <section className="admin-panel settings-admin-panel" aria-labelledby="backup-restored-title">
         <h2 id="backup-restored-title">Backup restored</h2>
         <p>The data was replaced with the backup contents. Every member and the Admin have been signed out; sign in with the Admin account stored in the backup.</p>
-        <p className="field-help">The data that was replaced was saved first as <code>{report.preRestoreBackup}</code> in the server&apos;s backups directory.</p>
+        {report.preRestoreBackup && <p className="field-help">The data that was replaced was saved first as <code>{report.preRestoreBackup}</code> in the server&apos;s backups directory.</p>}
         <Counts counts={report.counts} />
-        {report.migrations.upgrade.length > 0 && <p className="field-help">Upgraded with: {report.migrations.upgrade.join(', ')}.</p>}
+        {report.schemaVersion.backup < report.schemaVersion.current && <p className="field-help">Upgraded from database schema {report.schemaVersion.backup} to {report.schemaVersion.current}.</p>}
+        {report.warnings.map((warning) => <p className="field-help" key={warning}>{warning}</p>)}
         {report.ignoredSettings.length > 0 && <p className="field-help">Kept from the configuration file: {report.ignoredSettings.join(', ')}.</p>}
         <div className="dialog-actions"><button className="button button-primary" type="button" onClick={onRestored}>Sign in again</button></div>
       </section>
@@ -137,9 +139,10 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
       <section className="admin-panel settings-admin-panel" aria-labelledby="backup-export-title">
         <h2 id="backup-export-title">Download backup</h2>
         <p className="field-help">
-          Downloads a ZIP archive with every article, revision, tag, member account, the Admin account, the application settings,
-          and the current config.yaml, with a SHA-256 checksum for each file. Sessions and .env are never included.
-          The archive contains the Admin and member password hashes: store it as securely as the database itself.
+          Downloads a ZIP archive with a PostgreSQL dump of every article, revision, tag, member account, the Admin account and
+          the dashboard settings, and the current config.yaml, with a SHA-256 checksum for each file. Sessions and .env are never
+          included. Writes wait while the backup runs. The archive contains the Admin and member password hashes: store it as
+          securely as the database itself, and restore only backups you trust.
         </p>
         <div className="dialog-actions">
           <button className="button button-primary" disabled={busy} type="button" onClick={() => void download()}>
@@ -150,8 +153,10 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
       <section className="admin-panel settings-admin-panel" aria-labelledby="backup-restore-title">
         <h2 id="backup-restore-title">Restore backup</h2>
         <p className="field-help">
-          Upload a backup to preview it first; nothing changes until you confirm. Older backups are upgraded; backups from a newer version are refused.
-          Before restoring, the current data is saved as a pre-restore backup on the server. The restore runs in a single transaction, and afterwards everyone is signed out.
+          Upload a backup to preview it first: it is checked in a separate preview database and nothing changes until you confirm.
+          Older backups are upgraded; backups from a newer version, or made by version 1.x, are refused. Before restoring, the current
+          data is saved as a pre-restore backup on the server. The app is in maintenance while the restore runs; if it fails, the
+          pre-restore backup is put back. Afterwards everyone is signed out.
         </p>
         <form className="stack-form" onSubmit={(event) => void runPreview(event)}>
           <label className="field"><span>Backup file</span>

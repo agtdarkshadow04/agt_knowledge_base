@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { afterEach, describe, it, mock } from 'node:test';
+import { afterEach, describe, mock } from 'node:test';
 import { parseConfig } from '../config.js';
 import { lockedSettingKeys, setting, settingStates } from '../context.js';
 import { SettingsService } from '../settings-service.js';
-import { assertCalledWith, assertMatches, fakeDatabase, match, rejectsMatching } from './helpers.js';
+import { assertCalledWith, assertMatches, dataWriteIt, fakeDatabase, match, rejectsMatching } from './helpers.js';
 
 type Query = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -38,7 +38,7 @@ function transaction(table: Map<string, unknown>) {
 }
 
 describe('settings precedence (CFG-7)', () => {
-  it('resolves each setting from the file, then the dashboard, then the default', () => {
+  dataWriteIt('resolves each setting from the file, then the dashboard, then the default', () => {
     const config = parseConfig('site:\n  title: File Archive\nbackup:\n  maxEntries: 20\n');
     assert.deepEqual(setting(config, stored, 'site.title'), {
       key: 'site.title',
@@ -52,7 +52,7 @@ describe('settings precedence (CFG-7)', () => {
     assertMatches(setting(config, stored, 'articles.defaultVisibility'), { value: 1, source: 'dashboard' });
     assertMatches(setting(config, stored, 'backup.maxZipBytes'), { value: 52428800, source: 'dashboard' });
     assertMatches(setting(config, stored, 'backup.maxEntries'), { value: 20, source: 'config', locked: true });
-    assertMatches(setting(config, stored, 'backup.maxUncompressedBytes'), { value: 256 * 1024 * 1024, source: 'default', locked: false });
+    assertMatches(setting(config, stored, 'backup.maxUncompressedBytes'), { value: 1024 * 1024 * 1024, source: 'default', locked: false });
     assert.deepEqual(lockedSettingKeys(config), ['site.title', 'backup.maxEntries']);
     assert.deepEqual(settingStates(config, stored).map((state) => state.key), [
       'site.title', 'site.subtitle', 'site.supportUrl', 'articles.defaultVisibility',
@@ -60,11 +60,11 @@ describe('settings precedence (CFG-7)', () => {
     ]);
   });
 
-  it('ignores a stored value its schema no longer allows', () => {
-    assertMatches(setting(parseConfig(''), new Map([['backup.maxEntries', 0]]), 'backup.maxEntries'), { value: 16, source: 'default' });
+  dataWriteIt('ignores a stored value its schema no longer allows', () => {
+    assertMatches(setting(parseConfig(''), new Map([['backup.maxEntries', 0]]), 'backup.maxEntries'), { value: 10_000, source: 'default' });
   });
 
-  it('a file value of false still locks the key', () => {
+  dataWriteIt('a file value of false still locks the key', () => {
     assertMatches(setting(parseConfig('access:\n  allowPublicBrowsing: false\n'), new Map(), 'access.allowPublicBrowsing'), { value: false, source: 'config', locked: true });
   });
 });
@@ -76,7 +76,7 @@ describe('SettingsService', () => {
     database.query.mock.resetCalls();
   });
 
-  it('serves the effective public values grouped by key (CFG-10)', async () => {
+  dataWriteIt('serves the effective public values grouped by key (CFG-10)', async () => {
     assert.deepEqual(await service('access:\n  allowPublicBrowsing: true\n').getPublic(), {
       site: { title: 'Dashboard Archive', subtitle: 'Dashboard subtitle', supportUrl: 'https://www.nms-agt.com/support' },
       articles: { defaultVisibility: 1 },
@@ -85,7 +85,7 @@ describe('SettingsService', () => {
     assertCalledWith(database.query, 'SELECT key, value FROM settings');
   });
 
-  it('serves the deprecated 1.x public body', async () => {
+  dataWriteIt('serves the deprecated 1.x public body', async () => {
     assert.deepEqual(await service('').getLegacyPublic(), {
       applicationName: 'Dashboard Archive',
       applicationSubtitle: 'Dashboard subtitle',
@@ -95,7 +95,7 @@ describe('SettingsService', () => {
     });
   });
 
-  it('returns the states and the deprecated 1.x view', async () => {
+  dataWriteIt('returns the states and the deprecated 1.x view', async () => {
     const view = await service('site:\n  title: File Archive\n').getAdminView();
     assertMatches(view.states[0], { key: 'site.title', value: 'File Archive', source: 'config', locked: true });
     assert.equal(view.version, 1);
@@ -103,7 +103,7 @@ describe('SettingsService', () => {
     assert.deepEqual(view.settings.backupMaxBytes, { key: 'backup.maxZipBytes', value: 52428800, source: 'dashboard' });
   });
 
-  it('refuses the whole request if a key is set in config.yaml, before touching the database (CFG-8)', async () => {
+  dataWriteIt('refuses the whole request if a key is set in config.yaml, before touching the database (CFG-8)', async () => {
     await rejectsMatching(service('articles:\n  defaultVisibility: 0\n').update({ values: { 'site.title': 'Renamed', 'articles.defaultVisibility': 2 } }), {
       statusCode: 409,
       error: 'defined_in_config',
@@ -114,7 +114,7 @@ describe('SettingsService', () => {
     assert.equal(database.connect.mock.callCount(), 0);
   });
 
-  it('refuses unknown keys and invalid values', async () => {
+  dataWriteIt('refuses unknown keys and invalid values', async () => {
     await rejectsMatching(service('').update({ values: { 'site.title': 'Fine', 'server.port': 1 } }), { statusCode: 400, error: 'unknown_setting', params: { key: 'server.port' } });
     await rejectsMatching(service('').update({ values: { 'site.supportUrl': 'not a url' } }), { statusCode: 400, error: 'invalid_setting', params: { key: 'site.supportUrl' } });
     await rejectsMatching(service('').update({ values: { 'backup.maxZipBytes': 10 } }), { statusCode: 400, error: 'invalid_setting' });
@@ -122,7 +122,7 @@ describe('SettingsService', () => {
     assert.equal(database.connect.mock.callCount(), 0);
   });
 
-  it('stores submitted values and resets null ones to the default', async () => {
+  dataWriteIt('stores submitted values and resets null ones to the default', async () => {
     const table = new Map(stored);
     const query = transaction(table);
     const view = await service('').update({ values: { 'site.title': 'Renamed', 'backup.maxZipBytes': null } });
@@ -130,11 +130,11 @@ describe('SettingsService', () => {
     assertCalledWith(query, 'DELETE FROM settings WHERE key = $1', ['backup.maxZipBytes']);
     assertCalledWith(query, 'COMMIT');
     assertMatches(view.states.find((state) => state.key === 'site.title'), { value: 'Renamed', source: 'dashboard' });
-    assertMatches(view.states.find((state) => state.key === 'backup.maxZipBytes'), { value: 100 * 1024 * 1024, source: 'default' });
+    assertMatches(view.states.find((state) => state.key === 'backup.maxZipBytes'), { value: 200 * 1024 * 1024, source: 'default' });
     assert.equal(table.get('site.subtitle'), 'Dashboard subtitle');
   });
 
-  it('still accepts the deprecated 1.x body, mapping it to values', async () => {
+  dataWriteIt('still accepts the deprecated 1.x body, mapping it to values', async () => {
     const table = new Map<string, unknown>();
     transaction(table);
     const view = await service('').update({ version: 4, applicationName: '  Renamed  ', backupMaxEntries: 40, backupMaxBytes: null });
@@ -145,7 +145,7 @@ describe('SettingsService', () => {
     await rejectsMatching(service('site:\n  title: File\n').update({ version: 4, applicationName: 'Renamed' }), { statusCode: 409, error: 'defined_in_config' });
   });
 
-  it('rolls back when a write fails', async () => {
+  dataWriteIt('rolls back when a write fails', async () => {
     const query = mock.fn<Query>(async (sql) => {
       if (sql.startsWith('INSERT')) throw new Error('write failed');
       return { rows: [] };

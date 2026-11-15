@@ -87,12 +87,18 @@ export interface DiffLine {
 export interface RestorePreview {
   createdAt: string;
   appVersion: string;
+  formatVersion: number;
+  /** The backup's schema version and this installation's; an older one is migrated by the restore. */
+  schemaVersion: { backup: number; current: number };
+  /** Deprecated: migration ids; use `schemaVersion`. */
   migrations: { backup: string[]; upgrade: string[] };
   counts: Record<string, number>;
   config: { included: boolean; content: string | null; diff: DiffLine[] | null; identical: boolean };
   ignoredSettings: string[];
+  warnings: string[];
 }
 
 export interface RestoreReport extends RestorePreview {
-  preRestoreBackup: string;
+  /** Null for a recovery restore after a failed one. */
+  preRestoreBackup: string | null;
 }

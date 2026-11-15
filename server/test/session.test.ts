@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { afterEach, describe, it, mock } from 'node:test';
+import { afterEach, describe, mock } from 'node:test';
 import { parseConfig } from '../config.js';
 import { dummyPasswordHash, hashPassword, verifyPassword } from '../passwords.js';
 import { AdminAuthService, clearedCookie, hashSessionToken, MemberAuthService, sessionCookie } from '../session.js';
-import { assertCalledWith, assertEquals, assertMatches, fakeDatabase, match, rejectsMatching, testContext } from './helpers.js';
+import { assertCalledWith, assertEquals, assertMatches, dataWriteIt, fakeDatabase, match, rejectsMatching, testContext } from './helpers.js';
 
 type QueryFn = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -50,14 +50,14 @@ describe('Admin setup (AUTH-5, AUTH-6)', () => {
 
   const input = { setupPassword: setupSecret, username: 'Atlas Prime', password: 'Permanent123!' };
 
-  it('reports adminExists and whether the setup password is configured', async () => {
+  dataWriteIt('reports adminExists and whether the setup password is configured', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
     assert.deepEqual(await service(setupSecret).setupStatus(), { adminExists: false, setupPasswordConfigured: true, required: true });
     database.query.mock.mockImplementation(async () => ({ rowCount: 1, rows: [{}] }));
     assert.deepEqual(await service(null).setupStatus(), { adminExists: true, setupPasswordConfigured: false, required: false });
   });
 
-  it('answers 503 setup_password_missing when AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is unset', async () => {
+  dataWriteIt('answers 503 setup_password_missing when AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is unset', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
     await rejectsMatching(service(null).setup(input), {
       statusCode: 503,
@@ -68,34 +68,34 @@ describe('Admin setup (AUTH-5, AUTH-6)', () => {
     assert.equal(database.connect.mock.callCount(), 0);
   });
 
-  it('requires the setup password', async () => {
+  dataWriteIt('requires the setup password', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
     await rejectsMatching(service(setupSecret).setup({ ...input, setupPassword: 'guess' }), { statusCode: 401, error: 'invalid_setup_password', legacyCode: 'INVALID_SETUP_PASSWORD' });
     assert.equal(database.connect.mock.callCount(), 0);
   });
 
-  it('rejects a new password equal to the setup password', async () => {
+  dataWriteIt('rejects a new password equal to the setup password', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
     await rejectsMatching(service(setupSecret).setup({ ...input, password: setupSecret }), {
       statusCode: 400, error: 'validation_failed', legacyCode: 'PASSWORD_REUSED', fields: [{ field: 'password', code: 'same_as_setup_password' }],
     });
   });
 
-  it('answers 410 setup_complete once an Admin exists, even with or without the setup password', async () => {
+  dataWriteIt('answers 410 setup_complete once an Admin exists, even with or without the setup password', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 1, rows: [{}] }));
     await rejectsMatching(service(setupSecret).setup(input), { statusCode: 410, error: 'setup_complete', legacyCode: 'SETUP_ALREADY_COMPLETED' });
     await rejectsMatching(service(null).setup(input), { statusCode: 410, error: 'setup_complete' });
     assert.equal(database.connect.mock.callCount(), 0);
   });
 
-  it('handles a concurrent setup that inserted the Admin first', async () => {
+  dataWriteIt('handles a concurrent setup that inserted the Admin first', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
     const query = useClient((sql) => (sql.includes('INSERT INTO admin ') ? { rowCount: 0, rows: [] } : undefined));
     await rejectsMatching(service(setupSecret).setup(input), { statusCode: 410 });
     assert.ok(statements(query).includes('ROLLBACK'));
   });
 
-  it('creates the Admin as entered, a session storing only the token hash, and logs the AUTH-6 reminder', async () => {
+  dataWriteIt('creates the Admin as entered, a session storing only the token hash, and logs the AUTH-6 reminder', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
     const query = useClient((sql) => (sql.includes('INSERT INTO admin ') ? { rowCount: 1, rows: [] } : undefined));
 
@@ -123,13 +123,13 @@ describe('Admin sign-in and sessions (AUTH-3, AUTH-4, AUTH-8)', () => {
       : { rowCount: 1, rows: [] }));
   }
 
-  it('verifies against a dummy hash when no Admin exists', async () => {
+  dataWriteIt('verifies against a dummy hash when no Admin exists', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 0, rows: [] }));
     await rejectsMatching(service().login('atlas', 'Permanent123!'), { statusCode: 401, error: 'invalid_credentials', legacyCode: 'INVALID_CREDENTIALS' });
     assertCalledWith(auth.verifyPassword, 'Permanent123!', await dummyPasswordHash());
   });
 
-  it('compares the trimmed username exactly and always checks the password', async () => {
+  dataWriteIt('compares the trimmed username exactly and always checks the password', async () => {
     const passwordHash = await hashPassword('Permanent123!');
     adminRow(passwordHash);
     await rejectsMatching(service().login('apollo', 'Permanent123!'), { statusCode: 401, error: 'invalid_credentials' });
@@ -140,14 +140,14 @@ describe('Admin sign-in and sessions (AUTH-3, AUTH-4, AUTH-8)', () => {
     assert.equal(database.query.mock.calls.some(({ arguments: [sql] }) => sql.startsWith('UPDATE admin')), false);
   });
 
-  it('never verifies a malformed stored hash, answering like a wrong password and logging an error (AUTH-2)', async () => {
+  dataWriteIt('never verifies a malformed stored hash, answering like a wrong password and logging an error (AUTH-2)', async () => {
     adminRow('scrypt$1$8$1$AAAA$BBBB');
     await rejectsMatching(service().login('Atlas', 'Permanent123!'), { statusCode: 401, error: 'invalid_credentials' });
     assertCalledWith(log.error, 'The stored admin password hash is malformed or uses unsupported scrypt parameters.');
     assert.ok(!JSON.stringify(log.error.mock.calls).includes('scrypt$'));
   });
 
-  it('rehashes a password stored with the 1.x profile on sign-in', async () => {
+  dataWriteIt('rehashes a password stored with the 1.x profile on sign-in', async () => {
     auth.verifyPassword.mock.mockImplementationOnce(async () => ({ ok: true, rehash: true }));
     adminRow('scrypt$16384$8$1$legacy$legacy');
     await service().login('Atlas', 'Permanent123!');
@@ -155,7 +155,7 @@ describe('Admin sign-in and sessions (AUTH-3, AUTH-4, AUTH-8)', () => {
     assertEquals(update.arguments[1], [match.stringMatching(/^scrypt\$32768\$8\$1\$/)]);
   });
 
-  it('accepts only unexpired sessions for an existing Admin', async () => {
+  dataWriteIt('accepts only unexpired sessions for an existing Admin', async () => {
     database.query.mock.mockImplementationOnce(async () => ({ rows: [{ username: 'atlas' }] }));
     assert.deepEqual(await service().session('token'), { username: 'atlas' });
     const [sql, params] = database.query.mock.calls[0].arguments;
@@ -171,13 +171,13 @@ describe('Admin sign-in and sessions (AUTH-3, AUTH-4, AUTH-8)', () => {
     assert.equal(await service().session('x'.repeat(201)), null);
   });
 
-  it('revokes the session on sign-out', async () => {
+  dataWriteIt('revokes the session on sign-out', async () => {
     database.query.mock.mockImplementation(async () => ({ rowCount: 1, rows: [] }));
     await service().logout('token');
     assertCalledWith(database.query, 'DELETE FROM sessions WHERE token_hash = $1', [hashSessionToken('token')]);
   });
 
-  it('changes the password only with the current password, ending every session (AUTH-4)', async () => {
+  dataWriteIt('changes the password only with the current password, ending every session (AUTH-4)', async () => {
     const passwordHash = await hashPassword('Permanent123!');
     const query = useClient((sql) => (sql.startsWith('SELECT username')
       ? { rowCount: 1, rows: [{ username: 'atlas', password_hash: passwordHash }] }
@@ -210,7 +210,7 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
     role: 'Editor',
   });
 
-  it('signs an active member in by normalized username and stores only the token hash', async () => {
+  dataWriteIt('signs an active member in by normalized username and stores only the token hash', async () => {
     const passwordHash = await hashPassword('Permanent123!');
     database.query.mock.mockImplementation(async (sql: string) => (sql.startsWith('SELECT') ? { rows: [memberRow(passwordHash)] } : { rows: [] }));
 
@@ -232,7 +232,7 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
     assert.ok(!JSON.stringify(database.query.mock.calls).includes(session.token));
   });
 
-  it('answers 401 invalid_credentials for an unknown member, a wrong password or a malformed hash', async () => {
+  dataWriteIt('answers 401 invalid_credentials for an unknown member, a wrong password or a malformed hash', async () => {
     database.query.mock.mockImplementation(async () => ({ rows: [] }));
     await rejectsMatching(members().login('nobody', 'Permanent123!'), { statusCode: 401, error: 'invalid_credentials' });
     assertCalledWith(auth.verifyPassword, 'Permanent123!', await dummyPasswordHash());
@@ -247,7 +247,7 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
     assert.equal(database.query.mock.calls.some(({ arguments: [sql] }) => sql.includes('INSERT INTO member_sessions')), false);
   });
 
-  it('rehashes a 1.x password on sign-in', async () => {
+  dataWriteIt('rehashes a 1.x password on sign-in', async () => {
     auth.verifyPassword.mock.mockImplementationOnce(async () => ({ ok: true, rehash: true }));
     database.query.mock.mockImplementation(async (sql: string) => (sql.startsWith('SELECT') ? { rows: [memberRow('legacy')] } : { rows: [] }));
     await members().login('traveller', 'Permanent123!');
@@ -255,7 +255,7 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
     assertEquals(update.arguments[1], ['10000000-0000-4000-8000-000000000001', match.stringMatching(/^scrypt\$32768\$/)]);
   });
 
-  it('accepts only an unexpired session of an active member, and revokes it on sign-out', async () => {
+  dataWriteIt('accepts only an unexpired session of an active member, and revokes it on sign-out', async () => {
     database.query.mock.mockImplementationOnce(async () => ({ rows: [{ id: 'u1', username: 'traveller', display_name: 'Traveller', email: null, role: 'Moderator' }] }));
     assert.deepEqual(await members().session('token'), { sub: 'u1', username: 'traveller', displayName: 'Traveller', email: undefined, role: 'Moderator' });
     const [sql, params] = database.query.mock.calls[0].arguments;
@@ -275,7 +275,7 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
 });
 
 describe('session cookies (AUTH-8)', () => {
-  it('builds HttpOnly, SameSite=Strict cookies with Path=/', () => {
+  dataWriteIt('builds HttpOnly, SameSite=Strict cookies with Path=/', () => {
     const cookie = sessionCookie('agt_knowledge_base_session', 'abc', new Date(Date.now() + 3_600_000), false);
     assert.match(cookie, /^agt_knowledge_base_session=abc; Path=\/; Max-Age=3\d{3}; HttpOnly; SameSite=Strict$/);
     assert.match(sessionCookie('agt_knowledge_base_session', 'abc', new Date(Date.now() + 3_600_000), true), /; Secure$/);
