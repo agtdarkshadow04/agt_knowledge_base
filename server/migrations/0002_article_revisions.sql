@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE TABLE article_revisions (
   article_id uuid NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
   version integer NOT NULL CHECK (version > 0),
@@ -17,6 +15,3 @@ INSERT INTO article_revisions (
 )
 SELECT id, version, title, content, tags, is_protected, modified_at, modified_by
 FROM articles;
-
-INSERT INTO schema_migrations (id) VALUES ('002_article_revisions');
-COMMIT;

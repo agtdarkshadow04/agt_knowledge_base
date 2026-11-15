@@ -88,6 +88,16 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   `Cache-Control: public, max-age=30`, and `OPTIONS` requests answer `404`. `server.frontendOrigin` no longer enables
   CORS ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 
+- **The server connects to PostgreSQL as its own non-superuser role, `agt_knowledge_base`, and refuses to start as
+  a superuser** (DATA-11). A new Compose volume gets the role from `deploy/postgres-init/10-app-role.sh`. **An
+  existing 1.x database needs it once**: download a backup, stop the stack, add a new `AGT_KNOWLEDGE_BASE_DB_PASSWORD`
+  to `.env`, run `deploy/upgrade-database-role.sql` as the superuser, then start 2.0 (README, *Upgrading to 2.0*).
+  `POSTGRES_PASSWORD` is now only the superuser's, and the deprecated `DB_USER`/`DB_NAME` are no longer passed by Compose ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+- **Migrations run when the server starts; the `migrate` service is gone.** Start with
+  `docker compose up -d --build --remove-orphans`. The 1.x contract migrations that waited for `MIGRATION_TARGET_ID`
+  (`007`, `014`, `016`) now run automatically; `MIGRATION_TARGET_ID` and `npm run db:migrate` no longer exist. A
+  database with a migration the server does not know (a newer schema) stops it with a clear message ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+
 ### Added
 
 - `GET /api/openapi.json`: the OpenAPI 3.1 document of every route, generated from the route schemas, with the app
@@ -114,6 +124,12 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   setup, and warns at every start while an Admin exists and the variable is still set (AUTH-5, AUTH-6) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 - A one-time warning in the server log when a sign-in or setup request arrives over plain HTTP from another machine,
   and `deploy/Caddyfile.example` for the TLS proxy (SEC-4, DEP-10) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
+
+- Migrations are numbered files `server/migrations/NNNN_<name>.sql`, applied at startup under a PostgreSQL advisory
+  lock and recorded in `schema_migrations (version, name, applied_at)`, which the server converts from the 1.x table
+  (DATA-3, DATA-4, DATA-11) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+- `deploy/postgres-init/10-app-role.sh` and `deploy/upgrade-database-role.sql`, which create the database role and
+  the restore preview database `agt_knowledge_base_preview` (DEP-3) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 
 ### Changed
 
@@ -155,6 +171,12 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 - Markdown is rendered by one component, `src/components/Markdown.tsx`: raw HTML appears as text, only `http:`,
   `https:` and same-site URLs are kept, external links open in a new tab with `rel="noopener noreferrer"`, and
   external images load lazily without a referrer and show a fallback when they fail (SEC-12, SEC-13) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
+
+- Migration `0018_spec_storage`: the server merges orphaned tag IDs itself, so the last database function and the
+  `pgcrypto` extension are gone; new rows get `crypto.randomUUID()` IDs from the server instead of column defaults,
+  and incoming IDs must be UUIDv4 (DATA-6, DATA-11); `varchar(n)` columns are `text` with the same length checks;
+  `articles.modified_at` is renamed `updated_at`, and `app_users` and both session tables gain `updated_at` (DATA-8) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+- All SQL lives in `server/repository/` (SRV-4), except the backup code that Phase 6 replaces ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 
 ### Deprecated
 
@@ -203,6 +225,8 @@ These keep working and are removed in 3.0.0:
 - The `rehype-sanitize` dependency: Markdown never creates elements from raw HTML (SEC-12) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 - The error codes `setup_disabled`, `setup_already_completed` and `invalid_current_password`, which no release had
   sent (the 1.x `code` values stay) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
+
+- The `migrate` Compose service, `scripts/migrate.ts`, `npm run db:migrate` and `MIGRATION_TARGET_ID` ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 
 ### Security
 

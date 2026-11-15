@@ -1,4 +1,3 @@
-import type pg from 'pg';
 import { EDITABLE_SETTINGS, isSettingKey, validSetting, type SettingKey, type SettingValues } from './config.js';
 import {
   lockedSettingKeys,
@@ -6,10 +5,11 @@ import {
   settingValues,
   type AppContext,
   type SettingState,
-  type StoredSettings,
 } from './context.js';
 import type { ArticleVisibility } from './domain.js';
+import { withTransaction } from './db.js';
 import { HttpError } from './http.js';
+import { readStoredSettings, writeSettings } from './repository/settings.js';
 
 /** The settings the public UI needs, from `GET /api/settings/public` (CFG-10). */
 export interface PublicSettings {
@@ -77,21 +77,16 @@ function legacyValues(input: SettingsWrite): Record<string, unknown> {
   return values;
 }
 
-async function readStored(client: pg.Pool | pg.PoolClient): Promise<StoredSettings> {
-  const result = await client.query<{ key: string; value: unknown }>('SELECT key, value FROM settings');
-  return new Map(result.rows.map((row) => [row.key, row.value]));
-}
-
 export class SettingsService {
   constructor(private readonly context: Pick<AppContext, 'config' | 'db'>) {}
 
   async states(): Promise<SettingState[]> {
-    return settingStates(this.context.config, await readStored(await this.context.db.pool()));
+    return settingStates(this.context.config, await readStoredSettings(await this.context.db.pool()));
   }
 
   /** The effective value of every setting, by key. */
   async values(): Promise<SettingValues> {
-    return settingValues(this.context.config, await readStored(await this.context.db.pool()));
+    return settingValues(this.context.config, await readStoredSettings(await this.context.db.pool()));
   }
 
   async getAdminView(): Promise<AdminSettingsView> {
@@ -149,29 +144,10 @@ export class SettingsService {
       throw new HttpError(400, 'invalid_setting', `${invalid}: ${EDITABLE_SETTINGS[invalid].description}`, { params: { key: invalid } });
     }
 
-    const pool = await this.context.db.pool();
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      for (const key of keys) {
-        if (values[key] === null) {
-          await client.query('DELETE FROM settings WHERE key = $1', [key]);
-        } else {
-          await client.query(
-            `INSERT INTO settings (key, value) VALUES ($1, $2::jsonb)
-             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-            [key, JSON.stringify(values[key])],
-          );
-        }
-      }
-      const stored = await readStored(client);
-      await client.query('COMMIT');
-      return toView(settingStates(this.context.config, stored));
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    const stored = await withTransaction(await this.context.db.pool(), async (client) => {
+      await writeSettings(client, values);
+      return readStoredSettings(client);
+    });
+    return toView(settingStates(this.context.config, stored));
   }
 }

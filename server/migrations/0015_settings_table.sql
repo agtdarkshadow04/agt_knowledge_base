@@ -1,7 +1,3 @@
-BEGIN;
-
--- Dashboard settings become key/value rows in settings (CFG-6). Values that
--- differ from the 1.x defaults are copied; 016 drops application_settings.
 CREATE TABLE settings (
   key text PRIMARY KEY CHECK (key IN (
     'site.title', 'site.subtitle', 'site.supportUrl', 'articles.defaultVisibility',
@@ -25,5 +21,3 @@ CROSS JOIN LATERAL (VALUES
   ('backup.maxEntries', to_jsonb(source.backup_max_entries))
 ) AS entry (key, value)
 WHERE entry.value IS NOT NULL;
-
-COMMIT;

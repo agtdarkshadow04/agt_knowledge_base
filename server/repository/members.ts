@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import type { AppContext } from './context.js';
-import { HttpError } from './http.js';
-import { type AdminStats, type LocalUserRecord, type Role } from './domain.js';
-import { hashPassword } from './passwords.js';
+import type { AppContext } from '../context.js';
+import { HttpError } from '../http.js';
+import { type AdminStats, type LocalUserRecord, type Role } from '../domain.js';
+import { hashPassword } from '../passwords.js';
 
 interface LocalUserRow {
   id: string;
@@ -58,7 +59,8 @@ async function lockedUser(client: pg.PoolClient, id: string) {
   return result.rows[0];
 }
 
-export class AdminService {
+/** Member accounts (`local_users`) and the dashboard statistics: their SQL (SRV-4). */
+export class MemberRepository {
   constructor(private readonly context: Pick<AppContext, 'db'>) {}
 
   async listUsers(query: {
@@ -110,10 +112,10 @@ export class AdminService {
     try {
       await client.query('BEGIN');
       const result = await client.query<LocalUserRow>(
-        `INSERT INTO local_users (username, password_hash, display_name, email, role)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO local_users (id, username, password_hash, display_name, email, role)
+         VALUES ($6, $1, $2, $3, $4, $5)
          RETURNING ${userColumns}`,
-        [input.username, passwordHash, input.displayName, input.email ?? null, input.role],
+        [input.username, passwordHash, input.displayName, input.email ?? null, input.role, randomUUID()],
       );
       await client.query('COMMIT');
       return toUser(result.rows[0]);
@@ -225,4 +227,25 @@ export class AdminService {
     return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, Number(value)])) as unknown as AdminStats;
   }
 
+
+  /**
+   * Creates or resets a member account from the recovery CLI
+   * (`scripts/manage-local-user.ts`), activates it and ends its sessions (AUTH-4).
+   */
+  async recover(input: { username: string; displayName: string; email?: string; role: Role; passwordHash: string }) {
+    const pool = await this.context.db.pool();
+    await pool.query(
+      `INSERT INTO local_users (id, username, password_hash, display_name, email, role)
+       VALUES ($6, $1, $2, $3, $4, $5)
+       ON CONFLICT (username) DO UPDATE
+         SET password_hash = EXCLUDED.password_hash,
+             display_name = EXCLUDED.display_name,
+             email = EXCLUDED.email,
+             role = EXCLUDED.role,
+             is_active = true,
+             updated_at = now()`,
+      [input.username, input.passwordHash, input.displayName, input.email ?? null, input.role, randomUUID()],
+    );
+    await pool.query('DELETE FROM member_sessions WHERE user_id = (SELECT id FROM local_users WHERE username = $1)', [input.username]);
+  }
 }

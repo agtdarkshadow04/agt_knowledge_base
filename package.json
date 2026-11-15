@@ -13,15 +13,14 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "tsc -b && vite build",
     "build:server": "esbuild server/index.ts --bundle --platform=node --target=node26 --format=esm --packages=external --loader:.sql=text --outfile=dist-server/index.mjs",
-    "build:scripts": "esbuild scripts/migrate.ts scripts/manage-local-user.ts --bundle --platform=node --target=node26 --format=esm --packages=external --outdir=dist-server/scripts --out-extension:.js=.mjs",
+    "build:scripts": "esbuild scripts/manage-local-user.ts --bundle --platform=node --target=node26 --format=esm --packages=external --loader:.sql=text --outdir=dist-server/scripts --out-extension:.js=.mjs",
     "start": "node dist-server/index.mjs",
     "lint": "tsc -b --pretty false",
     "test": "npm run test:client && npm run test:server && npm run test:components",
-    "test:client": "esbuild src/lib/*.test.ts --bundle --platform=node --target=node26 --format=esm --packages=external --outdir=.test-build/client --out-extension:.js=.mjs && node --test .test-build/client/*.test.mjs",
-    "test:server": "esbuild server/test/*.test.ts --bundle --platform=node --target=node26 --format=esm --packages=external --loader:.sql=text --outdir=.test-build/server --out-extension:.js=.mjs && node --test --test-concurrency=1 .test-build/server/*.test.mjs",
+    "test:client": "node -e \"fs.rmSync('.test-build/client',{recursive:true,force:true})\" && esbuild src/lib/*.test.ts --bundle --platform=node --target=node26 --format=esm --packages=external --outdir=.test-build/client --out-extension:.js=.mjs && node --test .test-build/client/*.test.mjs",
+    "test:server": "node -e \"fs.rmSync('.test-build/server',{recursive:true,force:true})\" && esbuild server/test/*.test.ts --bundle --platform=node --target=node26 --format=esm --packages=external --loader:.sql=text --outdir=.test-build/server --out-extension:.js=.mjs && node --test --test-concurrency=1 .test-build/server/*.test.mjs",
     "test:components": "vitest run",
-    "check": "npm run lint && npm test && npm run build",
-    "db:migrate": "npm run build:scripts && node dist-server/scripts/migrate.mjs"
+    "check": "npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

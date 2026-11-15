@@ -9,11 +9,11 @@ RUN npm run build:client
 
 FROM dependencies AS server-build
 COPY . .
-# The API bundle, plus the migration job and the member-recovery CLI at the
-# paths docker-compose.yml and the README use.
+# The server bundle (it runs the migrations at startup, DATA-4), plus the
+# member-recovery CLI at the path the README uses.
 RUN npm run build:server \
-  && npx esbuild scripts/migrate.ts scripts/manage-local-user.ts \
-    --bundle --packages=external --platform=node --target=node26 --format=esm \
+  && npx esbuild scripts/manage-local-user.ts \
+    --bundle --packages=external --platform=node --target=node26 --format=esm --loader:.sql=text \
     --outdir=server-scripts
 
 FROM node:26-alpine AS api

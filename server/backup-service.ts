@@ -12,8 +12,7 @@ import {
 import { lockedSettingKeys, type AppContext } from './context.js';
 import { HttpError } from './http.js';
 import { diffLines, type DiffLine } from './line-diff.js';
-import { migrations as knownMigrations } from './migrations.js';
-import { migrationsById } from './migrations-runner.js';
+import { appliedVersions, migrationId, migrationsById, MIGRATIONS } from './db.js';
 import { SettingsService } from './settings-service.js';
 
 
@@ -37,13 +36,6 @@ export const unbackedTables = ['sessions', 'member_sessions'] as const;
 
 /** Earlier names of unbacked tables, which a backup's schema version may still have (017 renamed `admin_sessions`). */
 const formerUnbackedTables = ['admin_sessions'];
-
-/**
- * Tables that exist only until a contract migration drops them. They are
- * exported while they exist, so a backup matches its schema version, but a
- * restore never writes them: their data has already moved.
- */
-export const legacyTables = ['application_settings'] as const;
 
 export type BackupTable = typeof backupTables[number];
 export type BackupCounts = Record<string, number>;
@@ -125,9 +117,10 @@ function describeDataError(error: DatabaseError) {
   return error.constraint ? `${table} violates the ${error.constraint} constraint.` : `${table} violates a database constraint.`;
 }
 
+/** The applied migrations, by their 1.x ids, which backup manifests use. */
 async function appliedMigrations(client: pg.PoolClient) {
-  const result = await client.query<{ id: string }>('SELECT id FROM schema_migrations ORDER BY id');
-  return result.rows.map((row) => row.id);
+  const versions = await appliedVersions(client);
+  return MIGRATIONS.filter((migration) => versions.includes(migration.version)).map(migrationId);
 }
 
 /** Stored and generated column names of every base table in a schema (optionally only `tables`). */
@@ -151,20 +144,18 @@ async function schemaColumns(client: pg.PoolClient, schema: string, tables?: rea
 }
 
 /**
- * The backup's migrations must be exactly the start of this installation's
- * applied list. Anything else (newer, unknown, or diverging) is refused.
+ * The migrations a restore applies after loading a backup: every migration this
+ * installation has applied that the backup lacks, in order (DATA-4). A 1.x
+ * backup may lack a contract migration (007, 014, 016) that once needed an
+ * explicit target; it is applied like the others. A backup with a migration
+ * this installation does not know or has not applied is refused.
  */
 export function upgradePlan(backupMigrations: string[], current: string[]) {
-  const unknown = backupMigrations.find((id) => !knownMigrations.some((migration) => migration.id === id));
+  const unknown = backupMigrations.find((id) => !MIGRATIONS.some((migration) => migrationId(migration) === id));
   if (unknown) invalidBackup(`it was created by a newer or different version of the application (unknown migration ${unknown}).`);
-  if (backupMigrations.length > current.length) {
-    invalidBackup('it was created by a newer version of the application. Upgrade this installation first.');
-  }
-  const diverges = backupMigrations.findIndex((id, index) => current[index] !== id);
-  if (diverges >= 0) {
-    invalidBackup(`its schema history diverges from this installation's at ${backupMigrations[diverges]}.`);
-  }
-  return current.slice(backupMigrations.length);
+  const missing = backupMigrations.find((id) => !current.includes(id));
+  if (missing) invalidBackup('it was created by a newer version of the application. Upgrade this installation first.');
+  return current.filter((id) => !backupMigrations.includes(id));
 }
 
 export class BackupService {
@@ -184,10 +175,9 @@ export class BackupService {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       migrations = await appliedMigrations(client);
       const schema = (await client.query<{ schema: string }>('SELECT current_schema() AS schema')).rows[0].schema;
-      const columns = await schemaColumns(client, schema, [...backupTables, ...legacyTables]);
-      for (const table of [...backupTables, ...legacyTables]) {
+      const columns = await schemaColumns(client, schema, backupTables);
+      for (const table of backupTables) {
         const entry = columns.get(table);
-        if (!entry && (legacyTables as readonly string[]).includes(table)) continue;
         if (!entry) throw new Error(`The ${table} table is missing.`);
         const result = await client.query<{ rows: BackupRow[] }>(
           `SELECT coalesce(jsonb_agg(to_jsonb(source) - $1::text[]), '[]'::jsonb) AS rows
@@ -357,9 +347,9 @@ export class BackupService {
       try {
         await client.query(migration.sql);
       } catch (error) {
-        console.error('Restore migration failed', { migration: migration.id, error });
+        console.error('Restore migration failed', { migration: migrationId(migration), error });
         if (isDataError(error)) invalidBackup(`${failure}: ${describeDataError(error)}`);
-        invalidBackup(`${failure} (migration ${migration.id} failed).`);
+        invalidBackup(`${failure} (migration ${migrationId(migration)} failed).`);
       }
     }
   }

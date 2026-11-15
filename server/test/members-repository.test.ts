@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, mock } from 'node:test';
-import { AdminService } from '../admin-service.js';
+import { MemberRepository } from '../repository/members.js';
 import { assertCalledWith, assertMatches, fakeDatabase, rejectsMatching } from './helpers.js';
 
 type Query = (sql: string, params?: unknown[]) => Promise<unknown>;
@@ -9,7 +9,7 @@ const database = {
   connect: mock.fn(async (): Promise<unknown> => undefined),
   query: mock.fn<Query>(async () => undefined),
 };
-const service = () => new AdminService({ db: fakeDatabase(database) });
+const service = () => new MemberRepository({ db: fakeDatabase(database) });
 
 const editorRow = {
   id: '10000000-0000-4000-8000-000000000001',
@@ -33,7 +33,7 @@ function fakeClient(rows = [editorRow]) {
   return query;
 }
 
-describe('AdminService', () => {
+describe('MemberRepository', () => {
   beforeEach(() => {
     database.connect.mock.restore();
     database.connect.mock.resetCalls();
@@ -53,7 +53,39 @@ describe('AdminService', () => {
 
     const update = query.mock.calls.find(({ arguments: [sql] }) => sql.includes('UPDATE local_users'))!;
     assert.deepEqual(update.arguments[1], [editorRow.id, 'apollo', 'Apollo', null, 'Moderator', true, true]);
-    assertCalledWith(query, 'COMMIT');
+    // AUTH-4: a role change ends all of that member's sessions, in the same transaction.
+    assertCalledWith(query, 'DELETE FROM member_sessions WHERE user_id = $1', [editorRow.id]);
+    const sql = query.mock.calls.map(({ arguments: [statement] }) => statement);
+    assert.ok(sql.indexOf('DELETE FROM member_sessions WHERE user_id = $1') < sql.indexOf('COMMIT'));
+  });
+
+  it('keeps sessions when nothing security-relevant changes', async () => {
+    const query = fakeClient();
+    await service().updateUser(editorRow.id, { username: 'apollo', displayName: 'Apollo Renamed', role: 'Editor', isActive: true });
+    assert.equal(query.mock.calls.some(({ arguments: [sql] }) => sql.startsWith('DELETE FROM member_sessions')), false);
+  });
+
+  it('ends every session when the Admin sets a member\'s password (AUTH-4)', async () => {
+    const query = fakeClient();
+    await service().setPassword(editorRow.id, 'Replacement123!');
+    assertCalledWith(query, 'DELETE FROM member_sessions WHERE user_id = $1', [editorRow.id]);
+  });
+
+  it('generates the ID of a new member with crypto.randomUUID() (DATA-6)', async () => {
+    const query = fakeClient();
+    await service().createUser({ username: 'hermes', displayName: 'Hermes', role: 'Editor', password: 'Permanent123!' });
+    const insert = query.mock.calls.find(({ arguments: [sql] }) => sql.includes('INSERT INTO local_users'))!;
+    assert.ok(insert.arguments[0].includes('INSERT INTO local_users (id, '));
+    assert.match(String((insert.arguments[1] as unknown[])[5]), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it('recovers a member from the CLI: upserts, activates and ends their sessions', async () => {
+    database.query.mock.mockImplementation(async () => ({ rowCount: 1, rows: [] }));
+    await service().recover({ username: 'hermes', displayName: 'Hermes', role: 'Moderator', passwordHash: 'scrypt$hash' });
+    const upsert = database.query.mock.calls[0].arguments;
+    assert.ok(upsert[0].includes('ON CONFLICT (username) DO UPDATE'));
+    assert.ok(upsert[0].includes('is_active = true'));
+    assertCalledWith(database.query, 'DELETE FROM member_sessions WHERE user_id = (SELECT id FROM local_users WHERE username = $1)', ['hermes']);
   });
 
   it('never returns or references a super-administrator flag', async () => {

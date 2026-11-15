@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { isUuidV4 } from './api';
 import { describe, it } from 'node:test';
 import {
   parseAdminAccountPassword,
@@ -81,5 +82,16 @@ describe('request validation', () => {
     assert.deepEqual(parseVerificationWrite({ isVerified: true, version: 2 }), { isVerified: true, version: 2 });
     assert.throws(() => parseVerificationWrite({ isVerified: 'true', version: 2 }));
     assert.throws(() => parseVerificationWrite({ isVerified: true, version: 0 }));
+  });
+});
+
+describe('isUuidV4 (DATA-6)', () => {
+  it('accepts only UUIDv4', () => {
+    assert.equal(isUuidV4('10000000-0000-4000-8000-000000000001'), true);
+    assert.equal(isUuidV4('10000000-0000-4000-B000-00000000000A'), true);
+    assert.equal(isUuidV4('10000000-0000-1000-8000-000000000001'), false);
+    assert.equal(isUuidV4('10000000-0000-4000-c000-000000000001'), false);
+    assert.equal(isUuidV4('not-a-uuid'), false);
+    assert.equal(isUuidV4(42), false);
   });
 });

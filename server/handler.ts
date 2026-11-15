@@ -2,7 +2,7 @@ import { ArticleService } from './article-service.js';
 import { json, noContent, parseBody, pathId } from './api-response.js';
 import { requireActor } from './auth.js';
 import { HttpError, invalidField } from './http.js';
-import { PostgresArticleRepository } from './postgres-article-repository.js';
+import { PostgresArticleRepository } from './repository/articles.js';
 import type { AppContext } from './context.js';
 import type { ApiRequest, ApiResponse } from './routes.js';
 import { SettingsService } from './settings-service.js';

@@ -8,11 +8,11 @@ A production-oriented knowledge base for the Alliance of Galactic Travellers com
                     Docker Compose
 Browser --HTTP(S)--> web: Nginx --> api: Node.js (Fastify) --> postgres: PostgreSQL 16
                                      serves the React/Vite UI      (volume agt-postgres)
-                                     and /api/*
-                    migrate: one-shot job that applies schema migrations before the API starts
+                                     and /api/*, and applies
+                                     schema migrations at startup
 ```
 
-The browser never connects to PostgreSQL and contains no database credential. The Node.js server serves the member app (`index.html`), the admin panel (`admin.html`, only at `/admin`), and the API under `/api/`; Nginx only forwards requests to it. Member accounts and their scrypt password hashes are stored in `local_users`, and the API issues and verifies signed member session tokens. The installation Admin is stored separately, in the single-row `admin` table, and signs in with a cookie session that works only for the admin API. The API is the authorization boundary: it checks the session, role, visibility, and protection before reading or changing data. `created_at`, `created_by`, `modified_at`, `modified_by`, pinning, protection, and version fields are server-owned. PostgreSQL is reachable only through the private Compose network and an optional loopback-only port.
+The browser never connects to PostgreSQL and contains no database credential. The Node.js server serves the member app (`index.html`), the admin panel (`admin.html`, only at `/admin`), and the API under `/api/`; Nginx only forwards requests to it. Member accounts and their scrypt password hashes are stored in `local_users`, and members sign in with cookie sessions. The installation Admin is stored separately, in the single-row `admin` table, and signs in with a cookie session that works only for the admin API. The API is the authorization boundary: it checks the session, role, visibility, and protection before reading or changing data. `created_at`, `created_by`, `updated_at`, `modified_by`, pinning, protection, and version fields are server-owned. The server connects to PostgreSQL as the non-superuser role `agt_knowledge_base`, which owns only the app's database and its restore preview database, and refuses to start as a superuser. PostgreSQL is reachable only through the private Compose network and an optional loopback-only port.
 
 The project is fully self-hosted and needs no cloud account or external service.
 
@@ -47,12 +47,11 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
 
    Pre-restore backups go to `./data/backups` (`storage.dataDir` and `storage.backupsDir`, relative to the working directory).
 
-2. Start PostgreSQL and apply migrations. The database container's user and password must match `database.user` in `config.yaml` (default `agt_knowledge_base`) and `AGT_KNOWLEDGE_BASE_DB_PASSWORD` in `.env.local`:
+2. Start PostgreSQL. On first start, `deploy/postgres-init/10-app-role.sh` creates the `agt_knowledge_base` role (with `AGT_KNOWLEDGE_BASE_DB_PASSWORD` from `.env.local`) and its databases:
 
    ```bash
-   POSTGRES_USER=agt_knowledge_base POSTGRES_PASSWORD=local-development-db-password \
-     docker compose up -d postgres
-   set -a && source .env.local && set +a && npm run db:migrate
+   set -a && source .env.local && set +a
+   POSTGRES_PASSWORD=local-development-superuser-password docker compose up -d postgres
    ```
 
 3. Start the API and Vite in separate terminals:
@@ -62,7 +61,7 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
    npm run dev
    ```
 
-`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; rerun it after changing server code. The API listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Vite proxies `/api` to it, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base at `/login`. The API checks the member and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
+`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; it applies any pending migrations before it listens. Rerun it after changing server code. The API listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Vite proxies `/api` to it, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base at `/login`. The API checks the member and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
 
 ## Docker self-hosting
 
@@ -85,7 +84,7 @@ The Compose stack runs the web frontend, API, schema migrations, PostgreSQL, and
    docker compose ps
    ```
 
-   The one-shot `migrate` service waits for PostgreSQL, applies pending non-destructive migrations, and must finish successfully before the API starts.
+   On its first start the `postgres` service creates the `agt_knowledge_base` role and databases (`deploy/postgres-init/10-app-role.sh`). The API waits for PostgreSQL, applies pending migrations at startup and then listens.
 
 4. Open `http://localhost:8080/admin` (or the configured host and port) to create the Admin account. A fresh installation shows a setup screen that asks for the one-time `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env`, then the Admin username and a new password (at least 12 characters, including uppercase, lowercase, a number, and a symbol, and different from the setup password). Without `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD`, setup is refused, so nobody can claim a fresh installation by reaching it first. Once setup is complete, remove `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env` and run `docker compose up -d`; until then the API logs a warning at startup and the admin panel shows a reminder.
 
@@ -125,7 +124,7 @@ Use the admin panel for routine account management.
 **Admin lockout.** If the Admin password is lost, delete the Admin account and its sessions, then run setup again:
 
 ```bash
-docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DELETE FROM sessions; DELETE FROM admin;"'
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d agt_knowledge_base -c "DELETE FROM sessions; DELETE FROM admin;"'
 ```
 
 Then set `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` in `.env`, run `docker compose up -d`, and complete setup at `/admin`. Member accounts and articles are not affected. Alternatively, restore a backup whose Admin password you know.
@@ -168,14 +167,14 @@ Environment variables are only for secrets and for values the launcher sets (CFG
 | Variable | Purpose |
 | --- | --- |
 | `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` | One-time password for creating the Admin at `/admin`; ignored once the Admin exists. Remove it after setup |
-| `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | Password of the database role. Compose sets it from `POSTGRES_PASSWORD` |
+| `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | Password of the `agt_knowledge_base` database role (never a superuser) |
 | `AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD` | Only for the member-recovery command (see [Account recovery](#account-recovery)) |
 
 Set by the Dockerfile or Compose file, or for development: `AGT_KNOWLEDGE_BASE_CONFIG_FILE` (path of `config.yaml`), `AGT_KNOWLEDGE_BASE_SERVER_HOST` (listen address when `server.host` is not set; the image sets `0.0.0.0`), `AGT_KNOWLEDGE_BASE_DATABASE_HOST` (database host when `database.host` is not set; Compose sets `postgres`), `AGT_KNOWLEDGE_BASE_STATIC_DIR` (path of the built client), and `NODE_ENV`.
 
-Compose itself also reads these variables from `.env`: `POSTGRES_PASSWORD` (required; the database container's password, passed to the API as `AGT_KNOWLEDGE_BASE_DB_PASSWORD`), `POSTGRES_DB` and `POSTGRES_USER` (defaults `agt_knowledge_base` and `postgres`, used when the database container is first created), `POSTGRES_BIND_ADDRESS` and `POSTGRES_PORT` (`127.0.0.1`, `5432`), and `APP_BIND_ADDRESS` and `APP_PORT` (`127.0.0.1`, `8080`, the web container's host address and port).
+Compose itself also reads these variables from `.env`: `POSTGRES_PASSWORD` (required; the bootstrap superuser's password, which only the database container receives) and `POSTGRES_USER` (default `postgres`), `POSTGRES_BIND_ADDRESS` and `POSTGRES_PORT` (`127.0.0.1`, `5432`), and `APP_BIND_ADDRESS` and `APP_PORT` (`127.0.0.1`, `8080`, the web container's host address and port).
 
-**Deprecated variables** (still read until 3.0.0, each with a startup warning): `AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_PASSWORD`, `DATABASE_URL`, `LOCAL_USER_PASSWORD` (use the `AGT_KNOWLEDGE_BASE_` names above), `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DATABASE_SSL` (use `database.*` in `config.yaml`), and `AUTH_MODE` (only `local` is accepted). Compose still passes `DB_USER` and `DB_NAME` from `POSTGRES_USER` and `POSTGRES_DB`; set `database.user` (and `database.name` if you changed it) in `config.yaml` to stop the warning.
+**Deprecated variables** (still read until 3.0.0, each with a startup warning): `AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_PASSWORD`, `DATABASE_URL`, `LOCAL_USER_PASSWORD` (use the `AGT_KNOWLEDGE_BASE_` names above), `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DATABASE_SSL` (use `database.*` in `config.yaml`), and `AUTH_MODE` (only `local` is accepted). `MIGRATION_TARGET_ID` is no longer used.
 
 `API_HOST`, `API_PORT`, `APP_ORIGIN`, `LOCAL_FRONTEND_ORIGIN`, and `LOCAL_AUTH_SESSION_HOURS` are no longer read: use `server.*` and `session.ttlHours` in `config.yaml`.
 
@@ -184,7 +183,7 @@ Compose itself also reads these variables from `.env`: `POSTGRES_PASSWORD` (requ
 Useful operations:
 
 ```bash
-docker compose logs -f web api migrate postgres
+docker compose logs -f web api postgres
 docker compose ps
 docker compose down                # stop containers without deleting data
 ```
@@ -231,12 +230,12 @@ Admin sessions and `.env` are never included. **Backups contain the Admin and me
 - **`config.yaml` is never restored.** Download the backup's copy from the preview and apply any changes by hand. Dashboard settings in the backup for keys the current `config.yaml` defines are dropped and listed in the report.
 - **One transaction.** The restore validates the archive again, then replaces every table in a single transaction: an invalid file, a constraint violation, or any other error leaves the current data unchanged. Afterwards every member and the Admin are signed out; sign in at `/admin` with the Admin account stored in the backup.
 
-The restore creates a temporary schema, so the database user needs the `CREATE` privilege on the database (the Compose user owns the database and has it). Nginx streams backup uploads to the API without buffering them, and the API checks the Admin session before reading the body and enforces `backup.maxZipBytes` itself. If a TLS reverse proxy sits in front of the stack, allow request bodies of at least `backup.maxZipBytes` there too.
+The restore creates a temporary schema, so the database role needs the `CREATE` privilege on the database (`agt_knowledge_base` owns it). Nginx streams backup uploads to the API without buffering them, and the API checks the Admin session before reading the body and enforces `backup.maxZipBytes` itself. If a TLS reverse proxy sits in front of the stack, allow request bodies of at least `backup.maxZipBytes` there too.
 
 For host-level backups, scheduled backups, or moving data between versions, use `pg_dump` from the running `postgres` container:
 
 ```bash
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d agt_knowledge_base --format=custom' \
   > "agt-backup-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
@@ -244,21 +243,40 @@ Keep backups off the host and test restores periodically. To restore a backup in
 
 ```bash
 docker compose stop web api
-docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' \
+docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d agt_knowledge_base --clean --if-exists --no-owner --role=agt_knowledge_base' \
   < agt-backup-YYYYMMDD-HHMMSS.dump
 docker compose up -d
 ```
 
-Restoring a `pg_dump` backup from an older version is safe: on start, the `migrate` service applies any migrations the backup is missing.
+Restoring a `pg_dump` backup from an older version is safe: on start, the server applies any migrations the backup is missing.
 
 ### Upgrades
 
 1. Back up the database (see above).
 2. Pull the new version: `git pull`.
-3. Rebuild and restart: `docker compose up -d --build`. The `migrate` service applies pending migrations before the new API starts.
-4. Check `docker compose ps` and `docker compose logs migrate api`.
+3. Rebuild and restart: `docker compose up -d --build --remove-orphans`. The new API applies pending migrations before it listens; several processes starting together take turns under a database lock.
+4. Check `docker compose ps` and `docker compose logs api`.
 
-While the stack restarts, the previous API container keeps serving until it is replaced, and requests that depend on just-migrated tables can fail for a few seconds. To avoid that, run `docker compose stop web api` before step 3.
+A database whose schema is newer than the version you start stops the server with a clear message (for example after rolling back without restoring a backup): install the newer version again, or restore a backup made by the older one.
+
+#### Upgrading to 2.0
+
+2.0 connects to PostgreSQL as its own non-superuser role, `agt_knowledge_base`, instead of the bootstrap superuser, and refuses to start as a superuser (DATA-11). An existing 1.x database needs the role once:
+
+1. Download a backup from the admin panel (**Backup & restore**) and stop the stack: `docker compose stop`.
+2. Check out 2.0 and add a new random `AGT_KNOWLEDGE_BASE_DB_PASSWORD` to `.env` (see `docker.env.example`). If your `config.yaml` sets `database.user` or `database.name` to the old superuser or a non-default database, remove `database.user` and keep `database.name` only if your database is not called `agt_knowledge_base`.
+3. Create the role and hand it the database, as the superuser:
+
+   ```bash
+   set -a && . ./.env && set +a
+   docker compose up -d postgres
+   docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" \
+     -d "${POSTGRES_DB:-agt_knowledge_base}" -v app_password="$AGT_KNOWLEDGE_BASE_DB_PASSWORD" \
+     < deploy/upgrade-database-role.sql
+   ```
+
+   It creates the role, transfers the database and every table to it, removes the unused `pgcrypto` extension, and creates the restore preview database. It is safe to run again.
+4. `docker compose up -d --build --remove-orphans` (this also removes the old `migrate` container). The server applies the remaining migrations, including the 1.x contract migrations that used to need `MIGRATION_TARGET_ID`.
 
 #### Upgrading to the separate Admin account
 
@@ -270,11 +288,7 @@ This release replaces the super administrator with a separate Admin account and 
 
 Members who previously had the `Admin` role could see the super administrator's username in the Users list. Usernames are not secret, and the password is unchanged, but consider changing the Admin password under **Account** if that matters to you.
 
-Once the new version is running, apply the contract migration, which drops the unused `is_super_admin` column:
-
-```bash
-docker compose run --rm -e MIGRATION_TARGET_ID=014_admin_account_contract migrate
-```
+The contract migration that drops the unused `is_super_admin` column runs automatically from 2.0 on.
 
 ### Migrating from the AWS deployment
 
@@ -298,9 +312,7 @@ npm run check   # lint (tsc -b), all tests, and the production build
 
 ## Database migrations
 
-Migrations are recorded in `schema_migrations` and are idempotent. `npm run db:migrate` (and the Compose `migrate` service) applies every pending non-destructive migration.
-
-Migrations marked as requiring an explicit target are destructive contract phases and are not applied by default. Set `MIGRATION_TARGET_ID` to apply through a specific migration, for example `MIGRATION_TARGET_ID=014_admin_account_contract npm run db:migrate` or, once 2.0.0 runs, `MIGRATION_TARGET_ID=016_drop_application_settings npm run db:migrate`. Do not target a contract migration until the application version that depends on it is running.
+Schema changes are numbered SQL files, `server/migrations/NNNN_<name>.sql`, listed in `MIGRATIONS` in `server/db.ts` (DATA-3). The server applies every pending one at startup, each in its own transaction, under the PostgreSQL advisory lock `hashtext('agt_knowledge_base_migrations')`, and records it in `schema_migrations (version, name, applied_at)` (DATA-4, DATA-11). It refuses to start when the database has a migration it does not know (a newer schema) or when it is connected as a superuser. `MIGRATION_TARGET_ID` and `npm run db:migrate` no longer exist.
 
 ## Data and content security
 

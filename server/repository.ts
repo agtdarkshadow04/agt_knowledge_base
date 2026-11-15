@@ -11,6 +11,12 @@ import type {
   TagOrphan,
   TagWrite,
 } from './domain.js';
+import type { Database } from './db.js';
+
+/** `GET /api/health`: a trivial query (SRV-11). */
+export async function ping(db: Pick<Database, 'pool'>) {
+  await (await db.pool()).query('SELECT 1');
+}
 
 export interface ArticleRepository {
   /** One page in the query's order, starting after `query.after` (or at `query.page`, deprecated). */

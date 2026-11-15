@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { roles, type ArticleWrite, type ListArticlesQuery, type TagWrite } from './api.js';
+import { isUuidV4, roles, type ArticleWrite, type ListArticlesQuery, type TagWrite } from './api.js';
 
 const unsafeMdx = /(^|\n)\s*(import|export)\s|<\/?[A-Za-z][^>]*>/m;
 
-const uuidSchema = z.string().uuid();
+const uuidSchema = z.string().refine(isUuidV4, 'Invalid UUID');
 
 const tagIdsSchema = z.array(uuidSchema).max(12).superRefine((tagIds, context) => {
   if (new Set(tagIds).size !== tagIds.length) {
