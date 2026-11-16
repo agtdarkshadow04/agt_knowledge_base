@@ -1,5 +1,6 @@
-import { ApiError, errorMessage } from '../services/api';
-import type { ArticleListParams, ArticleListResponse, UserRole } from '../types';
+import type { ArticleListParams, ArticleListResponse, Role } from '../lib/api';
+import { ApiError, apiFetch, apiRequest, attachmentName, type RequestOptions } from '../lib/client';
+import { queryString } from '../lib/memberApi';
 import type {
   AuditLogEntry,
   LogFilters,
@@ -18,58 +19,55 @@ import type {
 } from './types';
 
 /**
- * Admin panel API client. Requests are always same-origin: the session is an
- * HttpOnly cookie scoped to /api/admin, and every non-GET request carries the
- * CSRF header the server requires. No member token is ever sent.
+ * Admin panel API calls, all through `apiRequest()` (FE-2). The session is an
+ * HttpOnly cookie scoped to /api/admin; no member session is ever used here.
  */
 export const adminApiBase = '/api/admin';
-export const adminUnauthorizedEvent = 'agt-admin-unauthorized';
+export const adminUnauthorizedEvent = 'agt_knowledge_base_admin_unauthorized';
 
 /** Paths whose 401 means "wrong credentials", not "the session ended". */
 const credentialPaths = ['/login', '/password', '/api/setup'];
 
-async function adminFetch(path: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
-  headers.set('Accept', 'application/json');
-  if (typeof init.body === 'string') headers.set('Content-Type', 'application/json');
-  const method = (init.method ?? 'GET').toUpperCase();
-  if (method !== 'GET') headers.set('x-agt-request', '1');
-  // Paths are relative to /api/admin, except the first-run setup routes under /api/setup (API-1).
-  const url = path.startsWith('/api/') ? path : `${adminApiBase}${path}`;
-  const response = await fetch(url, { ...init, headers, credentials: 'same-origin' });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => undefined);
-    if (response.status === 401 && !credentialPaths.includes(path)) {
-      window.dispatchEvent(new Event(adminUnauthorizedEvent));
-    }
-    throw new ApiError(errorMessage(payload, response.status), response.status, payload);
+/** Paths are relative to /api/admin, except the first-run setup routes under /api/setup (API-1). */
+function adminUrl(path: string) {
+  return path.startsWith('/api/') ? path : `${adminApiBase}${path}`;
+}
+
+function signalSessionEnd(path: string, error: unknown): never {
+  if (error instanceof ApiError && error.status === 401 && !credentialPaths.includes(path)) {
+    window.dispatchEvent(new Event(adminUnauthorizedEvent));
   }
-  return response;
+  throw error;
 }
 
-async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await adminFetch(path, init);
-  return (response.status === 204 ? undefined : await response.json()) as T;
+async function adminFetch(path: string, options: RequestOptions = {}) {
+  try {
+    return await apiFetch(adminUrl(path), options);
+  } catch (error) {
+    signalSessionEnd(path, error);
+  }
 }
 
-function query(params: Record<string, unknown>) {
-  const search = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== '' && value !== 'all') search.set(key, String(value));
-  });
-  return search.toString();
+async function adminRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  try {
+    return await apiRequest<T>(adminUrl(path), options);
+  } catch (error) {
+    signalSessionEnd(path, error);
+  }
 }
+
+const query = (params: Record<string, unknown>) => queryString(params).slice(1);
 
 export function getSetupStatus() {
   return adminRequest<SetupStatus>('/api/setup/status');
 }
 
 export function completeSetup(input: { setupPassword: string; username: string; password: string; passwordConfirmation: string }) {
-  return adminRequest<AdminSession>('/api/setup', { method: 'POST', body: JSON.stringify(input) });
+  return adminRequest<AdminSession>('/api/setup', { method: 'POST', body: input });
 }
 
 export function signIn(username: string, password: string) {
-  return adminRequest<AdminSession>('/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+  return adminRequest<AdminSession>('/login', { method: 'POST', body: { username, password } });
 }
 
 export function signOut() {
@@ -87,12 +85,12 @@ export async function getSession() {
 }
 
 export function changePassword(input: { currentPassword: string; password: string; passwordConfirmation: string }) {
-  return adminRequest<AdminSession>('/password', { method: 'POST', body: JSON.stringify(input) });
+  return adminRequest<AdminSession>('/password', { method: 'POST', body: input });
 }
 
 export function listUsers(params: {
   search?: string;
-  role?: 'all' | UserRole;
+  role?: 'all' | Role;
   active?: 'all' | 'active' | 'inactive';
   page?: number;
   pageSize?: number;
@@ -100,16 +98,16 @@ export function listUsers(params: {
   return adminRequest<LocalUserListResponse>(`/users?${query(params)}`, { signal });
 }
 
-export function createUser(input: { username: string; displayName: string; email?: string; role: UserRole; password: string }) {
-  return adminRequest<LocalUser>('/users', { method: 'POST', body: JSON.stringify(input) });
+export function createUser(input: { username: string; displayName: string; email?: string; role: Role; password: string }) {
+  return adminRequest<LocalUser>('/users', { method: 'POST', body: input });
 }
 
-export function updateUser(id: string, input: { username: string; displayName: string; email?: string; role: UserRole; isActive: boolean }) {
-  return adminRequest<LocalUser>(`/users/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(input) });
+export function updateUser(id: string, input: { username: string; displayName: string; email?: string; role: Role; isActive: boolean }) {
+  return adminRequest<LocalUser>(`/users/${encodeURIComponent(id)}`, { method: 'PUT', body: input });
 }
 
 export function setUserPassword(id: string, password: string) {
-  return adminRequest<void>(`/users/${encodeURIComponent(id)}/password`, { method: 'PUT', body: JSON.stringify({ password }) });
+  return adminRequest<void>(`/users/${encodeURIComponent(id)}/password`, { method: 'PUT', body: { password } });
 }
 
 export function deleteUser(id: string) {
@@ -129,15 +127,13 @@ export function getSettings(signal?: AbortSignal) {
 }
 
 export function updateSettings(input: SettingsWrite) {
-  return adminRequest<AdminSettingsView>('/settings', { method: 'PUT', body: JSON.stringify(input) });
+  return adminRequest<AdminSettingsView>('/settings', { method: 'PUT', body: input });
 }
 
 /** Downloads a full backup archive. */
 export async function downloadBackup() {
-  const response = await adminFetch('/backup', { headers: { Accept: 'application/zip' } });
-  const disposition = response.headers.get('content-disposition') ?? '';
-  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'agt-knowledge-base-backup.zip';
-  return { blob: await response.blob(), filename };
+  const response = await adminFetch('/backup', { accept: 'application/zip' });
+  return { blob: await response.blob(), filename: attachmentName(response, 'agt-knowledge-base-backup.zip') };
 }
 
 /** BAK-1: `POST /api/admin/restore` with the `backup` file and the action as multipart/form-data. */
@@ -193,7 +189,5 @@ export function clearServerLog() {
 /** Downloads the entries matching `filters` as JSON Lines or CSV (LOG-22). */
 export async function exportLog(log: LogKind, filters: LogFilters, format: 'jsonl' | 'csv') {
   const response = await adminFetch(`/logs/${log}/export${logQuery(filters, { format })}`);
-  const disposition = response.headers.get('content-disposition') ?? '';
-  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `agt-knowledge-base-${log}-log.${format}`;
-  return { blob: await response.blob(), filename };
+  return { blob: await response.blob(), filename: attachmentName(response, `agt-knowledge-base-${log}-log.${format}`) };
 }

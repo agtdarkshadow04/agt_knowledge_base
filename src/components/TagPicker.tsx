@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from 'react';
-import type { CanonicalTag } from '../types';
+import type { CanonicalTag } from '../lib/api';
 import { TagChip } from './TagChip';
 
 const selectionLimit = 12;

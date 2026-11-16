@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
-import type { CanonicalTag } from '../types';
+import type { CanonicalTag } from '../lib/api';
 import { TagPicker } from './TagPicker';
 
 const tags: CanonicalTag[] = Array.from({ length: 13 }, (_, index) => ({

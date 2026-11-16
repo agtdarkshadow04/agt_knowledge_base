@@ -6,9 +6,9 @@ import { Type } from '@sinclair/typebox';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import Fastify, { LogController, type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { createWriteStream, existsSync } from 'node:fs';
+import { createWriteStream, existsSync, readdirSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { authenticationHook, createAdminRequestHandler, type AdminRequestHandler } from './adminRoutes.js';
@@ -18,6 +18,7 @@ import type { AppConfig } from './config.js';
 import type { AppContext } from './context.js';
 import { createRequestHandler, type RequestHandler } from './handler.js';
 import { withDataWrite } from './dataWrite.js';
+import { noStoreHeaders, securityHeaders } from './headers.js';
 import { BodyTooLargeError, errorReply, HttpError, RateLimitedError } from './http.js';
 import type { Admission } from './operation.js';
 import { registerOpenApi, routeSecurity } from './openapi.js';
@@ -47,34 +48,14 @@ import {
 } from './session.js';
 import { SettingsService } from './settings-service.js';
 import { parseAdminAccountPassword, parseAdminSetup, parseCredentials } from '../src/lib/validation.js';
+import { legacyPageRedirect } from '../src/lib/routes.js';
 
 export { csrfHeader } from './adminRoutes.js';
 
 /** Member UI paths the React router still answers, until query-parameter deep links replace them (FE-4). */
-const memberPagePaths = ['/login', '/tags', '/articles/*'];
 
 /** The Content-Security-Policy of every response, exactly as SEC-1 gives it. */
-export const contentSecurityPolicy = [
-  "default-src 'self'", "script-src 'self'", "style-src 'self'", "img-src 'self' https: http: blob:",
-  "font-src 'self'", "connect-src 'self'", "media-src 'self'", "worker-src 'self'", "object-src 'none'",
-  "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'",
-].join('; ');
-
-/** SEC-1 and SEC-2: on every response. */
-const securityHeaders = {
-  'content-security-policy': contentSecurityPolicy,
-  'x-content-type-options': 'nosniff',
-  'x-frame-options': 'DENY',
-  'referrer-policy': 'strict-origin-when-cross-origin',
-  'cross-origin-opener-policy': 'same-origin',
-};
-
-/** SEC-3: API and HTML responses are never cached; only hashed `/assets/` files are. */
-export const noStoreHeaders = {
-  'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
-  pragma: 'no-cache',
-  expires: '0',
-};
+export { contentSecurityPolicy, noStoreHeaders } from './headers.js';
 
 export interface BuildAppOptions {
   /** Fastify's logger option; off by default so tests stay quiet. */
@@ -222,7 +203,29 @@ function registerStatic(app: FastifyInstance, staticDir: string) {
   app.get('/', hidden, page('index.html'));
   app.get('/admin', hidden, page('admin.html', { 'x-robots-tag': 'noindex, nofollow' }));
   app.get('/admin/', hidden, async (_request, reply) => reply.redirect('/admin', 301));
-  for (const path of memberPagePaths) app.get(path, hidden, page('index.html'));
+  // The files Vite copies from public/ (the logo, fonts and their licences, UI-15) at their own paths, never the entry pages.
+  for (const file of publicFiles(root, assets)) app.get(`/${file}`, hidden, page(file));
+  // FE-4: the member UI's 1.x page paths redirect to their query-parameter deep links (deprecated; removed in 3.0.0).
+  const legacyPage = async (request: FastifyRequest, reply: FastifyReply) => {
+    const target = legacyPageRedirect(new URL(request.url, 'http://localhost').pathname);
+    if (!target) throw new HttpError(404, 'not_found', 'Route not found.', { legacyCode: 'NOT_FOUND' });
+    return reply.redirect(target, 301);
+  };
+  for (const path of ['/login', '/tags', '/articles/*']) app.get(path, hidden, legacyPage);
+}
+
+/** Every file under `root` except the entry pages and the hashed build output, as URL paths. */
+function publicFiles(root: string, assets: string) {
+  const files: string[] = [];
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) { if (path !== assets) walk(path); continue; }
+      if (entry.isFile() && !entry.name.endsWith('.html')) files.push(relative(root, path).split(sep).join('/'));
+    }
+  };
+  walk(root);
+  return files;
 }
 
 /**

@@ -1,17 +1,18 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { AuthProvider } from './auth/AuthContext';
-import { AppSettingsProvider } from './settings/AppSettingsContext';
-import './config';
-import { handlePreloadError } from './preloadError';
+import { AppSettingsProvider } from './components/AppSettingsContext';
+import { AuthProvider } from './components/AuthContext';
+import { NavigationProvider } from './components/Navigation';
+import { handlePreloadError } from './lib/preloadError';
 import './styles.css';
 
 window.addEventListener('vite:preloadError', handlePreloadError);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AppSettingsProvider><AuthProvider><App /></AuthProvider></AppSettingsProvider>
+    <NavigationProvider>
+      <AppSettingsProvider><AuthProvider><App /></AuthProvider></AppSettingsProvider>
+    </NavigationProvider>
   </StrictMode>,
 );
-

@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { LoadingState } from '../components/States';
-import { agtVisibilityOptions, legacyVisibilityOptions, parseArticleVisibility } from '../visibility';
+import { agtVisibilityOptions, legacyVisibilityOptions, parseArticleVisibility } from '../lib/visibility';
 import { getSettings, updateSettings } from './api';
 import type { AdminSettingsView, DashboardSettings, SettingKey, SettingState, SettingsWrite } from './types';
 
@@ -48,7 +48,7 @@ export function SettingsPanel() {
     return () => controller.abort();
   }, []);
 
-  if (!view || !draft) return error ? <div className="inline-alert" role="alert">{error}</div> : <LoadingState message="Loading settings…" />;
+  if (!view || !draft) return error ? <p className="error-note" role="alert">{error}</p> : <LoadingState message="Loading settings…" />;
 
   const states = stateMap(view);
   const initial = draftFrom(view);
@@ -113,8 +113,8 @@ export function SettingsPanel() {
     <section className="admin-panel settings-admin-panel" aria-labelledby="application-settings-title">
       <h2 id="application-settings-title">Settings</h2>
       <p className="field-help">Settings defined in <code>config.yaml</code> are read-only here: the configuration file always wins.</p>
-      {error && <div className="inline-alert" role="alert">{error}</div>}
-      {saved && <div className="inline-notice" role="status">Settings saved.</div>}
+      {error && <p className="error-note" role="alert">{error}</p>}
+      <div role="status" aria-live="polite">{saved && <p className="success-note">Settings saved.</p>}</div>
       <form className="stack-form" onSubmit={(event) => void save(event)}>
         {textField('site.title', 'Application name', { maxLength: 100 })}
         {textField('site.subtitle', 'Subtitle or description', { maxLength: 240, multiline: true })}

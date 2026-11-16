@@ -30,3 +30,6 @@ if (typeof window !== 'undefined') {
     }),
   });
 }
+
+// jsdom does not implement scrolling; navigation scrolls to the top of the new page.
+if (typeof window !== 'undefined') window.scrollTo = () => undefined;

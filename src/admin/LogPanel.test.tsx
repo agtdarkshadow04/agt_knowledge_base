@@ -74,10 +74,12 @@ describe('LogPanel (LOG-19, LOG-20)', () => {
     await screen.findByText('Unhandled API error');
     await user.click(screen.getByRole('button', { name: 'Clear log' }));
     expect(mocks.clearServerLog).not.toHaveBeenCalled();
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('Delete every server log entry?');
-    await user.click(screen.getByRole('button', { name: 'Clear the server log' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Clear the server log?' });
+    expect(dialog).toHaveTextContent('Every server log entry is deleted. This cannot be undone. The audit log is not affected.');
+    await user.click(within(dialog).getByRole('button', { name: 'Clear the server log' }));
     expect(mocks.clearServerLog).toHaveBeenCalledOnce();
-    expect(await screen.findByRole('status')).toHaveTextContent('The server log was cleared.');
+    expect((await screen.findByText('The server log was cleared.')).closest('[role="status"]')).not.toBeNull();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
   it('shows the audit log with outcomes and counts, without any way to change it, and exports CSV', async () => {

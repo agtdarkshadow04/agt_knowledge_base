@@ -11,6 +11,8 @@ import {
   parseListQuery,
   parseTagWrite,
   parseVerificationWrite,
+  fieldMessages,
+  validate,
 } from './validation.js';
 
 const tagId = '10000000-0000-4000-8000-000000000001';
@@ -93,5 +95,31 @@ describe('isUuidV4 (DATA-6)', () => {
     assert.equal(isUuidV4('10000000-0000-4000-c000-000000000001'), false);
     assert.equal(isUuidV4('not-a-uuid'), false);
     assert.equal(isUuidV4(42), false);
+  });
+});
+
+describe('form validation (FE-6)', () => {
+  it('returns the parsed value or the same field errors the server sends', () => {
+    assert.deepEqual(validate(parseTagWrite, { name: ' Guides ', color: '#FFB451' }), { ok: true, value: { name: 'Guides', color: '#FFB451' } });
+    const result = validate(parseAdminUserCreate, { username: 'A', displayName: '', role: 'Editor', password: 'short' });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.deepEqual(result.fields.map((error) => [error.field, error.code]), [
+      ['username', 'invalid_format'],
+      ['displayName', 'required'],
+      ['password', 'too_short'],
+      ['password', 'invalid_format'],
+      ['password', 'invalid_format'],
+      ['password', 'invalid_format'],
+    ]);
+    assert.deepEqual(Object.keys(fieldMessages(result.fields)), ['username', 'displayName', 'password']);
+  });
+
+  it('rethrows errors that are not validation errors', () => {
+    assert.throws(() => validate(() => { throw new Error('boom'); }, {}), /boom/);
+  });
+
+  it('keys nested fields by their top-level name', () => {
+    assert.deepEqual(fieldMessages([{ field: 'tagIds.2', code: 'invalid_format', message: 'Invalid UUID' }, { field: 'tagIds', code: 'too_many', message: 'Too many' }]), { tagIds: 'Invalid UUID' });
   });
 });

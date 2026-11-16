@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import { isUuidV4, roles, type ArticleWrite, type ListArticlesQuery, type TagWrite } from './api.js';
+import { fieldErrorsFromIssues, type FieldError } from './errors.js';
+
+// Zod's JIT probes `new Function` when it builds an object schema, which the
+// browser reports as a CSP violation (SEC-1 has no 'unsafe-eval'). Jitless
+// parsing never probes; it must be set before the first schema below.
+z.config({ jitless: true });
 
 const unsafeMdx = /(^|\n)\s*(import|export)\s|<\/?[A-Za-z][^>]*>/m;
 
@@ -292,4 +298,29 @@ export function parseAuditLogQuery(query: Query) {
 /** The `format` of a log export (LOG-22). */
 export function parseExportFormat(query: Query) {
   return exportFormat.parse(first(query.format));
+}
+
+export type Validation<T> = { ok: true; value: T } | { ok: false; fields: FieldError[] };
+
+/**
+ * Runs one of the parsers above in a form (FE-6): the same rules, field names
+ * and field codes the server answers with, mapped as `server/http.ts` maps them.
+ */
+export function validate<T>(parse: (value: unknown) => T, value: unknown): Validation<T> {
+  try {
+    return { ok: true, value: parse(value) };
+  } catch (error) {
+    if (error instanceof z.ZodError) return { ok: false, fields: fieldErrorsFromIssues(error.issues) };
+    throw error;
+  }
+}
+
+/** The first message for each field, keyed by field name (`tagIds.2` counts as `tagIds`). */
+export function fieldMessages(fields: readonly FieldError[]): Record<string, string> {
+  const messages: Record<string, string> = {};
+  for (const error of fields) {
+    const name = error.field.split('.')[0] || '_';
+    messages[name] ??= error.message;
+  }
+  return messages;
 }

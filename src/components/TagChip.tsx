@@ -1,5 +1,5 @@
-import { Tag } from 'lucide-react';
-import type { CanonicalTag } from '../types';
+import type { CanonicalTag } from '../lib/api';
+import { TagIcon } from './Icons';
 
 export function stringToPastelHex(value: string) {
   let hash = 0;
@@ -26,7 +26,7 @@ export function TagChip({ tag }: { tag: CanonicalTag }) {
       className="tag"
       style={{ color, border: `1px solid ${color}`, backgroundColor: `rgba(${red}, ${green}, ${blue}, 0.1)` }}
     >
-      <Tag aria-hidden="true" />{tag.name}
+      <TagIcon aria-hidden="true" />{tag.name}
     </span>
   );
 }

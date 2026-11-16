@@ -20,6 +20,7 @@
     "test:client": "node -e \"fs.rmSync('.test-build/client',{recursive:true,force:true})\" && esbuild src/lib/*.test.ts --bundle --platform=node --target=node26 --format=esm --packages=external --outdir=.test-build/client --out-extension:.js=.mjs && node --test .test-build/client/*.test.mjs",
     "test:server": "node -e \"fs.rmSync('.test-build/server',{recursive:true,force:true})\" && esbuild server/test/*.test.ts --bundle --platform=node --target=node26 --format=esm --packages=external --loader:.sql=text --outdir=.test-build/server --out-extension:.js=.mjs && node --test --test-concurrency=1 .test-build/server/*.test.mjs",
     "test:components": "vitest run",
+    "test:e2e": "npm run build:client && playwright test",
     "check": "npm run lint && npm test && npm run build"
   },
   "dependencies": {
@@ -33,13 +34,11 @@
     "@sinclair/typebox": "^0.34.52",
     "fastify": "^5.12.8",
     "html2pdf.js": "^0.14.0",
-    "lucide-react": "^0.544.0",
     "pg": "^8.16.3",
     "pino": "^10.4.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^10.1.0",
-    "react-router-dom": "^7.9.1",
     "remark-gfm": "^4.0.1",
     "yaml": "^2.9.1",
     "yauzl": "^3.4.0",
@@ -47,6 +46,7 @@
     "zod": "^4.1.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",

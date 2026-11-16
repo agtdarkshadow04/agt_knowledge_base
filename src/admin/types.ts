@@ -1,4 +1,4 @@
-import type { ArticleVisibility, UserRole } from '../types';
+import type { ArticleVisibility, Role } from '../lib/api';
 
 export interface AdminSession {
   username: string;
@@ -18,7 +18,7 @@ export interface LocalUser {
   username: string;
   displayName: string;
   email?: string;
-  role: UserRole;
+  role: Role;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

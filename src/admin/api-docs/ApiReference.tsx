@@ -1,6 +1,6 @@
-import { Gauge, KeyRound, LockKeyhole, LockOpen, ShieldCheck, ShieldHalf } from 'lucide-react';
 import { Markdown } from '../../components/Markdown';
 import type { ApiDocument, ApiOperation, AuthMode, SchemaField } from '../../lib/openapi';
+import { GaugeIcon, KeyRoundIcon, LockKeyholeIcon, LockOpenIcon, ShieldCheckIcon, ShieldHalfIcon } from '../../components/Icons';
 
 /**
  * Renders a parsed OpenAPI document. Descriptions go through the one Markdown
@@ -9,10 +9,10 @@ import type { ApiDocument, ApiOperation, AuthMode, SchemaField } from '../../lib
  * import from src/admin/.
  */
 
-const authLabels: Record<AuthMode, { label: string; icon: typeof LockOpen }> = {
-  none: { label: 'Public', icon: LockOpen },
-  member: { label: 'Member session', icon: KeyRound },
-  admin: { label: 'Admin session', icon: LockKeyhole },
+const authLabels: Record<AuthMode, { label: string; icon: typeof LockOpenIcon }> = {
+  none: { label: 'Public', icon: LockOpenIcon },
+  member: { label: 'Member session', icon: KeyRoundIcon },
+  admin: { label: 'Admin session', icon: LockKeyholeIcon },
 };
 
 function AuthBadge({ auth }: { auth: AuthMode }) {
@@ -72,13 +72,13 @@ function Operation({ operation }: { operation: ApiOperation }) {
         <div className="api-badges">
           <AuthBadge auth={operation.auth} />
           {operation.requiredRole && (
-            <span className="api-badge api-role"><ShieldCheck aria-hidden="true" />{operation.requiredRole} only</span>
+            <span className="api-badge api-role"><ShieldCheckIcon aria-hidden="true" />{operation.requiredRole} only</span>
           )}
           {operation.csrfHeader && (
-            <span className="api-badge api-csrf"><ShieldHalf aria-hidden="true" />x-agt-request: 1</span>
+            <span className="api-badge api-csrf"><ShieldHalfIcon aria-hidden="true" />x-agt-request: 1</span>
           )}
           {operation.rateLimit && (
-            <span className="api-badge api-rate"><Gauge aria-hidden="true" />Rate-limited ({operation.rateLimit})</span>
+            <span className="api-badge api-rate"><GaugeIcon aria-hidden="true" />Rate-limited ({operation.rateLimit})</span>
           )}
           {operation.deprecated && <span className="api-badge api-deprecated">Deprecated</span>}
         </div>

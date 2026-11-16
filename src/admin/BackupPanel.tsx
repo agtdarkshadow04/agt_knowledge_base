@@ -1,8 +1,8 @@
-import { Download, Eye, Upload } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { downloadBackup, previewBackup, restoreBackup } from './api';
 import { saveFile } from './download';
 import type { RestorePreview, RestoreReport } from './types';
+import { DownloadIcon, EyeIcon, UploadIcon } from '../components/Icons';
 
 const tableLabels: Record<string, string> = {
   app_users: 'Author records',
@@ -30,14 +30,14 @@ function PreviewDetails({ preview }: { preview: RestorePreview }) {
     <>
       <p>Created {new Date(preview.createdAt).toLocaleString()} by version {preview.appVersion} (database schema {preview.schemaVersion.backup}).</p>
       {preview.schemaVersion.backup < preview.schemaVersion.current && (
-        <div className="inline-notice" role="note">
+        <div className="admin-notice" role="note">
           This backup is from an older version. Restoring upgrades its database from schema {preview.schemaVersion.backup} to {preview.schemaVersion.current}.
         </div>
       )}
-      {preview.warnings.map((warning) => <div className="inline-notice" role="note" key={warning}>{warning}</div>)}
+      {preview.warnings.map((warning) => <div className="admin-notice" role="note" key={warning}>{warning}</div>)}
       <Counts counts={preview.counts} />
       {preview.ignoredSettings.length > 0 && (
-        <div className="inline-notice" role="note">
+        <div className="admin-notice" role="note">
           These settings are defined in this installation&apos;s configuration file, so the backup&apos;s values are ignored: {preview.ignoredSettings.join(', ')}.
         </div>
       )}
@@ -55,7 +55,7 @@ function PreviewDetails({ preview }: { preview: RestorePreview }) {
           )}
           {config.content !== null && (
             <button className="button button-secondary" type="button" onClick={() => saveFile(new Blob([config.content!], { type: 'text/yaml' }), 'config.from-backup.yaml')}>
-              <Download aria-hidden="true" /> Download the backup&apos;s config.yaml
+              <DownloadIcon aria-hidden="true" /> Download the backup&apos;s config.yaml
             </button>
           )}
         </>
@@ -125,9 +125,9 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
 
   return (
     <div className="admin-data-sections">
-      {error && <div className="inline-alert" role="alert">{error}</div>}
+      {error && <p className="error-note" role="alert">{error}</p>}
       <section className="admin-panel settings-admin-panel" aria-labelledby="backup-export-title">
-        <h2 id="backup-export-title">Download backup</h2>
+        <h2 id="backup-export-title"> Download backup</h2>
         <p className="field-help">
           Downloads a ZIP archive with a PostgreSQL dump of every article, revision, tag, member account, the Admin account and
           the dashboard settings, and the current config.yaml, with a SHA-256 checksum for each file. Sessions and .env are never
@@ -136,7 +136,7 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
         </p>
         <div className="dialog-actions">
           <button className="button button-primary" disabled={busy} type="button" onClick={() => void download()}>
-            <Download aria-hidden="true" /> Download backup
+            <DownloadIcon aria-hidden="true" /> Download backup
           </button>
         </div>
       </section>
@@ -157,7 +157,7 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
             />
           </label>
           <div className="dialog-actions">
-            <button className="button button-secondary" disabled={busy || !file} type="submit"><Eye aria-hidden="true" /> Preview backup</button>
+            <button className="button button-secondary" disabled={busy || !file} type="submit"><EyeIcon aria-hidden="true" /> Preview backup</button>
           </div>
         </form>
       </section>
@@ -171,7 +171,7 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
           </label>
           <div className="dialog-actions">
             <button className="button button-danger" disabled={busy || !confirmed} type="button" onClick={() => void restore()}>
-              <Upload aria-hidden="true" /> Restore backup
+              <UploadIcon aria-hidden="true" /> Restore backup
             </button>
           </div>
         </section>

@@ -24,7 +24,7 @@ The project is fully self-hosted and needs no cloud account or external service.
 | Editor | Public, Internal, Private | Yes | Yes | Public, Internal, or AGT levels 0–1 on unprotected articles | Yes | No | No | No | No | No |
 | Moderator | All | Yes | Yes | Any level | Yes | Yes | Yes | Yes | Yes | Yes (**Tags** page) |
 
-Editors and Moderators are member accounts that sign in at `/login`. The **Admin** is not a member role: it is the single installation account, which signs in only at `/admin` and manages member accounts, settings, statistics, and backups. It cannot sign in to the knowledge base or write articles; use a separate member account for that. No API call or page can give a member account administrator privileges.
+Editors and Moderators are member accounts that sign in from the sign-in button in the header (`/?view=login`). The **Admin** is not a member role: it is the single installation account, which signs in only at `/admin` and manages member accounts, settings, statistics, and backups. It cannot sign in to the knowledge base or write articles; use a separate member account for that. No API call or page can give a member account administrator privileges.
 
 AGT-standard visibility is stored as numeric levels: `0` Public (`#2aff00`), `1` Private (`#00f4ff`), `2` Restricted (`#f198e2`), `3` Top Secret (`#fd0303`), `4` SLT Restricted (`#ff9300`), and `5` SCC Restricted (`#3287f0`). Public visitors and Editors can read level 0, Editors can also read level 1, and levels 2–5 are Moderator-only. The legacy text values Public, Internal, and Admin remain supported with their existing access rules and colors; legacy `Admin` articles are shown as "Admin (legacy)" and are visible to Moderators.
 
@@ -61,7 +61,7 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
    npm run dev
    ```
 
-`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; it applies any pending migrations before it listens. Rerun it after changing server code. The API listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Vite proxies `/api` to it, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base at `/login`. The API checks the member and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
+`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; it applies any pending migrations before it listens. Rerun it after changing server code. The API listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Vite proxies `/api` to it, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base with the header's sign-in button (`/?view=login`). The API checks the member and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
 
 ## Docker self-hosting
 
@@ -102,7 +102,11 @@ The admin panel is a separate page reachable only by visiting `/admin` directly;
 
 Members and the Admin sign in with cookie sessions: a random 32-byte token in an `HttpOnly`, `SameSite=Strict`, `Path=/` cookie (`agt_knowledge_base_member_session` for members, `agt_knowledge_base_session` for the Admin) that page scripts cannot read. Only its SHA-256 is stored (`member_sessions`, `sessions`), so signing out revokes it on the server, and sessions last `session.ttlHours`. Every state-changing request must also carry an `x-agt-request: 1` header. The cookies are marked `Secure` when a trusted proxy reports HTTPS (see [HTTPS](#https)); set `session.secureCookie` to `true` or `false` to override this. The member cookie is ignored on admin routes, and the Admin cookie on member routes. Changing a member's role, deactivating them, setting their password or deleting them ends all of their sessions.
 
-Moderators manage canonical tags and clean up orphaned tag references on the **Tags** page of the knowledge base, linked in the header for Moderators only. Personal accessibility, download, and search-view preferences remain browser-local in the Settings dialog.
+Moderators manage canonical tags and clean up orphaned tag references on the **Tags** page of the knowledge base (`/?view=tags`), linked in the header for Moderators only. The **Settings** dialog (the gear button in the header) keeps a few preferences in this browser only: the search-results view, whether the article page offers PDF and Markdown downloads, and the **text size** (1× to 2×). They are stored under `agt_knowledge_base_*` keys in `localStorage`; preferences saved by 1.x under `agt-*` keys are moved there once.
+
+Pages are addressed with query parameters on `/`: `/?article=<id>` opens an article, `&view=history` and `&view=edit` its history and editor, and `/?view=new`, `/?view=tags` and `/?view=login` the other pages. The article list keeps its search and filters in the address too. Links in the 1.x form (`/articles/<id>`, `/articles/<id>/history`, `/articles/<id>/edit`, `/articles/new`, `/tags`, `/login`) still work: the server redirects them to the new address. These redirects are removed in 3.0.0.
+
+While a restore runs, or a change waits too long for a backup, the server answers `503 maintenance`. The member UI and the admin panel then show a notice and retry the request once a few seconds later.
 
 ### Account recovery
 
@@ -379,13 +383,24 @@ Schema changes are numbered SQL files, `server/migrations/NNNN_<name>.sql`, list
 ## Repository layout
 
 ```text
-src/              React member UI, authentication session, safe Markdown, editors
-src/admin/        Admin panel (separate entry: admin.html)
+src/              Member UI: src/components/ (pages, dialogs, icons), src/agt-base.css (AGT base stylesheet), src/styles.css
+src/admin/        Admin panel (separate entry: admin.html) and admin.css
+public/           AGT logo, fonts and font licences, copied unmodified from the spec (UI-15)
 server/           Fastify API: entry point, app, route table, domain services, authorization, PostgreSQL adapter
 server/test/      Server tests (node:test)
-src/lib/          Validation and API types shared by the server and the browser
-migrations/       Reviewable SQL schema
+src/lib/          Framework-free code: validation and API types shared with the server, the API client, deep links, preferences
+tests/e2e/        Browser tests (Playwright): npm run test:e2e
+server/migrations/ SQL migrations (app, control and logs schemas)
 docs/             API guide (API.md) and the pinned AGT web app spec
-scripts/          migration and local-user recovery
+scripts/          Member-account recovery CLI
 .github/          CI workflow
 ```
+
+## Credits
+
+The AGT logo and the fonts come unmodified from the [AGT Web Application Specification](https://github.com/agtdarkshadow04/agt_webapp_specification/blob/v6.0.0/assets/README.md) (v6.0.0). The logo is © Alliance of Galactic Travellers, all rights reserved, and is used only in AGT apps.
+
+- **NMS Futura** (`public/NMSFuturaProBook_Kerned.ttf`), the interface font: by No Man's Sky Community Developers & Designers (NMSCD), designer Blend3rman (licence notice © 2020 Hector Javier Gonzalez Rivera), based on the typeface of Hello Games' No Man's Sky. Licensed under the [SIL Open Font License 1.1](public/fonts/NMSFuturaProBook-OFL.txt). Source: [NMSCD/No-Mans-Sky-Universal-Font](https://github.com/NMSCD/No-Mans-Sky-Universal-Font/blob/master/assets/font/NMSFuturaProBook_Kerned/Web-TT/NMSFuturaProBook_Kerned.ttf).
+- **Twemoji Country Flags** (`public/fonts/TwemojiCountryFlags.woff2`), which shows flag emoji in articles: flag artwork by Twitter, Inc. and other contributors (Twemoji), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); font packaging © 2022 TalkJS, MIT ([licence file](public/fonts/TwemojiCountryFlags-LICENSE.md)). Source: [talkjs/country-flag-emoji-polyfill](https://github.com/talkjs/country-flag-emoji-polyfill) 0.1.10.
+
+The app shows no portal codes, so it does not bundle the NMS Glyphs Mono font. The icons in `src/components/Icons.tsx` are shapes from [Lucide](https://lucide.dev) (ISC licence; the notice is in that file).
