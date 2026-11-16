@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { onMaintenance } from '../lib/client';
+import { useI18n } from './I18n';
 
 /**
  * FE-5: a non-blocking notice while the server answers `503 maintenance`
@@ -8,6 +9,7 @@ import { onMaintenance } from '../lib/client';
  */
 export function MaintenanceNotice() {
   const [retryAt, setRetryAt] = useState<number | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => onMaintenance((seconds) => setRetryAt(Date.now() + seconds * 1000)), []);
 
@@ -21,9 +23,7 @@ export function MaintenanceNotice() {
   return (
     <div className="maintenance-region" role="status" aria-live="polite">
       {retryAt !== null && (
-        <p className="admin-notice maintenance-notice">
-          Maintenance in progress: the server is busy with a backup or restore. Your request is retried automatically in a few seconds.
-        </p>
+        <p className="admin-notice maintenance-notice">{t.layout.maintenance}</p>
       )}
     </div>
   );

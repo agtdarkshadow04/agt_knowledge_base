@@ -172,7 +172,7 @@ Every error response has the same body (API-6):
 | --- | --- |
 | `error` | Stable snake_case code for programs; the table below lists them all |
 | `message` | English text for people and logs; it may change |
-| `params` | Values the text needs: `retryAfterSeconds` (`rate_limited`), `maxBytes` (`file_too_large`), `key` (`unknown_setting`, `invalid_setting`, `defined_in_config`) |
+| `params` | Values the text needs: `retryAfterSeconds` (`rate_limited`), `maxBytes` (`file_too_large`), `key` (`unknown_setting`, `invalid_setting`, `defined_in_config`), `reason` (`archive_rejected`, below) |
 | `fields` | Field errors `{ field, code, message, params? }`; `field` is the request property, dotted for nested ones (`tagIds.2`) |
 | `code` | **Deprecated**: the 1.x UPPER_SNAKE_CASE code (second column below). Removed in 3.0.0 |
 | `issues` | **Deprecated**: the 1.x Zod issues of a semantic validation failure. Removed in 3.0.0 |
@@ -203,7 +203,7 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 | 413 | `file_too_large` | `BODY_TOO_LARGE` | A backup upload exceeds `backup.maxZipBytes` (`params.maxBytes`). |
 | 413 | `body_too_large` | `BODY_TOO_LARGE` | A JSON body exceeds 1 MB. |
 | 415 | `multipart_required` | `MULTIPART_REQUIRED` | `POST /api/admin/restore` was not sent as `multipart/form-data`. |
-| 422 | `archive_rejected` | `INVALID_BACKUP` | The backup archive failed a check (layout, manifest, checksums, limits, the dump's contents, a newer format or schema, or a 1.x backup); the message says why, and nothing changed. |
+| 422 | `archive_rejected` | `INVALID_BACKUP` | The backup archive failed a check (layout, manifest, checksums, limits, the dump's contents, a newer format or schema, or a 1.x backup); the message says why, `params.reason` gives the check as a code clients translate, and nothing changed. |
 | 429 | `rate_limited` | `RATE_LIMITED` | Too many attempts; wait `params.retryAfterSeconds` (also sent as `Retry-After`). |
 | 503 | `setup_password_missing` | `SETUP_DISABLED` | `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` is not set on the server, so setup is unavailable. |
 | 500 | `internal` | `INTERNAL_ERROR` | An unexpected failure, or a restore that failed (the message says whether it was rolled back). |
@@ -258,6 +258,14 @@ curl -sS -b admin.cookies -X POST "$SITE/api/admin/restore" \
 ```
 
 Backups made by AGT Knowledge Base 1.x (a `database.json` table dump) are refused with `422 archive_rejected`: restore them with 1.x, then upgrade.
+
+`params.reason` of `422 archive_rejected` is one of `too_large`, `not_zip`, `unsafe_zip`, `missing_manifest`,
+`invalid_manifest`, `legacy_format` (a 1.x backup), `not_a_backup`, `newer_format`, `newer_schema`, `unlisted_file`,
+`missing_file`, `checksum_mismatch`, `schema_mismatch`, `disallowed_entry`, `invalid_dump`, `missing_tables` and
+`invalid_admin` (`server/backupCodes.ts`). Restore previews and reports carry `warningCodes` beside the English
+`warnings`, in the same order: `log_tables_ignored` (the dump's log or control tables are skipped) and `no_admin`
+(first-run setup is needed after the restore). Clients show translated text for the codes (I18N-6) and may show the
+English `message` as technical detail.
 
 **Maintenance** (BAK-8). While a restore runs, or after one failed and could not be rolled back, every API request except `GET /api/health` answers `503 maintenance` with `Retry-After: 10`. During a backup, reads continue and writes wait for up to 30 seconds before answering `503 maintenance`. Clients retry once after `Retry-After` and never treat `503` as a sign-out.
 

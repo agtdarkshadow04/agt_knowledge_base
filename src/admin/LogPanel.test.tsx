@@ -54,7 +54,7 @@ describe('LogPanel (LOG-19, LOG-20)', () => {
     const user = userEvent.setup();
     render(<LogPanel kind="server" />);
     const row = (await screen.findByText('Unhandled API error')).closest('tr')!;
-    expect(within(row).getByText('error')).toHaveClass('log-severity-error');
+    expect(within(row).getByText('Error')).toHaveClass('log-severity-error');
     await user.click(within(row).getByRole('button', { name: 'Details' }));
     expect(screen.getByLabelText('Entry details')).toHaveTextContent('"route": "/api/articles"');
 

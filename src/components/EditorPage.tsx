@@ -12,10 +12,12 @@ import {
   isModeratorOnlyVisibility,
   legacyVisibilityOptions,
   parseArticleVisibility,
-  visibilityLabel,
+  visibilityClassName,
 } from '../lib/visibility';
 import { routeHref } from '../lib/routes';
-import { fieldMessages, parseArticleWrite, validate as validateInput } from '../lib/validation';
+import { parseArticleWrite, validate as validateInput } from '../lib/validation';
+import { formErrors } from './Field';
+import { useI18n } from './I18n';
 import { ConfirmDialog, Dialog } from './Dialog';
 import { CloseIcon, EyeIcon, EyeOffIcon, FilePenLineIcon, SaveIcon } from './Icons';
 import { useBlocker, useNavigation } from './Navigation';
@@ -52,6 +54,7 @@ function MarkdownGuideIcon() {
 export function EditorPage({ id }: { id?: string }) {
   const isNew = !id;
   const { navigate } = useNavigation();
+  const { t, error: describe } = useI18n();
   const keepEditing = useRef<HTMLButtonElement>(null);
   const { user } = useAuth();
   const { settings } = useAppSettings();
@@ -94,12 +97,12 @@ export function EditorPage({ id }: { id?: string }) {
       return nextTags;
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') return null;
-      setTagsError(cause instanceof Error ? cause.message : 'Tags could not be verified.');
+      setTagsError(describe(cause));
       return null;
     } finally {
       if (!signal?.aborted) setTagsLoading(false);
     }
-  }, [rememberTags]);
+  }, [describe, rememberTags]);
 
   useEffect(() => {
     if (!isNew || draft.title || draft.content || draft.tagIds.length || baseline !== serializeDraft(emptyDraft)) return;
@@ -128,7 +131,7 @@ export function EditorPage({ id }: { id?: string }) {
       try {
         const article = await getArticle(articleId, controller.signal, true);
         if (article.isProtected && user?.role !== 'Moderator') {
-          setLoadError('This protected article can only be edited by a Moderator.');
+          setLoadError(t.editor.protectedOnly);
           return;
         }
         const loaded = { title: article.title, tagIds: article.tags.map((tag) => tag.id), content: article.content, visibility: article.visibility };
@@ -138,12 +141,12 @@ export function EditorPage({ id }: { id?: string }) {
         setVersion(article.version);
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === 'AbortError') return;
-        setLoadError(cause instanceof Error ? cause.message : 'Article could not be opened.');
+        setLoadError(describe(cause));
       } finally { if (!controller.signal.aborted) setLoading(false); }
     }
     void load();
     return () => controller.abort();
-  }, [id, rememberTags, user?.role]);
+  }, [describe, id, rememberTags, t.editor.protectedOnly, user?.role]);
 
   useEffect(() => {
     const listener = (event: BeforeUnloadEvent) => {
@@ -172,7 +175,7 @@ export function EditorPage({ id }: { id?: string }) {
   }, [catalogTags, draft.tagIds, tagsReady]);
 
   function tagNames(tagIds: string[]) {
-    return tagIds.map((tagId) => knownTagsById.get(tagId)?.name ?? 'Unavailable tag').join(', ');
+    return tagIds.map((tagId) => knownTagsById.get(tagId)?.name ?? t.tagPicker.unavailableTag).join(', ');
   }
 
   function sameTagIds(left: string[], right: string[]) {
@@ -182,16 +185,16 @@ export function EditorPage({ id }: { id?: string }) {
   function validate(verifiedTags: CanonicalTag[] | null = tagsReady ? catalogTags : null) {
     // FE-6: the server's own rules, then the checks only the browser can make against the tag catalog.
     const checked = validateInput(parseArticleWrite, { title: draft.title, content: draft.content, tagIds: draft.tagIds, visibility: draft.visibility, version });
-    const shared = checked.ok ? {} : fieldMessages(checked.fields);
+    const shared = formErrors(checked, t).fields;
     const next: Record<string, string> = {};
     if (shared.title) next.title = shared.title;
     if (shared.content) next.content = shared.content;
     if (shared.tagIds) next.tags = shared.tagIds;
-    if (!next.tags && !verifiedTags) next.tags = 'Tags could not be verified. Refresh the tag catalog and try again.';
+    if (!next.tags && !verifiedTags) next.tags = t.editor.tagsUnverified;
     if (!next.tags && verifiedTags) {
       const available = new Set(verifiedTags.map((tag) => tag.id));
       if (draft.tagIds.some((tagId) => !available.has(tagId))) {
-        next.tags = 'A selected tag was renamed or deleted. Refresh the catalog, remove unavailable tags, and try again.';
+        next.tags = t.editor.tagsChanged;
       }
     }
     setErrors(next);
@@ -220,12 +223,12 @@ export function EditorPage({ id }: { id?: string }) {
       navigate(routeHref({ page: 'article', id: saved.id }), { replace: true, force: true });
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
-        setSaveError('This article changed after you opened it. Copy your work, reload the latest version, and merge your changes.');
+        setSaveError(t.editor.conflict);
       } else if (cause instanceof ApiError && cause.status === 400 && (cause.fields.some((field) => field.field.startsWith('tagIds')) || /tag/i.test(cause.message))) {
-        setSaveError('One or more selected tags is no longer valid. Refresh the tag catalog, review your selections, and try again.');
+        setSaveError(t.editor.tagsInvalid);
         await refreshTagCatalog();
       } else {
-        setSaveError(cause instanceof Error ? cause.message : 'Article could not be saved.');
+        setSaveError(describe(cause));
       }
       setSaveConfirmationOpen(false);
     } finally { setSaving(false); }
@@ -236,20 +239,20 @@ export function EditorPage({ id }: { id?: string }) {
     navigate(isNew || !id ? '/' : routeHref({ page: 'article', id }));
   }
 
-  if (loading) return <LoadingState message="Preparing editor…" />;
+  if (loading) return <LoadingState message={t.editor.loading} />;
   if (loadError) return <ErrorState message={loadError} />;
 
   return (
     <div className="page editor-page">
       <header className="editor-header">
-        <div><p className="eyebrow">Authoring terminal</p><h1>{isNew ? 'Create article' : 'Edit article'}</h1></div>
-        <span className={`save-state ${dirty ? 'dirty' : ''}`} role="status">{dirty ? 'Unsaved changes' : 'All changes saved'}</span>
+        <div><p className="eyebrow">{t.editor.eyebrow}</p><h1>{isNew ? t.editor.createTitle : t.editor.editTitle}</h1></div>
+        <span className={`save-state ${dirty ? 'dirty' : ''}`} role="status">{dirty ? t.editor.unsaved : t.editor.saved}</span>
       </header>
 
       {saveError && <p className="error-note" role="alert">{saveError}</p>}
       <form onSubmit={(event) => void handleSave(event)} noValidate>
         <div className="editor-fields">
-          <label className="field"><span>Title</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} aria-invalid={Boolean(errors.title)} aria-describedby={errors.title ? 'title-error' : undefined} /></label>
+          <label className="field"><span>{t.editor.title}</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} aria-invalid={Boolean(errors.title)} aria-describedby={errors.title ? 'title-error' : undefined} /></label>
           {errors.title && <p className="field-error" id="title-error">{errors.title}</p>}
           <TagPicker
             tags={catalogTags}
@@ -263,89 +266,88 @@ export function EditorPage({ id }: { id?: string }) {
             }}
             onRefresh={() => void refreshTagCatalog()}
           />
-          <label className="field"><span>Visibility</span>
+          <label className="field"><span>{t.editor.visibility}</span>
             <select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: parseArticleVisibility(event.target.value) })}>
-              <optgroup label="AGT standard">
+              <optgroup label={t.visibility.agtGroup}>
                 {agtVisibilityOptions.filter((option) => user?.role === 'Moderator' || !option.moderatorOnly).map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>{t.visibility[option.className]}</option>
                 ))}
               </optgroup>
-              <optgroup label="Legacy">
+              <optgroup label={t.visibility.legacyGroup}>
                 {legacyVisibilityOptions.filter((option) => user?.role === 'Moderator' || !option.moderatorOnly).map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>{t.visibility[option.className]}</option>
                 ))}
               </optgroup>
             </select>
           </label>
         </div>
 
-        <div className="editor-toolbar" aria-label="Editor options">
-          <div className="segmented-control" aria-label="Markdown editor mode">
-            <button type="button" className={mode === 'plain' ? 'active' : ''} aria-pressed={mode === 'plain'} onClick={() => setMode('plain')}>Plain Markdown</button>
-            <button type="button" className={mode === 'rich' ? 'active' : ''} aria-pressed={mode === 'rich'} onClick={() => setMode('rich')}>Visual Markdown</button>
+        <div className="editor-toolbar" aria-label={t.editor.options}>
+          <div className="segmented-control" role="group" aria-label={t.editor.mode}>
+            <button type="button" className={mode === 'plain' ? 'active' : ''} aria-pressed={mode === 'plain'} onClick={() => setMode('plain')}>{t.editor.plain}</button>
+            <button type="button" className={mode === 'rich' ? 'active' : ''} aria-pressed={mode === 'rich'} onClick={() => setMode('rich')}>{t.editor.rich}</button>
           </div>
           <div className="editor-toolbar-actions">
-            <a className="button button-icon" href="https://www.markdownguide.org/basic-syntax/" target="_blank" rel="noreferrer" title="Markdown Guide"><MarkdownGuideIcon /><span className="sr-only">Markdown Guide</span></a>
-            <button className="button button-icon" type="button" onClick={cancel} title="Exit without saving"><CloseIcon aria-hidden="true" /><span className="sr-only">Exit without saving</span></button>
-            <button className="button button-icon" type="submit" disabled={saving || tagsLoading || !tagsReady || invalidTagIds.length > 0} title="Save article"><SaveIcon aria-hidden="true" /><span className="sr-only">Save article</span></button>
-            <button className="button button-icon" type="button" aria-pressed={preview} onClick={() => setPreview((value) => !value)} title={preview ? 'Hide preview' : 'Show preview'}>
-              {preview ? <EyeOffIcon aria-hidden="true" /> : <EyeIcon aria-hidden="true" />}
-              <span className="sr-only">{preview ? 'Hide preview' : 'Show preview'}</span>
+            <a className="button button-icon" href="https://www.markdownguide.org/basic-syntax/" target="_blank" rel="noreferrer" title={t.editor.guide} aria-label={t.editor.guide}><MarkdownGuideIcon /></a>
+            <button className="button button-icon" type="button" onClick={cancel} title={t.editor.exit} aria-label={t.editor.exit}><CloseIcon /></button>
+            <button className="button button-icon" type="submit" disabled={saving || tagsLoading || !tagsReady || invalidTagIds.length > 0} title={t.editor.save} aria-label={t.editor.save}><SaveIcon /></button>
+            <button className="button button-icon" type="button" aria-pressed={preview} onClick={() => setPreview((value) => !value)} title={preview ? t.editor.hidePreview : t.editor.showPreview} aria-label={preview ? t.editor.hidePreview : t.editor.showPreview}>
+              {preview ? <EyeOffIcon /> : <EyeIcon />}
             </button>
           </div>
         </div>
 
         <div className={`editor-workspace ${preview ? 'with-preview' : ''}`}>
           <section aria-labelledby="editor-label" className="editor-input-panel">
-            <h2 id="editor-label"><FilePenLineIcon aria-hidden="true" />{mode === 'plain' ? 'Markdown source' : 'Visual Markdown editor'}</h2>
+            <h2 id="editor-label"><FilePenLineIcon />{mode === 'plain' ? t.editor.sourceHeading : t.editor.richHeading}</h2>
             {mode === 'plain' ? (
-              <textarea aria-label="Markdown source" className="markdown-textarea" value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} spellCheck aria-invalid={Boolean(errors.content)} aria-describedby={errors.content ? 'content-error' : 'content-help'} />
+              <textarea aria-label={t.editor.source} className="markdown-textarea" value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} spellCheck aria-invalid={Boolean(errors.content)} aria-describedby={errors.content ? 'content-error' : 'content-help'} />
             ) : (
-              <Suspense fallback={<LoadingState message="Loading visual editor…" />}>
+              <Suspense fallback={<LoadingState message={t.editor.loadingRich} />}>
                 <RichMarkdownEditor value={draft.content} onChange={(content) => setDraft((current) => ({ ...current, content }))} />
               </Suspense>
             )}
-            <p id="content-help" className="field-help">Markdown only. Executable MDX and unsafe HTML are rejected by the API.</p>
+            <p id="content-help" className="field-help">{t.editor.contentHelp}</p>
             {errors.content && <p className="field-error" id="content-error">{errors.content}</p>}
           </section>
-          {preview && <section className="preview-panel" aria-labelledby="preview-label"><h2 id="preview-label">Preview</h2><Markdown content={draft.content || '*Preview will appear here.*'} /></section>}
+          {preview && <section className="preview-panel" aria-labelledby="preview-label"><h2 id="preview-label">{t.editor.preview}</h2><Markdown content={draft.content || t.editor.previewEmpty} /></section>}
         </div>
 
       </form>
 
       {saveConfirmationOpen && (
         <Dialog
-          title="Review changes before saving"
-          description="Compare the current revision with your proposed revision, then confirm to save."
+          title={t.editor.reviewTitle}
+          description={t.editor.reviewText}
           onClose={() => { if (!saving) setSaveConfirmationOpen(false); }}
           initialFocusRef={keepEditing}
           className="save-confirm-dialog"
           footer={(
             <>
-              <button className="button button-primary" type="button" disabled={saving} onClick={() => void confirmSave()}><SaveIcon />{saving ? 'Saving…' : 'Confirm save'}</button>
-              <button ref={keepEditing} className="button button-secondary" type="button" disabled={saving} onClick={() => setSaveConfirmationOpen(false)}>Keep editing</button>
+              <button className="button button-primary" type="button" disabled={saving} onClick={() => void confirmSave()}><SaveIcon />{saving ? t.editor.saving : t.editor.confirmSave}</button>
+              <button ref={keepEditing} className="button button-secondary" type="button" disabled={saving} onClick={() => setSaveConfirmationOpen(false)}>{t.editor.keepEditing}</button>
             </>
           )}
         >
-          <div className="save-diff-headings" aria-hidden="true"><span>Field</span><span>Current revision</span><span>New revision</span></div>
+          <div className="save-diff-headings" aria-hidden="true"><span>{t.editor.diffField}</span><span>{t.editor.diffCurrent}</span><span>{t.editor.diffNew}</span></div>
           <dl className="revision-comparison-metadata save-diff-metadata">
-            <div className={currentRevision.title === proposedRevision.title ? '' : 'changed'}><dt>Title</dt><dd>{currentRevision.title || 'Not set'}</dd><dd>{proposedRevision.title || 'Not set'}</dd></div>
-            <div className={sameTagIds(currentRevision.tagIds, proposedRevision.tagIds) ? '' : 'changed'}><dt>Tags</dt><dd>{tagNames(currentRevision.tagIds) || 'None'}</dd><dd>{tagNames(proposedRevision.tagIds) || 'None'}</dd></div>
-            <div className={currentRevision.visibility === proposedRevision.visibility ? '' : 'changed'}><dt>Visibility</dt><dd>{visibilityLabel(currentRevision.visibility)}</dd><dd>{visibilityLabel(proposedRevision.visibility)}</dd></div>
+            <div className={currentRevision.title === proposedRevision.title ? '' : 'changed'}><dt>{t.fields.title}</dt><dd>{currentRevision.title || t.common.notSet}</dd><dd>{proposedRevision.title || t.common.notSet}</dd></div>
+            <div className={sameTagIds(currentRevision.tagIds, proposedRevision.tagIds) ? '' : 'changed'}><dt>{t.fields.tagIds}</dt><dd>{tagNames(currentRevision.tagIds) || t.common.none}</dd><dd>{tagNames(proposedRevision.tagIds) || t.common.none}</dd></div>
+            <div className={currentRevision.visibility === proposedRevision.visibility ? '' : 'changed'}><dt>{t.fields.visibility}</dt><dd>{t.visibility[visibilityClassName(currentRevision.visibility)]}</dd><dd>{t.visibility[visibilityClassName(proposedRevision.visibility)]}</dd></div>
           </dl>
           <div className={`revision-content-grid save-diff-content ${currentRevision.content === proposedRevision.content ? '' : 'changed'}`}>
-            <section aria-labelledby="current-content-title"><h3 id="current-content-title">Current revision content</h3><pre>{currentRevision.content || 'No content'}</pre></section>
-            <section aria-labelledby="new-content-title"><h3 id="new-content-title">New revision content</h3><pre>{proposedRevision.content || 'No content'}</pre></section>
+            <section aria-labelledby="current-content-title"><h3 id="current-content-title">{t.editor.currentContent}</h3><pre>{currentRevision.content || t.editor.noContent}</pre></section>
+            <section aria-labelledby="new-content-title"><h3 id="new-content-title">{t.editor.newContent}</h3><pre>{proposedRevision.content || t.editor.noContent}</pre></section>
           </div>
         </Dialog>
       )}
 
       {blocker.state === 'blocked' && (
         <ConfirmDialog
-          title="Discard unsaved changes?"
-          description="Your draft has not been saved to the archive."
-          confirmLabel="Discard and leave"
-          cancelLabel="Keep editing"
+          title={t.editor.discardTitle}
+          description={t.editor.discardText}
+          confirmLabel={t.editor.discardConfirm}
+          cancelLabel={t.editor.keepEditing}
           danger
           onConfirm={() => blocker.proceed()}
           onCancel={() => blocker.reset()}

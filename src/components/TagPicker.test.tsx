@@ -23,7 +23,7 @@ describe('TagPicker', () => {
 
     await user.click(screen.getByRole('combobox', { name: 'Tags' }));
     expect(screen.getAllByRole('option')).toHaveLength(10);
-    await user.click(screen.getByRole('button', { name: 'Show More' }));
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
     expect(screen.getAllByRole('option')).toHaveLength(13);
   });
 
@@ -33,7 +33,7 @@ describe('TagPicker', () => {
 
     const input = screen.getByRole('combobox', { name: 'Tags' });
     await user.type(input, 'not a canonical tag{Enter}');
-    expect(screen.getByText('0 of 12 tags selected.')).toBeInTheDocument();
+    expect(screen.getByText('Tags selected: 0 of 12.')).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Selected tags' })).not.toBeInTheDocument();
   });
 
@@ -43,11 +43,11 @@ describe('TagPicker', () => {
 
     const input = screen.getByRole('combobox', { name: 'Tags' });
     await user.type(input, 'Tag 13{Enter}');
-    expect(screen.getByText('1 of 12 tags selected.')).toBeInTheDocument();
+    expect(screen.getByText('Tags selected: 1 of 12.')).toBeInTheDocument();
     const chip = within(screen.getByRole('list', { name: 'Selected tags' })).getByText('Tag 13');
     expect(chip.style.color).toBe('rgb(181, 195, 183)');
     await user.click(screen.getByRole('button', { name: 'Remove Tag 13' }));
-    expect(screen.getByText('0 of 12 tags selected.')).toBeInTheDocument();
+    expect(screen.getByText('Tags selected: 0 of 12.')).toBeInTheDocument();
   });
 
   it('enforces the twelve-tag limit until a selection is removed', async () => {
@@ -55,7 +55,7 @@ describe('TagPicker', () => {
     render(<PickerHarness initial={tags.slice(0, 12).map((tag) => tag.id)} />);
 
     await user.click(screen.getByRole('combobox', { name: 'Tags' }));
-    await user.click(screen.getByRole('button', { name: 'Show More' }));
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
     expect(screen.getByRole('option', { name: /Tag 13/ })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Remove Tag 1' }));
     await user.click(screen.getByRole('combobox', { name: 'Tags' }));

@@ -1,11 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { getApplicationSettings } from '../lib/memberApi';
 import type { ApplicationSettings } from '../lib/api';
+import { COMMON_TRANSLATIONS } from '../translations';
+import { useI18n } from './I18n';
 
 const defaults: ApplicationSettings = {
   site: {
-    title: 'AGT Knowledge Base',
-    subtitle: 'Field-tested guides, community procedures, and traveller intelligence.',
+    // The site's own text comes from the server (site.title, site.subtitle); until it arrives, the product name.
+    title: COMMON_TRANSLATIONS.product,
+    subtitle: '',
     supportUrl: 'https://www.nms-agt.com/support',
   },
   articles: { defaultVisibility: 'Internal' },
@@ -32,6 +35,9 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
   const [settings, setSettings] = useState(defaults);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const { error: describe } = useI18n();
+  const errorRef = useRef(describe);
+  errorRef.current = describe;
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -39,7 +45,7 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
     try {
       setSettings(await getApplicationSettings());
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Application settings could not be loaded.');
+      setError(errorRef.current(cause));
     } finally {
       setLoading(false);
     }

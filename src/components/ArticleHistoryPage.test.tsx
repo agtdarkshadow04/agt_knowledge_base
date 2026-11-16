@@ -71,9 +71,10 @@ describe('ArticleHistoryPage', () => {
   it('labels and compares the latest and previous revisions for Editors', async () => {
     renderHistory();
     expect(await screen.findByRole('heading', { name: 'Revision history' })).toBeInTheDocument();
-    expect(screen.getAllByText('Version 2 · Latest').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Version 1 · Previous').length).toBeGreaterThan(0);
-    expect(screen.getByText('2026-01-02T00:00:00.000Z')).toBeInTheDocument();
+    expect(screen.getAllByText('Version 2 · latest').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Version 1 · previous').length).toBeGreaterThan(0);
+    // I18N-5: a localized date and time, with the exact instant in the time element.
+    expect(document.querySelector('time[datetime="2026-01-02T00:00:00.000Z"]')).toHaveTextContent(/2026/);
     expect(screen.getByText(/Earlier instructions/)).toBeInTheDocument();
     expect(screen.getByText(/Latest instructions/)).toBeInTheDocument();
     expect(screen.getByText('Not pinned')).toBeInTheDocument();

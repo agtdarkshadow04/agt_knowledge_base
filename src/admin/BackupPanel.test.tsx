@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import { ApiError } from '../lib/client';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackupPanel } from './BackupPanel';
@@ -19,6 +20,7 @@ const preview: RestorePreview = {
   schemaVersion: { backup: 17, current: 18 },
   migrations: { backup: ['001_initial'], upgrade: ['018_spec_storage'] },
   warnings: ['The dump contains log or control tables; they are ignored.'],
+  warningCodes: ['log_tables_ignored'],
   counts: { app_users: 2, local_users: 2, tags: 4, articles: 7, article_revisions: 12, settings: 1, admin: 1 },
   config: {
     included: true,
@@ -52,7 +54,7 @@ describe('BackupPanel', () => {
     expect(mocks.previewBackup).toHaveBeenCalledWith(file);
     expect(mocks.restoreBackup).not.toHaveBeenCalled();
     expect(screen.getByText(/upgrades its database from schema 17 to 18/)).toBeInTheDocument();
-    expect(screen.getByText('The dump contains log or control tables; they are ignored.')).toBeInTheDocument();
+    expect(screen.getByText('The backup contains log or control tables; they are ignored.')).toBeInTheDocument();
     expect(screen.getByText(/backup's values are ignored: site.title/)).toBeInTheDocument();
     expect(screen.getByLabelText('config.yaml differences')).toHaveTextContent(/- +port: 4000/);
     expect(screen.getByText('Article revisions').nextSibling).toHaveTextContent('12');
@@ -64,20 +66,23 @@ describe('BackupPanel', () => {
 
     expect(await screen.findByRole('heading', { name: 'Backup restored' })).toBeInTheDocument();
     expect(mocks.restoreBackup).toHaveBeenCalledWith(file);
-    expect(screen.getByText('pre-restore-backup-2026-11-07T06-15-00-123Z.zip')).toBeInTheDocument();
+    expect(screen.getByText(/pre-restore-backup-2026-11-07T06-15-00-123Z\.zip/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Sign in again' }));
     expect(onRestored).toHaveBeenCalledOnce();
   });
 
   it('shows preview failures and never restores', async () => {
     const user = userEvent.setup();
-    mocks.previewBackup.mockRejectedValue(new Error('The backup has format version 2; this version of AGT Knowledge Base restores up to 1. Upgrade first.'));
+    mocks.previewBackup.mockRejectedValue(new ApiError(422, 'The backup has format version 2; this version of AGT Knowledge Base restores up to 1. Upgrade first.', 'archive_rejected', [], { reason: 'newer_format' }));
     render(<BackupPanel onRestored={() => undefined} />);
 
     await user.upload(screen.getByLabelText('Backup file'), archive());
     await user.click(screen.getByRole('button', { name: 'Preview backup' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('format version 2');
+    // I18N-6: the translated reason, and the server's English details for support.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This backup cannot be restored. The backup was made by a newer version of AGT Knowledge Base. Upgrade first.');
+    expect(within(alert).getByText(/format version 2/)).not.toBeVisible();
     expect(screen.queryByRole('button', { name: 'Restore backup' })).not.toBeInTheDocument();
     expect(mocks.restoreBackup).not.toHaveBeenCalled();
   });

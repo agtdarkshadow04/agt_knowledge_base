@@ -9,11 +9,13 @@ import {
   updateTag,
 } from '../lib/memberApi';
 import { ApiError } from '../lib/client';
-import { fieldMessages, parseTagWrite, validate } from '../lib/validation';
+import { parseTagWrite, validate } from '../lib/validation';
+import { formatTranslation } from '../translations';
+import { useI18n } from './I18n';
 import type { CanonicalTag, OrphanTagReference } from '../lib/api';
 import { stringToPastelHex, TagChip } from './TagChip';
 import { ConfirmDialog } from './Dialog';
-import { TextField } from './Field';
+import { formErrors as describeForm, TextField } from './Field';
 import { PencilIcon, TagIcon, TrashIcon } from './Icons';
 
 const colorPattern = /^#[0-9a-f]{6}$/i;
@@ -28,7 +30,9 @@ const emptyForm: TagForm = { name: '', color: '#FFB451' };
 /** The Moderator's tag catalog and orphaned references (the Tags page). */
 export function ManageTagsPanel() {
   const { user } = useAuth();
+  const { t, error: describe } = useI18n();
   const titleId = useId();
+  const [notice, setNotice] = useState('');
   const [pendingDelete, setPendingDelete] = useState<CanonicalTag | null>(null);
   const [tags, setTags] = useState<CanonicalTag[]>([]);
   const [orphans, setOrphans] = useState<OrphanTagReference[]>([]);
@@ -52,11 +56,11 @@ export function ManageTagsPanel() {
       setOrphans(nextOrphans);
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') return;
-      setError(cause instanceof Error ? cause.message : 'Tags could not be loaded.');
+      setError(describe(cause));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, []);
+  }, [describe]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -81,10 +85,10 @@ export function ManageTagsPanel() {
   function validateForm() {
     // FE-6: the server's rule (parseTagWrite), plus the uniqueness check against the loaded catalog.
     const checked = validate(parseTagWrite, { name: form.name, color: form.color.toUpperCase() });
-    const next: Partial<TagForm> = checked.ok ? {} : fieldMessages(checked.fields);
+    const next: Partial<TagForm> = describeForm(checked, t).fields;
     const name = form.name.trim();
     if (!next.name && tags.some((tag) => tag.id !== editingId && tag.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
-      next.name = 'Tag names must be unique, regardless of capitalization.';
+      next.name = t.tags.duplicate;
     }
     setFormErrors(next);
     return Object.keys(next).length === 0;
@@ -95,14 +99,18 @@ export function ManageTagsPanel() {
     if (!validateForm()) return;
     setBusy(true);
     setError('');
+    setNotice('');
     const input = { name: form.name.trim(), color: form.color.toUpperCase() };
     try {
       if (editingId) await updateTag(editingId, input);
       else await createTag(input);
+      setNotice(editingId ? t.tags.saved : t.tags.created);
       resetForm();
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The tag could not be saved.');
+      const described = describeForm(cause, t);
+      if (Object.keys(described.fields).length) setFormErrors(described.fields);
+      setError(described.form);
     } finally {
       setBusy(false);
     }
@@ -117,12 +125,14 @@ export function ManageTagsPanel() {
   async function removeTag(tag: CanonicalTag) {
     setBusy(true);
     setError('');
+    setNotice('');
     try {
       await deleteTag(tag.id);
       if (editingId === tag.id) resetForm();
+      setNotice(t.tags.deleted);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The tag could not be deleted.');
+      setError(describe(cause));
     } finally {
       setPendingDelete(null);
       setBusy(false);
@@ -132,15 +142,17 @@ export function ManageTagsPanel() {
   async function cleanupOrphan(orphan: OrphanTagReference, tagId: string) {
     setBusy(true);
     setError('');
+    setNotice('');
     try {
       await removeOrphanTagReference(orphan.articleId, tagId, orphan.version);
+      setNotice(t.tags.referenceRemoved);
       await load();
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         await load();
-        setError('This article changed before the reference could be removed. The orphan list has been refreshed; try again.');
+        setError(t.tags.orphanConflict);
       } else {
-        setError(cause instanceof Error ? cause.message : 'The orphaned reference could not be removed.');
+        setError(describe(cause));
       }
     } finally {
       setBusy(false);
@@ -154,56 +166,57 @@ export function ManageTagsPanel() {
       <section className="tag-management-panel" aria-labelledby={titleId}>
         <header className="settings-header">
           <div>
-            <p className="eyebrow">Moderator tools</p>
-            <h1 id={titleId}>Manage tags</h1>
+            <p className="eyebrow">{t.tags.eyebrow}</p>
+            <h1 id={titleId}>{t.tags.title}</h1>
           </div>
         </header>
 
         {error && <p className="error-note" role="alert">{error}</p>}
+        <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
 
         <section className="settings-section" aria-labelledby={`${titleId}-catalog`}>
-          <h3 id={`${titleId}-catalog`}><TagIcon aria-hidden="true" /> Tag catalog</h3>
+          <h3 id={`${titleId}-catalog`}><TagIcon /> {t.tags.catalog}</h3>
           <form className="tag-form" onSubmit={(event) => void submitTag(event)} noValidate>
-            <TextField label="Name" value={form.name} maxLength={40} error={formErrors.name} onChange={(event) => updateName(event.target.value)} />
+            <TextField label={t.tags.name} value={form.name} maxLength={40} error={formErrors.name} onChange={(event) => updateName(event.target.value)} />
             <div className="tag-color-row">
               <span className="tag-color-swatch" aria-hidden="true" style={{ backgroundColor: colorPattern.test(form.color) ? form.color : 'transparent' }} />
-              <TextField label="Color" value={form.color} placeholder="#RRGGBB" error={formErrors.color} help="Six hexadecimal digits, for example #FFB451." onChange={(event) => setForm({ ...form, color: event.target.value })} />
+              <TextField label={t.tags.color} value={form.color} placeholder={t.tags.colorPlaceholder} error={formErrors.color} help={t.tags.colorHelp} onChange={(event) => setForm({ ...form, color: event.target.value })} />
             </div>
             <div className="dialog-actions tag-form-actions">
               <button className="button button-primary" type="submit" disabled={busy}>
-                {editingId ? 'Save tag' : 'Create tag'}
+                {editingId ? t.tags.save : t.tags.create}
               </button>
-              {editingId && <button className="button button-secondary" type="button" disabled={busy} onClick={resetForm}>Cancel edit</button>}
+              {editingId && <button className="button button-secondary" type="button" disabled={busy} onClick={resetForm}>{t.tags.cancelEdit}</button>}
             </div>
           </form>
 
-          {loading ? <p className="field-help">Loading tag catalog…</p> : (
-            <ul className="tag-catalog-list" aria-label="Canonical tags">
+          {loading ? <p className="field-help" role="status">{t.tags.loading}</p> : (
+            <ul className="tag-catalog-list" aria-label={t.tags.list}>
               {tags.map((tag) => (
                 <li key={tag.id}>
                   <TagChip tag={tag} />
                   <code>{tag.color}</code>
                   <span className="tag-catalog-actions">
-                    <button className="button button-icon" type="button" disabled={busy} onClick={() => editTag(tag)} aria-label={`Edit ${tag.name}`} title={`Edit ${tag.name}`}><PencilIcon aria-hidden="true" /></button>
-                    <button className="button button-icon" type="button" disabled={busy} aria-haspopup="dialog" aria-expanded={pendingDelete?.id === tag.id} onClick={() => setPendingDelete(tag)} aria-label={`Delete ${tag.name}`} title={`Delete ${tag.name}`}><TrashIcon aria-hidden="true" /></button>
+                    <button className="button button-icon" type="button" disabled={busy} onClick={() => editTag(tag)} aria-label={formatTranslation(t.tags.edit, { name: tag.name })} title={formatTranslation(t.tags.edit, { name: tag.name })}><PencilIcon /></button>
+                    <button className="button button-icon" type="button" disabled={busy} aria-haspopup="dialog" aria-expanded={pendingDelete?.id === tag.id} onClick={() => setPendingDelete(tag)} aria-label={formatTranslation(t.tags.delete, { name: tag.name })} title={formatTranslation(t.tags.delete, { name: tag.name })}><TrashIcon /></button>
                   </span>
                 </li>
               ))}
-              {!tags.length && <li className="tag-catalog-empty">No canonical tags have been created.</li>}
+              {!tags.length && <li className="tag-catalog-empty">{t.tags.empty}</li>}
             </ul>
           )}
         </section>
 
         <section className="settings-section" aria-labelledby={`${titleId}-orphans`}>
-          <h3 id={`${titleId}-orphans`}>Orphaned references</h3>
-          <p className="field-help">Missing tag IDs stay hidden on articles until a Moderator explicitly removes them.</p>
-          {!loading && orphans.length === 0 && <p className="tag-catalog-empty">No current articles contain missing tag IDs.</p>}
+          <h3 id={`${titleId}-orphans`}>{t.tags.orphans}</h3>
+          <p className="field-help">{t.tags.orphansHelp}</p>
+          {!loading && orphans.length === 0 && <p className="tag-catalog-empty">{t.tags.noOrphans}</p>}
           <ul className="orphan-list">
             {orphans.flatMap((orphan) => orphan.missingTagIds.map((tagId) => (
               <li key={`${orphan.articleId}-${tagId}`}>
                 <span><strong>{orphan.articleTitle}</strong><code>{tagId}</code></span>
                 <button className="button button-danger compact" type="button" disabled={busy} onClick={() => void cleanupOrphan(orphan, tagId)}>
-                  Remove reference
+                  {t.tags.removeReference}
                 </button>
               </li>
             )))}
@@ -212,9 +225,9 @@ export function ManageTagsPanel() {
       </section>
       {pendingDelete && (
         <ConfirmDialog
-          title={`Delete “${pendingDelete.name}”?`}
-          description="Article and revision references are kept and stay unresolved until a Moderator removes them under Orphaned references."
-          confirmLabel={busy ? 'Deleting…' : 'Delete tag'}
+          title={formatTranslation(t.tags.deleteTitle, { name: pendingDelete.name })}
+          description={t.tags.deleteText}
+          confirmLabel={busy ? t.common.deleting : t.tags.deleteConfirm}
           danger
           busy={busy}
           onConfirm={() => void removeTag(pendingDelete)}

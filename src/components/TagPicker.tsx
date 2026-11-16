@@ -1,5 +1,7 @@
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from 'react';
 import type { CanonicalTag } from '../lib/api';
+import { formatTranslation } from '../translations';
+import { useI18n } from './I18n';
 import { TagChip } from './TagChip';
 
 const selectionLimit = 12;
@@ -26,6 +28,7 @@ export function TagPicker({
   error,
   onRefresh,
 }: TagPickerProps) {
+  const { t } = useI18n();
   const inputId = useId();
   const listboxId = useId();
   const statusId = useId();
@@ -85,7 +88,7 @@ export function TagPicker({
 
   return (
     <div className="tag-picker">
-      <label className="field" htmlFor={inputId}><span>Tags</span></label>
+      <label className="field" htmlFor={inputId}><span>{t.tagPicker.label}</span></label>
       <div className="tag-picker-control">
         <input
           id={inputId}
@@ -98,7 +101,7 @@ export function TagPicker({
           aria-invalid={Boolean(error)}
           autoComplete="off"
           disabled={disabled || loading}
-          placeholder={loading ? 'Loading tags…' : 'Search available tags'}
+          placeholder={loading ? t.tagPicker.loading : t.tagPicker.search}
           value={query}
           onBlur={() => setOpen(false)}
           onChange={(event) => {
@@ -111,7 +114,7 @@ export function TagPicker({
 
         {open && !loading && (
           <div className="tag-picker-options">
-            <div id={listboxId} role="listbox" aria-label="Available tags" aria-multiselectable="true">
+            <div id={listboxId} role="listbox" aria-label={t.tagPicker.available} aria-multiselectable="true">
               {visibleMatches.map((tag, index) => {
                 const selected = selectedIds.includes(tag.id);
                 const atLimit = selectedIds.length >= selectionLimit && !selected;
@@ -128,12 +131,12 @@ export function TagPicker({
                     onClick={() => toggle(tag.id)}
                   >
                     <TagChip tag={tag} />
-                    <span>{selected ? 'Selected' : atLimit ? 'Limit reached' : 'Select'}</span>
+                    <span>{selected ? t.tagPicker.selected : atLimit ? t.tagPicker.limitReached : t.tagPicker.select}</span>
                   </button>
                 );
               })}
             </div>
-            {!visibleMatches.length && <p className="tag-picker-empty" role="status">No matching tags.</p>}
+            {!visibleMatches.length && <p className="tag-picker-empty" role="status">{t.tagPicker.noMatches}</p>}
             {matches.length > visibleCount && (
               <button
                 className="tag-picker-more"
@@ -141,7 +144,7 @@ export function TagPicker({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => setVisibleCount((count) => count + resultBatchSize)}
               >
-                Show More
+                {t.tagPicker.showMore}
               </button>
             )}
           </div>
@@ -149,15 +152,15 @@ export function TagPicker({
       </div>
 
       {selectedIds.length > 0 && (
-        <ul className="selected-tags" aria-label="Selected tags">
+        <ul className="selected-tags" aria-label={t.tagPicker.selectedTags}>
           {selectedIds.map((tagId) => {
-            const tag = knownById.get(tagId) ?? { id: tagId, name: 'Unavailable tag', color: '#FF6C68' };
+            const tag = knownById.get(tagId) ?? { id: tagId, name: t.tagPicker.unavailableTag, color: '#FF6C68' };
             const unavailable = !availableById.has(tagId);
             return (
               <li className={unavailable ? 'unavailable' : ''} key={tagId}>
                 <TagChip tag={tag} />
-                {unavailable && <span className="tag-unavailable">Unavailable</span>}
-                <button type="button" disabled={disabled} onClick={() => toggle(tagId)} aria-label={`Remove ${tag.name}`}>×</button>
+                {unavailable && <span className="tag-unavailable">{t.tagPicker.unavailable}</span>}
+                <button type="button" disabled={disabled} onClick={() => toggle(tagId)} aria-label={formatTranslation(t.tagPicker.remove, { name: tag.name })} title={formatTranslation(t.tagPicker.remove, { name: tag.name })}>×</button>
               </li>
             );
           })}
@@ -165,12 +168,12 @@ export function TagPicker({
       )}
 
       <p className="field-help tag-picker-status" id={statusId} aria-live="polite">
-        {selectedIds.length} of {selectionLimit} tags selected.
+        {formatTranslation(t.tagPicker.count, { count: selectedIds.length, max: selectionLimit })}
       </p>
       {error && <p className="field-error" id={errorId} role="alert">{error}</p>}
       {onRefresh && (
         <button className="button button-ghost compact tag-refresh" type="button" disabled={loading || disabled} onClick={onRefresh}>
-          {loading ? 'Refreshing…' : 'Refresh tags'}
+          {loading ? t.tagPicker.refreshing : t.tagPicker.refresh}
         </button>
       )}
     </div>

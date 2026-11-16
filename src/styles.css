@@ -199,8 +199,8 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .revision-content-grid.changed section { border-color: rgba(226, 85, 48, 0.65); }
 .revision-content-grid h3 { margin: 0; padding: 0.75rem 1rem; border-bottom: 1px solid rgba(255, 180, 81, 0.1); color: var(--agt-orange); font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; }
 .revision-content-grid pre { max-height: 38rem; overflow: auto; margin: 0; padding: 1rem; color: #ded8d1; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.78rem; line-height: 1.55; }
-.auth-page { display: grid; min-height: calc(100vh - 5rem); place-items: center; }
-.auth-card { width: min(100%, 30rem); padding: clamp(1.5rem, 5vw, 3rem); border: 1px solid var(--line); border-radius: 1rem; background: #121212; box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.45); }
+.auth-page { display: grid; min-height: calc(100vh - 5rem); grid-template-columns: minmax(0, 1fr); place-items: center; }
+.auth-card { width: min(100%, 30rem); min-width: 0; overflow-wrap: break-word; hyphens: auto; padding: clamp(1.5rem, 5vw, 3rem); border: 1px solid var(--line); border-radius: 1rem; background: #121212; box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.45); }
 .auth-card h1 { font-size: 2.6rem; }
 .auth-card > p:not(.eyebrow) { color: #aaa39a; line-height: 1.6; }
 .auth-icon { width: 2rem; color: var(--agt-orange); }

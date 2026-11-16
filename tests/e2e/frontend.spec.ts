@@ -39,7 +39,7 @@ async function prepare(page: Page) {
     document.addEventListener('securitypolicyviolation', (event) => {
       violations.push({ directive: event.effectiveDirective, blocked: event.blockedURI });
     });
-    localStorage.setItem('agt_knowledge_base_allow_downloads', 'true');
+    localStorage.setItem('agt_knowledge_base_settings', JSON.stringify({ allowDownloads: true }));
   });
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -149,3 +149,20 @@ test('pages fit 300 px without horizontal scrolling (UI-12)', async ({ page }) =
     expect(overflow, url).toBe(0);
   }
 });
+
+for (const language of ['de', 'th', 'hi']) {
+  test(`pages fit 300 px in ${language}, with <html lang> set (UI-12, I18N-3)`, async ({ page }) => {
+    await prepare(page);
+    await page.addInitScript((value) => {
+      localStorage.setItem('agt_knowledge_base_settings', JSON.stringify({ allowDownloads: true, language: value }));
+    }, language);
+    await page.setViewportSize({ width: 300, height: 700 });
+    for (const url of ['/', `/?article=${articleId}`, '/?view=new', '/admin']) {
+      await page.goto(url);
+      await expect(page.locator('main')).toBeVisible();
+      await expect(page.locator('html')).toHaveAttribute('lang', language);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `${language} ${url}`).toBe(0);
+    }
+  });
+}

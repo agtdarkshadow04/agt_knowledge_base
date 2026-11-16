@@ -1,25 +1,27 @@
 import type { AgtArticleVisibility, ArticleVisibility, ArticleVisibilityFilter } from './api.js';
 
+/** The key of a level's CSS class and of its translated name (`t.visibility[key]`). */
+export type VisibilityKey = 'agt-public' | 'private' | 'restricted' | 'top-secret' | 'slt-restricted' | 'scc-restricted' | 'public' | 'internal' | 'admin';
+
 interface VisibilityOption {
   value: ArticleVisibility;
-  label: string;
-  className: string;
+  className: VisibilityKey;
   moderatorOnly: boolean;
 }
 
 export const agtVisibilityOptions = [
-  { value: 0, label: 'Public', className: 'agt-public', moderatorOnly: false },
-  { value: 1, label: 'Private', className: 'private', moderatorOnly: false },
-  { value: 2, label: 'Restricted', className: 'restricted', moderatorOnly: true },
-  { value: 3, label: 'Top Secret', className: 'top-secret', moderatorOnly: true },
-  { value: 4, label: 'SLT Restricted', className: 'slt-restricted', moderatorOnly: true },
-  { value: 5, label: 'SCC Restricted', className: 'scc-restricted', moderatorOnly: true },
+  { value: 0, className: 'agt-public', moderatorOnly: false },
+  { value: 1, className: 'private', moderatorOnly: false },
+  { value: 2, className: 'restricted', moderatorOnly: true },
+  { value: 3, className: 'top-secret', moderatorOnly: true },
+  { value: 4, className: 'slt-restricted', moderatorOnly: true },
+  { value: 5, className: 'scc-restricted', moderatorOnly: true },
 ] as const satisfies readonly VisibilityOption[];
 
 export const legacyVisibilityOptions = [
-  { value: 'Public', label: 'Public', className: 'public', moderatorOnly: false },
-  { value: 'Internal', label: 'Internal', className: 'internal', moderatorOnly: false },
-  { value: 'Admin', label: 'Admin (legacy)', className: 'admin', moderatorOnly: true },
+  { value: 'Public', className: 'public', moderatorOnly: false },
+  { value: 'Internal', className: 'internal', moderatorOnly: false },
+  { value: 'Admin', className: 'admin', moderatorOnly: true },
 ] as const satisfies readonly VisibilityOption[];
 
 const visibilityOptions: readonly VisibilityOption[] = [...agtVisibilityOptions, ...legacyVisibilityOptions];
@@ -30,11 +32,7 @@ export function parseArticleVisibility(value: string): ArticleVisibility {
   return option.value;
 }
 
-export function visibilityLabel(visibility: ArticleVisibility) {
-  return visibilityOptions.find((option) => option.value === visibility)!.label;
-}
-
-export function visibilityClassName(visibility: ArticleVisibility) {
+export function visibilityClassName(visibility: ArticleVisibility): VisibilityKey {
   return visibilityOptions.find((option) => option.value === visibility)!.className;
 }
 

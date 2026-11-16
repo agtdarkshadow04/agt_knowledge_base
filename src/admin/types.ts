@@ -100,6 +100,7 @@ export interface RestorePreview {
   config: { included: boolean; content: string | null; diff: DiffLine[] | null; identical: boolean };
   ignoredSettings: string[];
   warnings: string[];
+  warningCodes: ('log_tables_ignored' | 'no_admin')[];
 }
 
 export interface RestoreReport extends RestorePreview {

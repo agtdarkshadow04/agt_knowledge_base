@@ -1,6 +1,8 @@
 import { isValidElement, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { formatTranslation } from '../translations';
+import { useI18n } from './I18n';
 
 /**
  * The one component that renders stored Markdown (SEC-12): `react-markdown` +
@@ -88,7 +90,14 @@ function Link({ href, children, node: _node, ...props }: ComponentPropsWithoutRe
 
 function Image({ src, alt, node: _node, ...props }: ComponentPropsWithoutRef<'img'> & { node?: unknown }) {
   const [failed, setFailed] = useState(false);
-  if (!src || failed) return <span className="markdown-image-fallback" role="img" aria-label={alt || 'Image'}>{alt ? `[Image: ${alt}]` : '[Image unavailable]'}</span>;
+  const { t } = useI18n();
+  if (!src || failed) {
+    return (
+      <span className="markdown-image-fallback" role="img" aria-label={alt || t.markdown.image}>
+        {alt ? formatTranslation(t.markdown.imageAlt, { alt }) : t.markdown.imageUnavailable}
+      </span>
+    );
+  }
   return <img {...props} src={src} alt={alt ?? ''} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
 }
 

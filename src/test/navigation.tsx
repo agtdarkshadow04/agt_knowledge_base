@@ -1,11 +1,12 @@
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
+import { I18nProvider } from '../components/I18n';
 import { NavigationProvider, useNavigation } from '../components/Navigation';
 
-/** Renders `ui` with the navigation context, starting at `url` (FE-4 deep links on /). */
+/** Renders `ui` with the preferences and navigation contexts, starting at `url` (FE-4 deep links on /). */
 export function renderAt(url: string, ui: ReactElement) {
   window.history.replaceState(null, '', url);
-  return render(<NavigationProvider>{ui}</NavigationProvider>);
+  return render(<I18nProvider><NavigationProvider>{ui}</NavigationProvider></I18nProvider>);
 }
 
 /** The address the app is showing. */

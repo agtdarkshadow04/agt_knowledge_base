@@ -1,6 +1,9 @@
 import { type FormEvent, Fragment, useCallback, useEffect, useState } from 'react';
 import { ConfirmDialog } from '../components/Dialog';
 import { LoadingState } from '../components/States';
+import { formatTranslation } from '../translations';
+import { useAdminI18n } from './context';
+import type { AdminTranslations } from './i18n';
 import { clearServerLog, exportLog, listAuditLog, listServerLog, type LogKind } from './api';
 import { saveFile } from './download';
 import type { AuditLogEntry, LogFilters, ServerLogEntry } from './types';
@@ -14,9 +17,9 @@ import { DownloadIcon, SearchIcon, TrashIcon } from '../components/Icons';
 
 type Entry = ServerLogEntry | AuditLogEntry;
 
-const levelOptions = [['', 'Any level'], ['info', 'Info and above'], ['warn', 'Warnings and above'], ['error', 'Errors and above'], ['fatal', 'Fatal only']];
-const actorOptions = [['', 'Anyone'], ['admin', 'Admin'], ['member', 'Member'], ['anonymous', 'Anonymous']];
-const outcomeOptions = [['', 'Any outcome'], ['success', 'Success'], ['denied', 'Denied'], ['rate_limited', 'Rate limited'], ['failure', 'Failure']];
+const levelOptions = (a: AdminTranslations) => [['', a.logs.anyLevel], ['info', a.logs.infoUp], ['warn', a.logs.warnUp], ['error', a.logs.errorUp], ['fatal', a.logs.fatalOnly]];
+const actorOptions = (a: AdminTranslations) => [['', a.logs.anyone], ['admin', a.logs.actorAdmin], ['member', a.logs.actorMember], ['anonymous', a.logs.actorAnonymous]];
+const outcomeOptions = (a: AdminTranslations) => [['', a.logs.anyOutcome], ['success', a.logs.success], ['denied', a.logs.denied], ['rate_limited', a.logs.rateLimited], ['failure', a.logs.failure]];
 
 /** LOG-19: colour and text, never colour alone. */
 function severity(value: string) {
@@ -25,15 +28,13 @@ function severity(value: string) {
   return 'log-severity';
 }
 
-const outcomeLabels: Record<string, string> = { success: 'Success', denied: 'Denied', rate_limited: 'Rate limited', failure: 'Failure' };
+const outcomeLabel = (outcome: string, a: AdminTranslations) => ({ success: a.logs.success, denied: a.logs.denied, rate_limited: a.logs.rateLimited, failure: a.logs.failure } as Record<string, string>)[outcome] ?? outcome;
+const actorLabel = (actorType: string, a: AdminTranslations) => ({ admin: a.logs.actorAdmin, member: a.logs.actorMember, anonymous: a.logs.actorAnonymous } as Record<string, string>)[actorType] ?? actorType;
+const levelLabel = (level: string, a: AdminTranslations) => a.logs.levels[level as keyof AdminTranslations['logs']['levels']] ?? level;
 
 /** A `datetime-local` value as ISO 8601, in the browser's time zone. */
 function isoTime(value: string) {
   return value ? new Date(value).toISOString() : '';
-}
-
-function failure(cause: unknown, fallback: string) {
-  return cause instanceof Error ? cause.message : fallback;
 }
 
 function Select({ label, name, options, value, onChange }: { label: string; name: string; options: string[][]; value: string; onChange(value: string): void }) {
@@ -51,6 +52,7 @@ function TextFilter({ label, name, value, onChange, type = 'text' }: { label: st
 }
 
 export function LogPanel({ kind }: { kind: LogKind }) {
+  const { a, dateTime, error: describe } = useAdminI18n();
   const [draft, setDraft] = useState<LogFilters>({});
   const [filters, setFilters] = useState<LogFilters>({});
   const [entries, setEntries] = useState<Entry[] | null>(null);
@@ -70,9 +72,9 @@ export function LogPanel({ kind }: { kind: LogKind }) {
       setEntries((current) => (after && current ? [...current, ...page.items] : page.items));
       setCursor(page.nextCursor);
     } catch (cause) {
-      setError(failure(cause, 'The log could not be loaded.'));
+      setError(describe(cause));
     } finally { setBusy(false); }
-  }, [kind]);
+  }, [describe, kind]);
 
   useEffect(() => { void load({}); }, [load]);
 
@@ -92,7 +94,7 @@ export function LogPanel({ kind }: { kind: LogKind }) {
       const { blob, filename } = await exportLog(kind, filters, format);
       saveFile(blob, filename);
     } catch (cause) {
-      setError(failure(cause, 'The export could not be created.'));
+      setError(describe(cause));
     }
   }
 
@@ -102,108 +104,108 @@ export function LogPanel({ kind }: { kind: LogKind }) {
     try {
       await clearServerLog();
       setConfirmClear(false);
-      setNotice('The server log was cleared.');
+      setNotice(a.logs.cleared);
       await load(filters);
     } catch (cause) {
-      setError(failure(cause, 'The server log could not be cleared.'));
+      setError(describe(cause));
     } finally { setBusy(false); }
   }
 
-  const title = kind === 'server' ? 'Server log' : 'Audit log';
-  const columns = kind === 'server' ? ['Time', 'Level', 'Source', 'Message', ''] : ['Time', 'Actor', 'Action', 'Target', 'Outcome', 'Status', ''];
+  const title = kind === 'server' ? a.logs.serverTitle : a.logs.auditTitle;
+  const columns = kind === 'server'
+    ? [a.logs.colTime, a.logs.colLevel, a.logs.colSource, a.logs.colMessage, '']
+    : [a.logs.colTime, a.logs.colActor, a.logs.colAction, a.logs.colTarget, a.logs.colOutcome, a.logs.colStatus, ''];
 
   return (
     <section className="admin-panel log-panel" aria-labelledby={`${kind}-log-title`}>
       <h2 id={`${kind}-log-title`}>{title}</h2>
       <p className="field-help">
-        {kind === 'server'
-          ? 'Events the server caused itself: startup, migrations, retention, backups and unexpected errors.'
-          : 'Who did what, when, with what outcome: every change, sign-in and denied attempt. Addresses are stored only as pseudonymous hashes. The audit log cannot be edited or cleared.'}
-        {' '}Logs are not part of backups.
+        {kind === 'server' ? a.logs.serverIntro : a.logs.auditIntro}
+        {' '}{a.logs.notInBackups}
       </p>
       {error && <p className="error-note" role="alert">{error}</p>}
       <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
-      <form className="log-filters" onSubmit={apply} aria-label={`${title} filters`}>
+      <form className="log-filters" onSubmit={apply} aria-label={formatTranslation(a.logs.filters, { log: title })}>
         {kind === 'server' ? (
           <>
-            <Select label="Level" name="level" options={levelOptions} value={draft.level ?? ''} onChange={set('level')} />
-            <TextFilter label="Source" name="source" value={draft.source ?? ''} onChange={set('source')} />
+            <Select label={a.logs.level} name="level" options={levelOptions(a)} value={draft.level ?? ''} onChange={set('level')} />
+            <TextFilter label={a.logs.source} name="source" value={draft.source ?? ''} onChange={set('source')} />
           </>
         ) : (
           <>
-            <Select label="Actor" name="actorType" options={actorOptions} value={draft.actorType ?? ''} onChange={set('actorType')} />
-            <TextFilter label="Action" name="action" value={draft.action ?? ''} onChange={set('action')} />
-            <Select label="Outcome" name="outcome" options={outcomeOptions} value={draft.outcome ?? ''} onChange={set('outcome')} />
-            <TextFilter label="Target type" name="targetType" value={draft.targetType ?? ''} onChange={set('targetType')} />
-            <TextFilter label="Target ID" name="targetId" value={draft.targetId ?? ''} onChange={set('targetId')} />
+            <Select label={a.logs.actor} name="actorType" options={actorOptions(a)} value={draft.actorType ?? ''} onChange={set('actorType')} />
+            <TextFilter label={a.logs.action} name="action" value={draft.action ?? ''} onChange={set('action')} />
+            <Select label={a.logs.outcome} name="outcome" options={outcomeOptions(a)} value={draft.outcome ?? ''} onChange={set('outcome')} />
+            <TextFilter label={a.logs.targetType} name="targetType" value={draft.targetType ?? ''} onChange={set('targetType')} />
+            <TextFilter label={a.logs.targetId} name="targetId" value={draft.targetId ?? ''} onChange={set('targetId')} />
           </>
         )}
-        <TextFilter label="From" name="from" type="datetime-local" value={draft.from ?? ''} onChange={set('from')} />
-        <TextFilter label="To" name="to" type="datetime-local" value={draft.to ?? ''} onChange={set('to')} />
-        <TextFilter label="Search" name="q" value={draft.q ?? ''} onChange={set('q')} />
+        <TextFilter label={a.logs.from} name="from" type="datetime-local" value={draft.from ?? ''} onChange={set('from')} />
+        <TextFilter label={a.logs.to} name="to" type="datetime-local" value={draft.to ?? ''} onChange={set('to')} />
+        <TextFilter label={a.logs.search} name="q" value={draft.q ?? ''} onChange={set('q')} />
         <div className="dialog-actions">
-          <button className="button button-secondary" type="submit" disabled={busy}><SearchIcon aria-hidden="true" /> Apply filters</button>
+          <button className="button button-secondary" type="submit" disabled={busy}><SearchIcon /> {a.logs.apply}</button>
         </div>
       </form>
       <div className="dialog-actions log-actions">
-        <label className="field inline-field"><span>Export format</span>
+        <label className="field inline-field"><span>{a.logs.format}</span>
           <select value={format} onChange={(event) => setFormat(event.target.value as 'jsonl' | 'csv')}>
-            <option value="jsonl">JSON Lines</option>
-            <option value="csv">CSV</option>
+            <option value="jsonl">{a.logs.jsonl}</option>
+            <option value="csv">{a.logs.csv}</option>
           </select>
         </label>
-        <button className="button button-secondary" type="button" onClick={() => void download()}><DownloadIcon aria-hidden="true" /> Export</button>
+        <button className="button button-secondary" type="button" onClick={() => void download()}><DownloadIcon /> {a.logs.export}</button>
         {kind === 'server' && (
-          <button className="button button-danger" type="button" aria-haspopup="dialog" aria-expanded={confirmClear} onClick={() => { setConfirmClear(true); setNotice(''); }}><TrashIcon aria-hidden="true" /> Clear log</button>
+          <button className="button button-danger" type="button" aria-haspopup="dialog" aria-expanded={confirmClear} onClick={() => { setConfirmClear(true); setNotice(''); }}><TrashIcon /> {a.logs.clear}</button>
         )}
       </div>
       {kind === 'server' && confirmClear && (
         <ConfirmDialog
-          title="Clear the server log?"
-          description="Every server log entry is deleted. This cannot be undone. The audit log is not affected."
-          confirmLabel={busy ? 'Clearing…' : 'Clear the server log'}
+          title={a.logs.clearTitle}
+          description={a.logs.clearText}
+          confirmLabel={busy ? a.logs.clearing : a.logs.clearConfirm}
           danger
           busy={busy}
           onConfirm={() => void clear()}
           onCancel={() => setConfirmClear(false)}
         />
       )}
-      {entries === null ? <LoadingState message="Loading the log…" /> : entries.length === 0 ? (
-        <p className="field-help">No entries match.</p>
+      {entries === null ? <LoadingState message={a.logs.loading} /> : entries.length === 0 ? (
+        <p className="field-help">{a.logs.empty}</p>
       ) : (
         <div className="table-scroll">
           <table className="admin-table log-table">
-            <thead><tr>{columns.map((column, index) => <th key={index} scope="col">{column || <span className="sr-only">Details</span>}</th>)}</tr></thead>
+            <thead><tr>{columns.map((column, index) => <th key={index} scope="col">{column || <span className="sr-only">{a.logs.details}</span>}</th>)}</tr></thead>
             <tbody>
               {entries.map((entry) => (
                 <Fragment key={entry.id}>
                   <tr>
-                    <td><time dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time></td>
+                    <td><time dateTime={entry.at}>{dateTime(entry.at)}</time></td>
                     {'level' in entry ? (
                       <>
-                        <td><span className={severity(entry.level)}>{entry.level}</span></td>
+                        <td><span className={severity(entry.level)}>{levelLabel(entry.level, a)}</span></td>
                         <td>{entry.source}</td>
                         <td>{entry.message}</td>
                       </>
                     ) : (
                       <>
-                        <td>{entry.actor ?? '—'} <small className="field-help">({entry.actorType})</small></td>
+                        <td>{entry.actor ?? '—'} <small className="field-help">({actorLabel(entry.actorType, a)})</small></td>
                         <td><code>{entry.action}</code></td>
                         <td>{entry.targetType ? `${entry.targetType} ${entry.targetId ?? ''}` : '—'}</td>
-                        <td><span className={severity(entry.outcome)}>{outcomeLabels[entry.outcome]}</span>{entry.count > 1 && <small className="field-help"> ×{entry.count}</small>}</td>
+                        <td><span className={severity(entry.outcome)}>{outcomeLabel(entry.outcome, a)}</span>{entry.count > 1 && <small className="field-help"> ×{entry.count}</small>}</td>
                         <td>{entry.statusCode}</td>
                       </>
                     )}
                     <td>
                       <button className="button button-secondary button-small" type="button" aria-expanded={open === entry.id} onClick={() => setOpen(open === entry.id ? null : entry.id)}>
-                        {open === entry.id ? 'Hide details' : 'Details'}
+                        {open === entry.id ? a.logs.hideDetails : a.logs.details}
                       </button>
                     </td>
                   </tr>
                   {open === entry.id && (
                     <tr className="log-details-row">
                       <td colSpan={columns.length}>
-                        <pre className="log-details" aria-label="Entry details">{JSON.stringify(
+                        <pre className="log-details" aria-label={a.logs.entryDetails}>{JSON.stringify(
                           'level' in entry
                             ? { requestId: entry.requestId, details: entry.details }
                             : { method: entry.method, route: entry.route, client: entry.client, ipHash: entry.ipHash, requestId: entry.requestId, firstAt: entry.at, lastAt: entry.lastAt, details: entry.details },
@@ -221,7 +223,7 @@ export function LogPanel({ kind }: { kind: LogKind }) {
       )}
       {cursor && (
         <div className="dialog-actions">
-          <button className="button button-secondary" type="button" disabled={busy} onClick={() => void load(filters, cursor)}>Load older entries</button>
+          <button className="button button-secondary" type="button" disabled={busy} onClick={() => void load(filters, cursor)}>{a.logs.loadOlder}</button>
         </div>
       )}
     </section>

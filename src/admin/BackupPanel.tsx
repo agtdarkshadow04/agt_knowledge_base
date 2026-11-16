@@ -1,61 +1,65 @@
 import { type FormEvent, useState } from 'react';
+import { ApiError } from '../lib/client';
+import { formatTranslation } from '../translations';
+import { useAdminI18n } from './context';
+import type { AdminTranslations } from './i18n';
 import { downloadBackup, previewBackup, restoreBackup } from './api';
 import { saveFile } from './download';
 import type { RestorePreview, RestoreReport } from './types';
 import { DownloadIcon, EyeIcon, UploadIcon } from '../components/Icons';
 
-const tableLabels: Record<string, string> = {
-  app_users: 'Author records',
-  local_users: 'Member accounts',
-  tags: 'Tags',
-  articles: 'Articles',
-  article_revisions: 'Article revisions',
-  settings: 'Dashboard settings',
-  admin: 'Admin account',
-};
-
 function Counts({ counts }: { counts: Record<string, number> }) {
+  const { a, number } = useAdminI18n();
   return (
     <dl className="stats-grid">
       {Object.entries(counts).map(([table, count]) => (
-        <div key={table}><dt>{tableLabels[table] ?? table}</dt><dd>{count.toLocaleString()}</dd></div>
+        <div key={table}><dt>{a.backup.tables[table as keyof AdminTranslations['backup']['tables']] ?? table}</dt><dd>{number(count)}</dd></div>
       ))}
     </dl>
   );
 }
 
+/** A refused archive's translated reason (`params.reason`), with the server's English details kept for support. */
+function rejection(cause: unknown, a: AdminTranslations) {
+  if (!(cause instanceof ApiError) || cause.code !== 'archive_rejected') return null;
+  const reason = cause.params.reason;
+  const text = typeof reason === 'string' ? a.backup.reasons[reason as keyof AdminTranslations['backup']['reasons']] : undefined;
+  return text ? { text, details: cause.message } : null;
+}
+
 function PreviewDetails({ preview }: { preview: RestorePreview }) {
+  const { a, dateTime } = useAdminI18n();
   const { config } = preview;
   return (
     <>
-      <p>Created {new Date(preview.createdAt).toLocaleString()} by version {preview.appVersion} (database schema {preview.schemaVersion.backup}).</p>
+      <p>{formatTranslation(a.backup.created, { date: dateTime(preview.createdAt), version: preview.appVersion, schema: preview.schemaVersion.backup })}</p>
       {preview.schemaVersion.backup < preview.schemaVersion.current && (
         <div className="admin-notice" role="note">
-          This backup is from an older version. Restoring upgrades its database from schema {preview.schemaVersion.backup} to {preview.schemaVersion.current}.
+          {formatTranslation(a.backup.olderVersion, { from: preview.schemaVersion.backup, to: preview.schemaVersion.current })}
         </div>
       )}
-      {preview.warnings.map((warning) => <div className="admin-notice" role="note" key={warning}>{warning}</div>)}
+      {preview.warningCodes.map((code) => <div className="admin-notice" role="note" key={code}>{a.backup.warnings[code]}</div>)}
       <Counts counts={preview.counts} />
       {preview.ignoredSettings.length > 0 && (
         <div className="admin-notice" role="note">
-          These settings are defined in this installation&apos;s configuration file, so the backup&apos;s values are ignored: {preview.ignoredSettings.join(', ')}.
+          {formatTranslation(a.backup.ignoredSettings, { keys: preview.ignoredSettings.join(', ') })}
         </div>
       )}
-      <h3>Configuration file</h3>
-      {!config.included && <p className="field-help">The backup does not contain a config.yaml.</p>}
+      <h3>{a.backup.configTitle}</h3>
+      {!config.included && <p className="field-help">{a.backup.noConfig}</p>}
       {config.included && (
         <>
           <p className="field-help">
-            config.yaml is never restored. {config.identical ? 'The backup’s file is identical to the current one.' : 'Differences from the current file are shown below; apply any you want by editing config.yaml on the server.'}
+            {a.backup.configNeverRestored} {config.identical ? a.backup.configIdentical : a.backup.configDifferent}
           </p>
           {config.diff && !config.identical && (
-            <pre className="config-diff" aria-label="config.yaml differences">
+            <pre className="config-diff" aria-label={a.backup.configDiff}>
               {config.diff.map((line, index) => <span key={index} className={`diff-line diff-${line.kind === '+' ? 'added' : line.kind === '-' ? 'removed' : 'same'}`}>{line.kind} {line.text}{'\n'}</span>)}
             </pre>
           )}
           {config.content !== null && (
             <button className="button button-secondary" type="button" onClick={() => saveFile(new Blob([config.content!], { type: 'text/yaml' }), 'config.from-backup.yaml')}>
-              <DownloadIcon aria-hidden="true" /> Download the backup&apos;s config.yaml
+              <DownloadIcon /> {a.backup.downloadConfig}
             </button>
           )}
         </>
@@ -65,8 +69,16 @@ function PreviewDetails({ preview }: { preview: RestorePreview }) {
 }
 
 export function BackupPanel({ onRestored }: { onRestored(): void }) {
+  const { a, error: describe } = useAdminI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [details, setDetails] = useState('');
+
+  function fail(cause: unknown) {
+    const rejected = rejection(cause, a);
+    setError(rejected ? `${describe(cause)} ${rejected.text}` : describe(cause));
+    setDetails(rejected?.details ?? '');
+  }
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<RestorePreview | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -75,11 +87,12 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
   async function download() {
     setBusy(true);
     setError('');
+    setDetails('');
     try {
       const { blob, filename } = await downloadBackup();
       saveFile(blob, filename);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The backup could not be created.');
+      fail(cause);
     } finally { setBusy(false); }
   }
 
@@ -88,12 +101,13 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
     if (!file) return;
     setBusy(true);
     setError('');
+    setDetails('');
     setPreview(null);
     setConfirmed(false);
     try {
       setPreview(await previewBackup(file));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The backup could not be checked.');
+      fail(cause);
     } finally { setBusy(false); }
   }
 
@@ -101,77 +115,74 @@ export function BackupPanel({ onRestored }: { onRestored(): void }) {
     if (!file || !preview || !confirmed) return;
     setBusy(true);
     setError('');
+    setDetails('');
     try {
       setReport(await restoreBackup(file));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The backup could not be restored.');
+      fail(cause);
     } finally { setBusy(false); }
   }
 
   if (report) {
     return (
       <section className="admin-panel settings-admin-panel" aria-labelledby="backup-restored-title">
-        <h2 id="backup-restored-title">Backup restored</h2>
-        <p>The data was replaced with the backup contents. Every member and the Admin have been signed out; sign in with the Admin account stored in the backup.</p>
-        {report.preRestoreBackup && <p className="field-help">The data that was replaced was saved first as <code>{report.preRestoreBackup}</code> in the server&apos;s backups directory.</p>}
+        <h2 id="backup-restored-title">{a.backup.restoredTitle}</h2>
+        <p>{a.backup.restoredText}</p>
+        {report.preRestoreBackup && <p className="field-help">{formatTranslation(a.backup.preRestoreSaved, { file: report.preRestoreBackup })}</p>}
         <Counts counts={report.counts} />
-        {report.schemaVersion.backup < report.schemaVersion.current && <p className="field-help">Upgraded from database schema {report.schemaVersion.backup} to {report.schemaVersion.current}.</p>}
-        {report.warnings.map((warning) => <p className="field-help" key={warning}>{warning}</p>)}
-        {report.ignoredSettings.length > 0 && <p className="field-help">Kept from the configuration file: {report.ignoredSettings.join(', ')}.</p>}
-        <div className="dialog-actions"><button className="button button-primary" type="button" onClick={onRestored}>Sign in again</button></div>
+        {report.schemaVersion.backup < report.schemaVersion.current && <p className="field-help">{formatTranslation(a.backup.upgraded, { from: report.schemaVersion.backup, to: report.schemaVersion.current })}</p>}
+        {report.warningCodes.map((code) => <p className="field-help" key={code}>{a.backup.warnings[code]}</p>)}
+        {report.ignoredSettings.length > 0 && <p className="field-help">{formatTranslation(a.backup.keptFromConfig, { keys: report.ignoredSettings.join(', ') })}</p>}
+        <div className="dialog-actions"><button className="button button-primary" type="button" onClick={onRestored}>{a.backup.signInAgain}</button></div>
       </section>
     );
   }
 
   return (
     <div className="admin-data-sections">
-      {error && <p className="error-note" role="alert">{error}</p>}
+      {error && (
+        <div role="alert">
+          <p className="error-note">{error}</p>
+          {details && <details className="field-help"><summary>{a.backup.technicalDetails}</summary><p>{details}</p></details>}
+        </div>
+      )}
+      <div role="status" aria-live="polite">{busy && <p className="field-help">{a.backup.working}</p>}</div>
       <section className="admin-panel settings-admin-panel" aria-labelledby="backup-export-title">
-        <h2 id="backup-export-title"> Download backup</h2>
-        <p className="field-help">
-          Downloads a ZIP archive with a PostgreSQL dump of every article, revision, tag, member account, the Admin account and
-          the dashboard settings, and the current config.yaml, with a SHA-256 checksum for each file. Sessions and .env are never
-          included. Writes wait while the backup runs. The archive contains the Admin and member password hashes: store it as
-          securely as the database itself, and restore only backups you trust.
-        </p>
+        <h2 id="backup-export-title">{a.backup.downloadTitle}</h2>
+        <p className="field-help">{a.backup.downloadHelp}</p>
         <div className="dialog-actions">
           <button className="button button-primary" disabled={busy} type="button" onClick={() => void download()}>
-            <DownloadIcon aria-hidden="true" /> Download backup
+            <DownloadIcon /> {a.backup.download}
           </button>
         </div>
       </section>
       <section className="admin-panel settings-admin-panel" aria-labelledby="backup-restore-title">
-        <h2 id="backup-restore-title">Restore backup</h2>
-        <p className="field-help">
-          Upload a backup to preview it first: it is checked in a separate preview database and nothing changes until you confirm.
-          Older backups are upgraded; backups from a newer version, or made by version 1.x, are refused. Before restoring, the current
-          data is saved as a pre-restore backup on the server. The app is in maintenance while the restore runs; if it fails, the
-          pre-restore backup is put back. Afterwards everyone is signed out.
-        </p>
+        <h2 id="backup-restore-title">{a.backup.restoreTitle}</h2>
+        <p className="field-help">{a.backup.restoreHelp}</p>
         <form className="stack-form" onSubmit={(event) => void runPreview(event)}>
-          <label className="field"><span>Backup file</span>
+          <label className="field"><span>{a.backup.file}</span>
             <input
               type="file"
               accept="application/zip,.zip"
-              onChange={(event) => { setFile(event.target.files?.[0] ?? null); setPreview(null); setConfirmed(false); setError(''); }}
+              onChange={(event) => { setFile(event.target.files?.[0] ?? null); setPreview(null); setConfirmed(false); setError(''); setDetails(''); }}
             />
           </label>
           <div className="dialog-actions">
-            <button className="button button-secondary" disabled={busy || !file} type="submit"><EyeIcon aria-hidden="true" /> Preview backup</button>
+            <button className="button button-secondary" disabled={busy || !file} type="submit"><EyeIcon /> {a.backup.preview}</button>
           </div>
         </form>
       </section>
       {preview && (
         <section className="admin-panel settings-admin-panel" aria-labelledby="backup-preview-title">
-          <h2 id="backup-preview-title">Backup preview</h2>
+          <h2 id="backup-preview-title">{a.backup.previewTitle}</h2>
           <PreviewDetails preview={preview} />
           <label className="check-field">
             <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-            I understand that restoring permanently replaces all current data.
+            {a.backup.understand}
           </label>
           <div className="dialog-actions">
             <button className="button button-danger" disabled={busy || !confirmed} type="button" onClick={() => void restore()}>
-              <UploadIcon aria-hidden="true" /> Restore backup
+              <UploadIcon /> {a.backup.restore}
             </button>
           </div>
         </section>

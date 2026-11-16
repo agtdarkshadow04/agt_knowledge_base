@@ -1,28 +1,14 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { migrateLegacyPreferences, applyPreferences, readPreferences, preferencesChangedEvent } from '../lib/preferences';
+import { COMMON_TRANSLATIONS, formatTranslation } from '../translations';
 import { routeHref } from '../lib/routes';
 import { useAppSettings } from './AppSettingsContext';
 import { useAuth } from './AuthContext';
+import { useI18n } from './I18n';
 import { BookOpenIcon, LogInIcon, LogOutIcon, PlusIcon, SettingsIcon, ShieldCheckIcon, TagsIcon } from './Icons';
 import { MaintenanceNotice } from './MaintenanceNotice';
 import { Link, useNavigation } from './Navigation';
 import { loginHref } from './RequireAuth';
 import { SettingsModal } from './SettingsModal';
-
-/** Applies the stored page-wide preferences now and whenever they change (A11Y-6). */
-function usePagePreferences() {
-  useEffect(() => {
-    migrateLegacyPreferences();
-    const apply = () => applyPreferences(document.documentElement, readPreferences());
-    apply();
-    window.addEventListener(preferencesChangedEvent, apply);
-    window.addEventListener('storage', apply);
-    return () => {
-      window.removeEventListener(preferencesChangedEvent, apply);
-      window.removeEventListener('storage', apply);
-    };
-  }, []);
-}
 
 /**
  * The public page chrome (UI-7): the `site-header` with the brand lockup and a
@@ -35,7 +21,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const { route, navigate } = useNavigation();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const main = useRef<HTMLElement>(null);
-  usePagePreferences();
+  const { t } = useI18n();
 
   // Moving to another page announces it to screen readers by focusing the new content.
   const page = route.page === 'article' || route.page === 'history' || route.page === 'edit' ? `${route.page}:${route.id}` : route.page;
@@ -53,43 +39,43 @@ export function Layout({ children }: { children: ReactNode }) {
   const isModerator = user?.role === 'Moderator';
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <a className="skip-link" href="#main-content">{t.common.skipToContent}</a>
       <header className="site-header">
         <div className="header-inner">
-          <Link to="/" className="brand" aria-label={`Alliance of Galactic Travellers ${settings.site.title}: home`}>
+          <Link to="/" className="brand" aria-label={formatTranslation(t.layout.homeLabel, { alliance: COMMON_TRANSLATIONS.alliance, product: settings.site.title })}>
             <img className="brand-logo" src="/AgtOfficialLogo.webp" alt="" aria-hidden="true" width="44" height="44" />
             <span className="brand-copy">
-              <span className="brand-name">Alliance of Galactic Travellers</span>
+              <span className="brand-name">{COMMON_TRANSLATIONS.alliance}</span>
               <span className="brand-product">{settings.site.title}</span>
             </span>
           </Link>
 
-          <nav className="header-actions" aria-label="Main">
+          <nav className="header-actions" aria-label={t.layout.mainNavigation}>
             {user && (
               <span className={`identity-badge ${isModerator ? 'moderator' : ''}`}>
                 {isModerator && <ShieldCheckIcon />}
-                <span>{user.displayName} · {user.role}</span>
+                <span>{user.displayName} · {t.roles[user.role]}</span>
               </span>
             )}
-            <Link to="/" className="button button-icon" aria-label="Browse articles" title="Browse articles" aria-current={route.page === 'home' ? 'page' : undefined}>
+            <Link to="/" className="button button-icon" aria-label={t.layout.browse} title={t.layout.browse} aria-current={route.page === 'home' ? 'page' : undefined}>
               <BookOpenIcon />
             </Link>
             {user && (
-              <Link to={routeHref({ page: 'new' })} className="button button-icon" aria-label="New article" title="New article" aria-current={route.page === 'new' ? 'page' : undefined}>
+              <Link to={routeHref({ page: 'new' })} className="button button-icon" aria-label={t.layout.newArticle} title={t.layout.newArticle} aria-current={route.page === 'new' ? 'page' : undefined}>
                 <PlusIcon />
               </Link>
             )}
             {isModerator && (
-              <Link to={routeHref({ page: 'tags' })} className="button button-icon" aria-label="Manage tags" title="Manage tags" aria-current={route.page === 'tags' ? 'page' : undefined}>
+              <Link to={routeHref({ page: 'tags' })} className="button button-icon" aria-label={t.layout.manageTags} title={t.layout.manageTags} aria-current={route.page === 'tags' ? 'page' : undefined}>
                 <TagsIcon />
               </Link>
             )}
             {user ? (
-              <button className="button button-icon" type="button" onClick={() => void handleSignOut()} aria-label="Sign out" title="Sign out">
+              <button className="button button-icon" type="button" onClick={() => void handleSignOut()} aria-label={t.layout.signOut} title={t.layout.signOut}>
                 <LogOutIcon />
               </button>
             ) : (
-              <Link to={route.page === 'login' ? routeHref(route) : loginHref()} className="button button-icon" aria-label="Sign in" title="Sign in" aria-current={route.page === 'login' ? 'page' : undefined}>
+              <Link to={route.page === 'login' ? routeHref(route) : loginHref()} className="button button-icon" aria-label={t.layout.signIn} title={t.layout.signIn} aria-current={route.page === 'login' ? 'page' : undefined}>
                 <LogInIcon />
               </Link>
             )}
@@ -97,8 +83,8 @@ export function Layout({ children }: { children: ReactNode }) {
               className="button button-icon"
               type="button"
               onClick={() => setSettingsOpen(true)}
-              aria-label="Settings"
-              title="Settings"
+              aria-label={t.layout.settings}
+              title={t.layout.settings}
               aria-haspopup="dialog"
               aria-expanded={settingsOpen}
             >
@@ -115,14 +101,14 @@ export function Layout({ children }: { children: ReactNode }) {
       </main>
 
       <footer className="site-footer">
-        <nav aria-label="Alliance links">
-          <a href="https://www.nms-agt.com" target="_blank" rel="noreferrer">Home</a>
-          <a href="https://www.nms-agt.com/about-the-agt" target="_blank" rel="noreferrer">About</a>
-          <a href="https://www.nms-agt.com/contribute" target="_blank" rel="noreferrer">Contribute</a>
-          <a href="https://www.nms-agt.com/agt-galactic-archives" target="_blank" rel="noreferrer">Galactic Archives</a>
-          <a href={settings.site.supportUrl} target="_blank" rel="noreferrer">Support</a>
+        <nav aria-label={t.layout.allianceLinks}>
+          <a href="https://www.nms-agt.com" target="_blank" rel="noreferrer">{t.layout.footerHome}</a>
+          <a href="https://www.nms-agt.com/about-the-agt" target="_blank" rel="noreferrer">{t.layout.footerAbout}</a>
+          <a href="https://www.nms-agt.com/contribute" target="_blank" rel="noreferrer">{t.layout.footerContribute}</a>
+          <a href="https://www.nms-agt.com/agt-galactic-archives" target="_blank" rel="noreferrer">{t.layout.footerArchives}</a>
+          <a href={settings.site.supportUrl} target="_blank" rel="noreferrer">{t.layout.footerSupport}</a>
         </nav>
-        <p>© {new Date().getUTCFullYear()} Alliance of Galactic Travellers</p>
+        <p>{formatTranslation(t.layout.copyright, { year: new Date().getUTCFullYear(), alliance: COMMON_TRANSLATIONS.alliance })}</p>
       </footer>
       {settingsOpen && <SettingsModal user={user} onClose={() => setSettingsOpen(false)} />}
     </div>
