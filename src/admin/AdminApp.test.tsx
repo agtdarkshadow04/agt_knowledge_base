@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
   signIn: vi.fn(),
   signOut: vi.fn(),
   listUsers: vi.fn(),
+  getServerLogSummary: vi.fn(),
+  markServerLogSeen: vi.fn(),
+  listServerLog: vi.fn(),
+  listAuditLog: vi.fn(),
 }));
 
 vi.mock('./api', async (importOriginal) => ({ ...await importOriginal<typeof import('./api')>(), ...mocks }));
@@ -60,6 +64,7 @@ describe('AdminApp', () => {
     mocks.getSession.mockResolvedValue(null);
     mocks.listUsers.mockResolvedValue({ items: [], page: 1, pageSize: 25, total: 0, totalPages: 1 });
     mocks.signOut.mockResolvedValue(undefined);
+    mocks.getServerLogSummary.mockResolvedValue({ unseenWarnings: 0, unseenErrors: 0 });
   });
 
   it('shows first-run setup on a fresh installation and opens the dashboard afterwards', async () => {
@@ -105,7 +110,7 @@ describe('AdminApp', () => {
 
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
     const tabs = screen.getByRole('navigation', { name: 'Administration sections' });
-    expect([...tabs.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Users', 'Data', 'Settings', 'Backup & restore', 'Account', 'API']);
+    expect([...tabs.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Users', 'Data', 'Settings', 'Backup & restore', 'Server log', 'Audit log', 'Account', 'API']);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     // The member session is untouched.
     expect(localStorage.length).toBe(0);
@@ -185,5 +190,26 @@ describe('bundle separation', () => {
   it('serves the admin panel from its own HTML entry', () => {
     expect(html['../../admin.html']).toContain('/src/admin/main.tsx');
     expect(html['../../index.html']).not.toContain('admin');
+  });
+
+  it('badges the Server log tab with unseen warnings and errors, and marks them seen when it is opened (LOG-21)', async () => {
+    const user = userEvent.setup();
+    mocks.getSetupStatus.mockResolvedValue({ adminExists: true, setupPasswordConfigured: false });
+    mocks.listUsers.mockResolvedValue({ items: [], page: 1, pageSize: 25, total: 0, totalPages: 1 });
+    mocks.getSession.mockResolvedValue(session);
+    mocks.getServerLogSummary.mockReset().mockResolvedValueOnce({ unseenWarnings: 2, unseenErrors: 1 }).mockResolvedValue({ unseenWarnings: 0, unseenErrors: 0 });
+    mocks.markServerLogSeen.mockResolvedValue(undefined);
+    mocks.listServerLog.mockResolvedValue({ items: [], nextCursor: null });
+    render(<AdminApp />);
+
+    expect(await screen.findByText(/The server log has 3 new warnings or errors\./)).toBeInTheDocument();
+    const tab = screen.getByRole('button', { name: /^Server log/ });
+    expect(tab.querySelector('.admin-badge-error')).toHaveTextContent('3 unseen errors and warnings');
+    expect(mocks.markServerLogSeen).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Open the server log' }));
+    expect(await screen.findByRole('heading', { name: 'Server log' })).toBeInTheDocument();
+    expect(mocks.markServerLogSeen).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.queryByText('3')).not.toBeInTheDocument());
   });
 });

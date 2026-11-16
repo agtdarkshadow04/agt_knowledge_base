@@ -1,4 +1,5 @@
 import { Type, type TSchema } from '@sinclair/typebox';
+import type { AuditInfo } from './audit.js';
 import type { Actor } from './domain.js';
 import * as S from './schemas.js';
 
@@ -38,6 +39,8 @@ export interface ApiResponse {
   body?: unknown;
   /** Clear the caller's Admin session cookie (a restore replaced the Admin account). */
   endsAdminSession?: boolean;
+  /** The target and change summary for the audit entry (LOG-14). */
+  audit?: AuditInfo;
 }
 
 /**
@@ -81,6 +84,8 @@ export interface RouteDefinition {
   writesData: boolean;
   /** A `multipart/form-data` upload, read into a temporary file (BAK-1, SEC-9). */
   multipart?: boolean;
+  /** A GET route that is audited anyway: a sensitive read such as a download or an export (LOG-11). */
+  audit?: boolean;
 }
 
 export const defaultMaxBodyBytes = 1_000_000;
@@ -146,9 +151,18 @@ const routes: RouteDefinition[] = [
   { method: 'GET', path: '/api/admin/articles', writesData: false, auth: 'admin', operationId: 'listAdminArticles', tag: 'admin', summary: 'List every article, at every visibility level.', querystring: S.ArticleListQuery, response: { 200: S.ArticleList } },
   { method: 'GET', path: '/api/admin/settings', writesData: false, auth: 'admin', operationId: 'getSettings', tag: 'admin', summary: 'Return each dashboard setting with its value and source.', response: { 200: S.AdminSettings } },
   { method: 'PUT', path: '/api/admin/settings', writesData: true, auth: 'admin', operationId: 'updateSettings', tag: 'admin', summary: 'Change dashboard settings; keys config.yaml defines are refused.', body: S.SettingsWriteBody, response: { 200: S.AdminSettings } },
-  { method: 'GET', path: '/api/admin/backup', writesData: false, auth: 'admin', operationId: 'downloadBackup', tag: 'admin', summary: 'Download a backup ZIP: a pg_dump of the database and config.yaml.', response: { 200: S.BackupArchive } },
+  { method: 'GET', path: '/api/admin/backup', writesData: false, audit: true, auth: 'admin', operationId: 'downloadBackup', tag: 'admin', summary: 'Download a backup ZIP: a pg_dump of the database and config.yaml.', response: { 200: S.BackupArchive } },
   { method: 'POST', path: '/api/admin/restore', writesData: false, auth: 'admin', rateLimit: 'adminUploads', maxBodyBytes: 'backup', multipart: true, operationId: 'restoreBackup', tag: 'admin', summary: 'Preview or restore an uploaded backup ZIP.', description: 'A `multipart/form-data` body with the `backup` file, at most `backup.maxZipBytes`, and `action` (`preview` or `restore`). A restore signs every Admin and member session out.', body: S.RestoreUpload, response: { 200: Type.Union([S.RestoreReport, S.RestorePreview]) } },
   { method: 'POST', path: '/api/admin/backup/restore', writesData: false, auth: 'admin', rateLimit: 'adminUploads', maxBodyBytes: 'backup', rawBody: true, replacedBy: 'POST /api/admin/restore', ownHandler: true, operationId: 'restoreBackupDeprecated', tag: 'admin', summary: 'Deprecated: use POST /api/admin/restore, which takes a multipart upload.', description: 'The body is the ZIP archive itself, at most `backup.maxZipBytes`.', querystring: S.RestoreActionQuery, body: S.BackupUpload, response: { 200: Type.Union([S.RestoreReport, S.RestorePreview]) } },
+
+  // The server log and the audit log (LOG-18). No route edits or deletes audit entries.
+  { method: 'GET', path: '/api/admin/logs/server', writesData: false, auth: 'admin', operationId: 'listServerLog', tag: 'admin', summary: 'List server log entries, newest first.', querystring: S.ServerLogQuery, response: { 200: S.ServerLogList } },
+  { method: 'GET', path: '/api/admin/logs/server/export', writesData: false, audit: true, auth: 'admin', operationId: 'exportServerLog', tag: 'admin', summary: 'Download the server log entries that match the filters as JSON Lines or CSV.', querystring: S.ServerLogExportQuery, response: { 200: S.LogExport } },
+  { method: 'GET', path: '/api/admin/logs/server/summary', writesData: false, auth: 'admin', operationId: 'getServerLogSummary', tag: 'admin', summary: 'Count the warnings and errors since the server log was last seen.', response: { 200: S.ServerLogSummary } },
+  { method: 'POST', path: '/api/admin/logs/server/seen', writesData: false, auth: 'admin', operationId: 'markServerLogSeen', tag: 'admin', summary: 'Mark the server log as seen now.', response: { 204: S.NoContent } },
+  { method: 'DELETE', path: '/api/admin/logs/server', writesData: false, auth: 'admin', operationId: 'clearServerLog', tag: 'admin', summary: 'Delete every server log entry.', response: { 204: S.NoContent } },
+  { method: 'GET', path: '/api/admin/logs/audit', writesData: false, auth: 'admin', operationId: 'listAuditLog', tag: 'admin', summary: 'List audit log entries, newest first.', querystring: S.AuditLogQuery, response: { 200: S.AuditLogList } },
+  { method: 'GET', path: '/api/admin/logs/audit/export', writesData: false, audit: true, auth: 'admin', operationId: 'exportAuditLog', tag: 'admin', summary: 'Download the audit log entries that match the filters as JSON Lines or CSV.', querystring: S.AuditLogExportQuery, response: { 200: S.LogExport } },
 ];
 
 /** A route-table entry with its derived key, as registered on the Fastify app. */

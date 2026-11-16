@@ -19,8 +19,10 @@ import m0015 from './migrations/0015_settings_table.sql';
 import m0016 from './migrations/0016_drop_application_settings.sql';
 import m0017 from './migrations/0017_auth_sessions.sql';
 import m0018 from './migrations/0018_spec_storage.sql';
+import m0019 from './migrations/0019_log_settings.sql';
 
 import c0001 from './migrations/control/0001_operation.sql';
+import l0001 from './migrations/logs/0001_initial.sql';
 
 const { Pool, Client } = pg;
 
@@ -187,6 +189,7 @@ export const MIGRATIONS: readonly Migration[] = [
   [m0016, 'drop_application_settings'],
   [m0017, 'auth_sessions'],
   [m0018, 'spec_storage'],
+  [m0019, 'log_settings'],
 ].map(([sql, name], index) => ({ version: index + 1, name, sql }));
 
 /** The 1.x name of a migration (`001_initial`), still reported in the deprecated `migrations` field of a restore preview. */
@@ -201,6 +204,14 @@ export function migrationId(migration: Pick<Migration, 'version' | 'name'>) {
  */
 export const CONTROL_MIGRATIONS: readonly Migration[] = [
   [c0001, 'operation'],
+].map(([sql, name], index) => ({ version: index + 1, name, sql }));
+
+/**
+ * The migrations of the log store, the `logs` schema (LOG-1), recorded in
+ * `logs.schema_migrations`. Backups and restores never touch it (LOG-17).
+ */
+export const LOG_MIGRATIONS: readonly Migration[] = [
+  [l0001, 'initial'],
 ].map(([sql, name], index) => ({ version: index + 1, name, sql }));
 
 export class StartupCheckError extends Error {
@@ -257,6 +268,8 @@ export async function appliedVersions(client: Pick<Queryable, 'query'>, table = 
   return result.rows.map((row) => Number((row as { version: number }).version));
 }
 
+const migrationLabels: Record<string, string> = { 'control.schema_migrations': 'control ', 'logs.schema_migrations': 'log store ' };
+
 /** Applies the pending migrations of one list, each in its own transaction; a newer schema stops the server (SRV-8). */
 async function applyPending(
   client: Pick<Queryable, 'query'>,
@@ -284,7 +297,7 @@ async function applyPending(
       throw error;
     }
     applied.push(migration.version);
-    log.info(`Applied ${table === 'schema_migrations' ? '' : 'control '}migration ${String(migration.version).padStart(4, '0')}_${migration.name}.`);
+    log.info(`Applied ${migrationLabels[table] ?? ''}migration ${String(migration.version).padStart(4, '0')}_${migration.name}.`);
   }
   return applied;
 }
@@ -314,7 +327,7 @@ const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout
  * The BAK-12 startup steps, on the process's control connection, before it
  * listens: refuse a superuser role (DATA-11); take the migration lock; set up
  * and migrate the `control` schema; refuse to start after a failed restore
- * (BAK-11); apply the app's migrations while holding the write lock shared
+ * (BAK-11); set up and migrate the `logs` schema (LOG-1); apply the app's migrations while holding the write lock shared
  * with the operation state `idle`, so they never run during a backup or
  * restore; release the migration lock. A newer schema stops the server (SRV-8).
  */
@@ -333,6 +346,11 @@ export async function migrateAtStartup(client: Pick<Queryable, 'query'>, options
     )`);
     await applyPending(client, CONTROL_MIGRATIONS, 'control.schema_migrations', 'control schema', log);
     await refuseAfterFailedRestore(client, options.restoreFailedMarker);
+    await client.query('CREATE SCHEMA IF NOT EXISTS logs');
+    await client.query(`CREATE TABLE IF NOT EXISTS logs.schema_migrations (
+      ${versionTableColumns}
+    )`);
+    await applyPending(client, LOG_MIGRATIONS, 'logs.schema_migrations', 'log store', log);
     for (;;) {
       await client.query(`SELECT pg_advisory_lock_shared${lockKey('writes')}`);
       try {

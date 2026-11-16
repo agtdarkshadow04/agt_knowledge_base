@@ -6,7 +6,10 @@ import type { AdminSettingsView, DashboardSettings, SettingKey, SettingState, Se
 
 type Draft = { [Key in SettingKey]: DashboardSettings[Key] | null };
 
-const limitKeys = ['backup.maxZipBytes', 'backup.maxUncompressedBytes', 'backup.maxEntries'] as const;
+const limitKeys = [
+  'backup.maxZipBytes', 'backup.maxUncompressedBytes', 'backup.maxEntries',
+  'logs.serverRetentionDays', 'logs.serverMaxEntries', 'logs.auditRetentionDays', 'logs.auditMaxEntries',
+] as const;
 
 function stateMap(view: AdminSettingsView) {
   return Object.fromEntries(view.states.map((state) => [state.key, state])) as { [Key in SettingKey]: SettingState<Key> };
@@ -14,7 +17,7 @@ function stateMap(view: AdminSettingsView) {
 
 function draftFrom(view: AdminSettingsView): Draft {
   const draft = Object.fromEntries(view.states.map((state) => [state.key, state.value])) as Draft;
-  // Backup limits left at their defaults show as empty ("use the default").
+  // Limits left at their defaults show as empty ("use the default").
   for (const state of view.states) {
     if ((limitKeys as readonly string[]).includes(state.key) && state.source === 'default') draft[state.key] = null;
   }
@@ -132,6 +135,12 @@ export function SettingsPanel() {
         {limitField('backup.maxZipBytes', 'Largest backup upload (bytes)')}
         {limitField('backup.maxEntries', 'Most entries in a backup archive')}
         {limitField('backup.maxUncompressedBytes', 'Largest uncompressed backup (bytes)')}
+        <h3>Log retention</h3>
+        <p className="field-help">Logs are never part of backups. The audit log keeps entries for at least 30 days.</p>
+        {limitField('logs.serverRetentionDays', 'Server log: days to keep entries')}
+        {limitField('logs.serverMaxEntries', 'Server log: most entries')}
+        {limitField('logs.auditRetentionDays', 'Audit log: days to keep entries')}
+        {limitField('logs.auditMaxEntries', 'Audit log: most entries')}
         <div className="dialog-actions">
           <button className="button button-primary" disabled={busy} type="submit">Save settings</button>
           <button className="button button-secondary" disabled={busy} type="button" onClick={() => { setDraft(draftFrom(view)); setSaved(false); }}>Cancel</button>

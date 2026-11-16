@@ -21,6 +21,10 @@ const view = {
     state('backup.maxZipBytes', 104857600, 'default'),
     state('backup.maxUncompressedBytes', 268435456, 'default'),
     state('backup.maxEntries', 30, 'dashboard', 16),
+    state('logs.serverRetentionDays', 30, 'default'),
+    state('logs.serverMaxEntries', 100000, 'default'),
+    state('logs.auditRetentionDays', 365, 'default'),
+    state('logs.auditMaxEntries', 1000000, 'default'),
   ],
 } as AdminSettingsView;
 

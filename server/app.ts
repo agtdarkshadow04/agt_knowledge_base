@@ -12,6 +12,7 @@ import { join, resolve, sep } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { authenticationHook, createAdminRequestHandler, type AdminRequestHandler } from './adminRoutes.js';
+import { auditHook, writeSummary } from './audit.js';
 import { toActor, type AuthenticatedUser } from './auth.js';
 import type { AppConfig } from './config.js';
 import type { AppContext } from './context.js';
@@ -78,6 +79,8 @@ export const noStoreHeaders = {
 export interface BuildAppOptions {
   /** Fastify's logger option; off by default so tests stay quiet. */
   logger?: FastifyServerOptions['logger'];
+  /** The pino logger that writes to stdout and the server log (LOG-5); replaces `logger`. */
+  loggerInstance?: FastifyServerOptions['loggerInstance'];
   /** The built client (`dist/`) to serve (SRV-9); nothing is served when it is missing. */
   staticDir?: string;
   /** The rate limiter's clock, for tests. */
@@ -231,10 +234,12 @@ function registerStatic(app: FastifyInstance, staticDir: string) {
 export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   const { config } = context;
   const app = Fastify({
-    logger: options.logger ?? false,
+    ...(options.loggerInstance ? { loggerInstance: options.loggerInstance } : { logger: options.logger ?? false }),
     trustProxy: trustProxyOption(config.server.trustProxy),
     bodyLimit: defaultMaxBodyBytes,
-    // Per-request access logs stay off; the server logs what it does, not every request.
+    // LOG-10: request IDs link an audit entry to its server log entry, across restarts too.
+    genReqId: () => randomUUID(),
+    // Per-request access logs stay off (LOG-6); the audit log covers user activity.
     logController: new LogController({ disableRequestLogging: true }),
     // Keeps the last value of a repeated query parameter, as a plain object of strings.
     routerOptions: { querystringParser: (query: string) => Object.fromEntries(new URLSearchParams(query)) },
@@ -282,7 +287,9 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
     ];
   }
 
-  function startSession(request: FastifyRequest, statusCode: number, session: AdminSessionResult) {
+  /** A new Admin session; its audit entry names the Admin and only that a setup or password change happened (LOG-14). */
+  function startSession(request: FastifyRequest, statusCode: number, session: AdminSessionResult, details?: Record<string, unknown>) {
+    request.audit = { actorType: 'admin', actor: session.identity.username, ...(details ? { details } : {}) };
     return json(statusCode, adminSessionBody(session.identity.username), { 'set-cookie': adminCookies(request, session) });
   }
 
@@ -318,7 +325,13 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   registerOpenApi(app, context.version);
 
   app.setErrorHandler((error, request, reply) => {
-    const result = errorReply(error, (unexpected) => request.log.error({ err: unexpected }, 'Unhandled API error'));
+    // LOG-7, LOG-8: an unexpected error is a server log entry with its name, message, stack and route only (LOG-9).
+    const result = errorReply(error, (unexpected) => request.log.error(
+      { err: unexpected, source: 'http', route: request.routeOptions.url },
+      'Unhandled API error',
+    ));
+    // LOG-14: a failure's audit entry names the error code and the failed fields, never their values.
+    request.auditError = { error: result.body.error, ...(result.body.fields ? { fields: result.body.fields.map((field) => field.field) } : {}) };
     return sendError(reply, result.statusCode, result.body, result.headers);
   });
   app.setNotFoundHandler((_request, reply) => sendError(reply, 404, { error: 'not_found', message: 'Route not found.', code: 'NOT_FOUND' }));
@@ -327,6 +340,10 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   // under the activity lease, before authentication, so a restore never sees
   // a request touch the database. The BAK-11 recovery session is recognised here.
   app.decorateRequest('admission', null);
+  app.decorateRequest('audit', null);
+  app.decorateRequest('auditError', null);
+  // LOG-11: one hook audits every write, every audited read and every denial.
+  app.addHook('onResponse', auditHook(context.logs));
   app.addHook('onRequest', async (request, reply) => {
     const route = request.routeOptions.config.apiRoute;
     if (!route || route.routeKey === 'GET /api/health') return;
@@ -357,6 +374,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
         config: {
           apiRoute: route,
           writesData: route.writesData,
+          audit: route.audit === true,
           // A deprecated path shares its replacement's bucket (groupId), so it adds no attempts.
           ...(limit ? { rateLimit: { max: limit.max, timeWindow: limit.windowMinutes * 60_000, groupId: route.rateLimit } } : {}),
         },
@@ -448,6 +466,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
         warnOnPlainHttp(request);
         const input = parseCredentials(body);
         const session = await memberAuth.login(input.username, input.password);
+        request.audit = { actorType: 'member', actor: session.identity.username };
         return json(200, session.identity, {
           'set-cookie': sessionCookie(memberSessionCookie, session.token, session.expiresAt, secureCookie(request)),
         });
@@ -461,7 +480,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
         return json(200, await adminAuth.setupStatus());
       case 'POST /api/setup':
         warnOnPlainHttp(request);
-        return startSession(request, 201, await adminAuth.setup(parseAdminSetup(body)));
+        return startSession(request, 201, await adminAuth.setup(parseAdminSetup(body)), { setup: true });
       case 'POST /api/admin/login': {
         warnOnPlainHttp(request);
         const input = parseCredentials(body);
@@ -474,7 +493,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
         return json(200, adminSessionBody(request.admin!.username));
       case 'POST /api/admin/password': {
         const input = parseAdminAccountPassword(body);
-        return startSession(request, 200, await adminAuth.changePassword(input.currentPassword, input.password));
+        return startSession(request, 200, await adminAuth.changePassword(input.currentPassword, input.password), { passwordChanged: true });
       }
     }
 
@@ -490,6 +509,11 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
     const result = route.admin
       ? await handleAdminRequest({ ...apiRequest, actor: null, admin: request.admin })
       : await handleRequest({ ...apiRequest, actor: request.member ? toActor(request.member) : null });
+    // LOG-14: a write's summary (names and field names, never values), refined by the handler.
+    if (route.method !== 'GET' || route.audit) {
+      const summary = route.writesData ? writeSummary(body, result.body) : {};
+      request.audit = { ...summary, ...result.audit, details: { ...summary.details, ...result.audit?.details } };
+    }
     // A restore replaces the Admin account, so the caller signs in again (BAK-4 step 6.4).
     if (result.endsAdminSession) return { ...result, headers: { ...result.headers, 'set-cookie': adminCookies(request, null) } };
     return result;

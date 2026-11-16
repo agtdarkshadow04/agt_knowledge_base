@@ -94,3 +94,15 @@ articles:
 access:
   # Whether visitors who are not signed in can browse public articles.
   # allowPublicBrowsing: true
+
+logs:
+  # Retention of the server log and the audit log (LOG-15, LOG-16). Logs are
+  # never part of backups. The oldest entries beyond a cap are deleted first.
+  # Days the server log keeps an entry (1 to 3650).
+  # serverRetentionDays: 30
+  # Most entries the server log keeps (1000 to 10000000).
+  # serverMaxEntries: 100000
+  # Days the audit log keeps an entry (30 to 3650).
+  # auditRetentionDays: 365
+  # Most entries the audit log keeps (10000 to 10000000); failures go first.
+  # auditMaxEntries: 1000000

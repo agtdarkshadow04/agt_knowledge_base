@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, mock } from 'node:test';
 import { settingKeys } from '../config.js';
-import { CONTROL_MIGRATIONS, createDatabase, dataWriteScope, lockKey, migrationId, MIGRATIONS, runMigrations, withTransaction } from '../db.js';
+import { CONTROL_MIGRATIONS, createDatabase, dataWriteScope, LOG_MIGRATIONS, lockKey, migrationId, MIGRATIONS, runMigrations, withTransaction } from '../db.js';
 import { fakeDatabase, match, rejectsMatching } from './helpers.js';
 
 type QueryFn = (sql: string, values?: unknown[]) => Promise<unknown>;
@@ -17,6 +17,7 @@ function fakeServer(options: {
   columns?: string[];
   applied?: number[];
   controlApplied?: number[];
+  logsApplied?: number[];
   failOn?: string;
   /** States `control.operation` reports, one per read; the last one repeats. */
   states?: string[];
@@ -26,6 +27,7 @@ function fakeServer(options: {
     columns: options.columns ?? ['version', 'name', 'applied_at'],
     applied: [...(options.applied ?? [])],
     controlApplied: [...(options.controlApplied ?? [])],
+    logsApplied: [...(options.logsApplied ?? [])],
     states: [...(options.states ?? ['idle'])],
   };
   const versions = (list: number[]) => ({ rows: [...list].sort((a, b) => a - b).map((version) => ({ version })), rowCount: list.length });
@@ -35,6 +37,8 @@ function fakeServer(options: {
     if (sql.includes('information_schema.columns')) return { rows: state.columns.map((column_name) => ({ column_name })), rowCount: state.columns.length };
     if (sql.startsWith('SELECT version FROM schema_migrations')) return versions(state.applied);
     if (sql.startsWith('SELECT version FROM control.schema_migrations')) return versions(state.controlApplied);
+    if (sql.startsWith('SELECT version FROM logs.schema_migrations')) return versions(state.logsApplied);
+    if (sql.startsWith('INSERT INTO logs.schema_migrations (version, name)')) state.logsApplied.push(values![0] as number);
     if (sql.startsWith('INSERT INTO schema_migrations (version, name)')) state.applied.push(values![0] as number);
     if (sql.startsWith('INSERT INTO control.schema_migrations (version, name)')) state.controlApplied.push(values![0] as number);
     if (sql.startsWith('SELECT state, pre_restore_backup FROM control.operation')) {
@@ -118,8 +122,10 @@ describe('MIGRATIONS (DATA-3)', () => {
   it('copies changed 1.x settings and stores only EDITABLE_SETTINGS keys (0015)', () => {
     const sql = byName('settings_table').sql;
     assert.ok(sql.includes("('backup.maxZipBytes', to_jsonb(source.backup_max_bytes))"));
-    const allowed = sql.match(/CHECK \(key IN \(([^)]*)\)\)/)![1].match(/'[^']+'/g)!.map((key) => key.slice(1, -1));
-    assert.deepEqual(allowed, settingKeys);
+    const allowed = (migration: string) => byName(migration).sql.match(/CHECK \(key IN \(([^)]*)\)\)/)![1].match(/'[^']+'/g)!.map((key) => key.slice(1, -1));
+    assert.deepEqual(allowed('settings_table'), settingKeys.filter((key) => !key.startsWith('logs.')));
+    // 0019 adds the LOG-16 retention settings; the latest CHECK list is every EDITABLE_SETTINGS key.
+    assert.deepEqual(allowed('log_settings'), settingKeys);
     assert.ok(byName('drop_application_settings').sql.includes('DROP TABLE application_settings'));
   });
 
@@ -156,8 +162,12 @@ describe('runMigrations (DATA-4, DATA-11)', () => {
     assert.ok(sql.indexOf('SELECT state FROM control.operation WHERE id = 1') > writeLock);
     assert.ok(sql.findIndex((statement) => statement.startsWith('CREATE TABLE schema_migrations (')) > writeLock);
     assert.ok(sql.indexOf(`SELECT pg_advisory_unlock_shared${lockKey('writes')}`) > sql.indexOf(MIGRATIONS.at(-1)!.sql));
-    assert.equal(sql.filter((statement) => statement === 'BEGIN').length, MIGRATIONS.length + CONTROL_MIGRATIONS.length);
-    assert.equal(sql.filter((statement) => statement === 'COMMIT').length, MIGRATIONS.length + CONTROL_MIGRATIONS.length);
+    // LOG-1: the log store's schema and migrations come after the control schema, before the app's.
+    assert.ok(sql.indexOf('CREATE SCHEMA IF NOT EXISTS logs') > sql.indexOf(CONTROL_MIGRATIONS[0].sql));
+    assert.ok(sql.indexOf(LOG_MIGRATIONS[0].sql) < writeLock);
+    const all = MIGRATIONS.length + CONTROL_MIGRATIONS.length + LOG_MIGRATIONS.length;
+    assert.equal(sql.filter((statement) => statement === 'BEGIN').length, all);
+    assert.equal(sql.filter((statement) => statement === 'COMMIT').length, all);
     assert.equal(sql.at(-1), "SELECT pg_advisory_unlock(0, hashtext('agt_knowledge_base_migrations'))");
     assert.equal(server.client.release.mock.callCount(), 1);
     const insert = server.client.query.mock.calls.find(({ arguments: [statement] }) => statement.startsWith('INSERT INTO schema_migrations'))!;
@@ -188,14 +198,14 @@ describe('runMigrations (DATA-4, DATA-11)', () => {
   });
 
   it('refuses a database whose schema is newer than this version (SRV-8)', async () => {
-    server = fakeServer({ controlApplied: [1], applied: [...MIGRATIONS.map((migration) => migration.version), MIGRATIONS.length + 1] });
+    server = fakeServer({ controlApplied: [1], logsApplied: [1], applied: [...MIGRATIONS.map((migration) => migration.version), MIGRATIONS.length + 1] });
     await rejectsMatching(runMigrations(server.db), { name: 'StartupCheckError', message: match.stringMatching(/newer than this version/) });
     assert.ok(!server.statements().includes('BEGIN'));
     assert.equal(server.statements().at(-1), "SELECT pg_advisory_unlock(0, hashtext('agt_knowledge_base_migrations'))");
   });
 
   it('rolls back a failing migration, records nothing for it and releases the lock', async () => {
-    server = fakeServer({ controlApplied: [1], applied: MIGRATIONS.slice(0, -1).map((migration) => migration.version), failOn: byName('spec_storage').sql });
+    server = fakeServer({ controlApplied: [1], applied: MIGRATIONS.slice(0, -1).map((migration) => migration.version), failOn: byName('log_settings').sql });
     await assert.rejects(runMigrations(server.db), /migration failed/);
     assert.ok(server.statements().includes('ROLLBACK'));
     assert.ok(!server.state.applied.includes(MIGRATIONS.length));
@@ -204,6 +214,11 @@ describe('runMigrations (DATA-4, DATA-11)', () => {
 });
 
 describe('the BAK-12 startup steps', () => {
+  it('refuses a log store newer than this version (SRV-8)', async () => {
+    const server = fakeServer({ controlApplied: [1], logsApplied: [1, 2] });
+    await rejectsMatching(runMigrations(server.db), { name: 'StartupCheckError', message: match.stringMatching(/log store is newer/) });
+  });
+
   it('refuses a control schema newer than this version (SRV-8)', async () => {
     const server = fakeServer({ controlApplied: [1, 2] });
     await rejectsMatching(runMigrations(server.db), { name: 'StartupCheckError', message: match.stringMatching(/control schema is newer/) });

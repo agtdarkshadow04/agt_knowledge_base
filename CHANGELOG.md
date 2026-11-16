@@ -107,6 +107,24 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   for `POST /api/admin/restore` ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 
 ### Added
+- The server log and the audit log (§13), in a `logs` schema of their own with `LOG_MIGRATIONS`
+  (`server/migrations/logs/`), never part of a backup or touched by a restore (LOG-1, LOG-2, LOG-17). The server logs
+  with pino to stdout (`server.logLevel`) and, from `info` up, to the server log: startup, configuration warnings,
+  migrations, backups, retention runs, unexpected errors with their stack, and shutdown (LOG-5..LOG-9). New runtime
+  dependency: `pino`, which STACK-1 names as Fastify's logger and LOG-5 requires as a direct dependency ([#56](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/56)).
+- One `onResponse` hook audits every write, backup downloads and log exports, every denied admin request and every
+  rate-limited request, with the actor (Admin, member or anonymous), a pseudonymous HMAC of the client address, the
+  action (`operationId`), target, outcome and a summary that never holds values or bodies; settings changes record old
+  and new values. Identical failures from one address within 60 seconds are counted in one entry (LOG-10..LOG-14).
+  Members are recorded as `actorType: member` (the AUTH-1 deviation) ([#56](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/56)).
+- Retention at startup and every hour, with the dashboard settings `logs.serverRetentionDays` (30),
+  `logs.serverMaxEntries` (100000), `logs.auditRetentionDays` (365, at least 30) and `logs.auditMaxEntries` (1000000)
+  (LOG-15, LOG-16) ([#56](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/56)).
+- The admin panel's **Server log** and **Audit log** tabs, with filters, paging, entry details, JSON Lines and CSV
+  exports (formula-neutralized), **Clear log** for the server log only, and a badge and notice for unseen warnings
+  and errors, backed by `GET /api/admin/logs/server`, `…/server/export`, `…/server/summary`,
+  `POST …/server/seen`, `DELETE /api/admin/logs/server`, `GET /api/admin/logs/audit` and `…/audit/export`
+  (LOG-18..LOG-22). The README documents what the logs hold (LOG-23) ([#56](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/56)).
 - Backups (§12): `GET /api/admin/backup` downloads `agt-knowledge-base-backup-<timestamp>.zip` with a `pg_dump`
   custom-format `database.dump` of the `public` schema (without session rows), `config.yaml`, and the BAK-2
   `manifest.json` (format version 1, schema version, each file's size and SHA-256) (BAK-1, BAK-2, BAK-6, BAK-7) ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
@@ -158,6 +176,8 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   the restore preview database `agt_knowledge_base_preview` (DEP-3) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 
 ### Changed
+
+- Request IDs are random UUIDs, so they link audit and server log entries across restarts ([#56](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/56)).
 
 - The API now runs on Fastify 5 instead of a hand-written Node.js HTTP server, with the same routes, authentication,
   CSRF checks, rate limits, body limits and error bodies. Unexpected errors are logged as JSON lines on standard

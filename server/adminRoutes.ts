@@ -3,6 +3,8 @@ import { json, noContent, parseBody, pathId } from './api-response.js';
 import { ArticleService } from './article-service.js';
 import { requireAdminSession } from './auth.js';
 import { BackupService } from './backup.js';
+import { auditColumns, decodeLogCursor, encodeLogCursor, exportFileName, exportStream, serverColumns } from './logs.js';
+import { stat } from 'node:fs/promises';
 import { adminSessionExpiry } from './repository/sessions.js';
 import { HttpError, invalidField } from './http.js';
 import { PostgresArticleRepository } from './repository/articles.js';
@@ -16,6 +18,9 @@ import {
   parseAdminUserCreate,
   parseAdminUserUpdate,
   parseListQuery,
+  parseAuditLogQuery,
+  parseExportFormat,
+  parseServerLogQuery,
   parseUserListQuery,
 } from '../src/lib/validation.js';
 
@@ -83,11 +88,25 @@ function restoreAction(request: ApiRequest) {
   return action;
 }
 
+/** A log cursor, or `400 invalid_request` for a malformed one (API-8). */
+function logCursor(cursor: string) {
+  if (!cursor) return null;
+  const decoded = decodeLogCursor(cursor);
+  if (!decoded) throw new HttpError(400, 'invalid_request', 'The cursor is not valid for this list. Start again from the first page.');
+  return decoded;
+}
+
+/** One page from `limit + 1` rows: the extra row only says there is a next page. */
+function page<Entry extends { at: Date; id: string }>(rows: Entry[], limit: number) {
+  const items = rows.slice(0, limit);
+  return { items, nextCursor: rows.length > limit ? encodeLogCursor(items.at(-1)!) : null };
+}
+
 export type AdminRequestHandler = (request: ApiRequest) => Promise<ApiResponse>;
 
 /** Builds the admin route dispatcher. Errors are thrown for the app's error handler (SRV-5). */
 export function createAdminRequestHandler(
-  context: Pick<AppContext, 'config' | 'configFile' | 'db' | 'version' | 'operations' | 'toolPath'>,
+  context: Pick<AppContext, 'config' | 'configFile' | 'db' | 'version' | 'operations' | 'toolPath' | 'logs'>,
   options: { backupLog?: { info(message: string): void; warn(message: string): void; error(message: string): void } } = {},
 ): AdminRequestHandler {
   const articleService = new ArticleService(new PostgresArticleRepository(context.db));
@@ -116,8 +135,11 @@ export function createAdminRequestHandler(
         return json(200, await articleService.listAll(parseListQuery(request.query)));
       case 'GET /api/admin/settings':
         return json(200, await settingsService.getAdminView());
-      case 'PUT /api/admin/settings':
-        return json(200, await settingsService.update(parseBody(request) as SettingsWrite));
+      case 'PUT /api/admin/settings': {
+        // LOG-14: each changed key with its old and new value.
+        const { view, changes } = await settingsService.updateWithChanges(parseBody(request) as SettingsWrite);
+        return { ...json(200, view), audit: { details: { changes } } };
+      }
       case 'GET /api/admin/backup': {
         const backup = await backupService.backup();
         return {
@@ -128,6 +150,7 @@ export function createAdminRequestHandler(
             'content-length': String(backup.size),
           },
           body: backup.stream,
+          audit: { details: { filename: backup.filename, size: backup.size } },
         };
       }
       case 'POST /api/admin/restore':
@@ -135,7 +158,11 @@ export function createAdminRequestHandler(
         const action = restoreAction(request);
         const upload = request.upload;
         if (!upload) throw new HttpError(400, 'file_required', 'Upload a backup archive as the backup file.');
-        if (action === 'preview') return json(200, await backupService.preview(upload.file));
+        const size = (await stat(upload.file)).size;
+        if (action === 'preview') {
+          const preview = await backupService.preview(upload.file);
+          return { ...json(200, preview), audit: { details: { action, size, schemaVersion: preview.schemaVersion.backup, counts: preview.counts } } };
+        }
         // BAK-11: the restoring Admin's session becomes the recovery session.
         const token = request.sessionToken ?? '';
         const tokenHash = hashSessionToken(token);
@@ -143,7 +170,49 @@ export function createAdminRequestHandler(
         const expiresAt = recovery ? new Date(0) : await adminSessionExpiry(await context.db.pool(), tokenHash);
         if (!expiresAt) throw new HttpError(401, 'unauthorized', 'Admin sign-in is required.', { legacyCode: 'UNAUTHENTICATED' });
         const report = await backupService.restore(upload.file, { tokenHash, username: request.admin!.username, expiresAt }, recovery);
-        return { ...json(200, report), endsAdminSession: true };
+        return {
+          ...json(200, report),
+          endsAdminSession: true,
+          audit: { details: { action, size, schemaVersion: report.schemaVersion.backup, counts: report.counts, preRestoreBackup: report.preRestoreBackup } },
+        };
+      }
+      case 'GET /api/admin/logs/server': {
+        const query = parseServerLogQuery(request.query);
+        const items = await context.logs.listServer(query, logCursor(query.cursor), query.limit + 1);
+        return json(200, page(items, query.limit));
+      }
+      case 'GET /api/admin/logs/audit': {
+        const query = parseAuditLogQuery(request.query);
+        const items = await context.logs.listAudit(query, logCursor(query.cursor), query.limit + 1);
+        return json(200, page(items, query.limit));
+      }
+      case 'GET /api/admin/logs/server/export':
+      case 'GET /api/admin/logs/audit/export': {
+        const log = request.routeKey.includes('/server/') ? 'server' : 'audit';
+        const format = parseExportFormat(request.query);
+        const filters = log === 'server' ? parseServerLogQuery(request.query) : parseAuditLogQuery(request.query);
+        const { limit: _limit, cursor: _cursor, ...appliedFilters } = filters;
+        const stream = log === 'server'
+          ? exportStream((after, limit) => context.logs.listServer(filters, after, limit), format, serverColumns)
+          : exportStream((after, limit) => context.logs.listAudit(filters, after, limit), format, auditColumns);
+        return {
+          statusCode: 200,
+          headers: {
+            'content-type': format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson; charset=utf-8',
+            'content-disposition': `attachment; filename="${exportFileName(log, format, new Date())}"`,
+          },
+          body: stream,
+          audit: { details: { format, filters: appliedFilters } },
+        };
+      }
+      case 'GET /api/admin/logs/server/summary':
+        return json(200, await context.logs.summary());
+      case 'POST /api/admin/logs/server/seen':
+        await context.logs.markSeen();
+        return noContent();
+      case 'DELETE /api/admin/logs/server': {
+        const deleted = await context.logs.clearServer();
+        return { ...noContent(), audit: { details: { deleted } } };
       }
       default:
         throw new HttpError(404, 'not_found', 'Route not found.');

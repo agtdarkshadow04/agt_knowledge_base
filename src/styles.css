@@ -509,3 +509,18 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* Logs (LOG-19, LOG-21): severity in colour and text, never colour alone. */
+.admin-badge { display: inline-flex; min-width: 1.4rem; justify-content: center; margin-left: 0.35rem; padding: 0.05rem 0.4rem; border-radius: 999px; color: #090909; background: var(--orange); font-size: 0.72rem; font-weight: 700; }
+.admin-badge-error { color: var(--white); background: var(--red); }
+.admin-log-link { margin: 0.75rem 0; }
+.link-button { padding: 0; border: 0; color: var(--gold); background: none; text-decoration: underline; cursor: pointer; font: inherit; }
+.log-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.75rem; align-items: end; margin: 1rem 0; }
+.log-actions { align-items: end; flex-wrap: wrap; }
+.inline-field { min-width: 10rem; }
+.log-severity { font-weight: 700; text-transform: capitalize; }
+.log-severity-error { color: var(--red); }
+.log-severity-warn { color: var(--orange); }
+.log-table td { vertical-align: top; }
+.log-details { max-height: 24rem; margin: 0; overflow: auto; padding: 0.75rem; border-radius: 0.5rem; background: #0c0c0c; color: #ded8d1; font-size: 0.78rem; white-space: pre-wrap; word-break: break-word; }
+.button-small { padding: 0.35rem 0.6rem; font-size: 0.78rem; }

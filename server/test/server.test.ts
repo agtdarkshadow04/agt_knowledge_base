@@ -12,7 +12,7 @@ import type { AdminIdentity, ApiRequest, ApiResponse } from '../routes.js';
 import { apiRoutes, routeKeys } from '../routes.js';
 import { HttpError } from '../http.js';
 import type { AdminSessionResult, MemberUser, SessionResult } from '../session.js';
-import { assertCalledWith, assertMatches, callArgs, fakeDatabase, match, testContext, testOperations } from './helpers.js';
+import { assertCalledWith, assertMatches, callArgs, fakeDatabase, match, testContext, testLogs, testOperations } from './helpers.js';
 
 /** The HTTP pipeline: session separation, CSRF, cookies, body limits and rate limits, over a real socket. */
 
@@ -44,13 +44,15 @@ let logLines: string[] = [];
 /** Where uploads are streamed in these tests (`storage.dataDir`). */
 const dataDir = mkdtempSync(join(tmpdir(), 'agt-server-test-'));
 let operations = testOperations();
+let logs = testLogs();
 
 async function start(config = '', setupPassword: string | null = null) {
   operations = testOperations();
+  logs = testLogs();
   await app?.close();
   logLines = [];
   const stream = new Writable({ write(chunk, _encoding, done) { logLines.push(String(chunk)); done(); } });
-  app = buildApp(testContext({ config: `${config}\nstorage:\n  dataDir: ${dataDir}\n`, setupPassword, operations }), {
+  app = buildApp(testContext({ config: `${config}\nstorage:\n  dataDir: ${dataDir}\n`, setupPassword, operations, logs }), {
     logger: { level: 'warn', stream },
     dataWrite: asDataWrite,
     rateLimitClock: () => now,
@@ -682,9 +684,75 @@ describe('operation lock (BAK-8, BAK-12)', () => {
     assert.equal(dataWrite.mock.callCount(), 1);
     for (const route of apiRoutes) {
       // Sign-out only deletes session rows; the restore is the operation itself (BAK-8).
-      const changesData = route.method !== 'GET' && !route.path.endsWith('/logout') && !/^\/api\/admin\/(backup\/)?restore$/.test(route.path);
+      // The log routes write only the log store, never the main database (LOG-1).
+      const changesData = route.method !== 'GET' && !route.path.endsWith('/logout') && !/^\/api\/admin\/(backup\/)?restore$/.test(route.path)
+        && !route.path.startsWith('/api/admin/logs/');
       assert.equal(route.writesData, changesData, route.routeKey);
     }
+  });
+});
+
+describe('audit log (LOG-10, LOG-11, LOG-14)', () => {
+  it('audits a member write with its actor, target, client and outcome, and the handler\'s summary', async () => {
+    mocks.handleRequest.mock.mockImplementationOnce(async () => ({
+      statusCode: 201, headers: {}, body: '{}', audit: { targetId: '00000000-0000-4000-8000-000000000009' },
+    }));
+    await send('POST', '/api/articles', { headers: { ...moderatorToken, 'x-agt-client': 'web' }, body: JSON.stringify(article) });
+    await eventually(() => logs.written.length === 1);
+    assertMatches(logs.written[0], {
+      actorType: 'member', actor: 'mod', client: 'web', action: 'createArticle', method: 'POST', route: '/api/articles',
+      targetType: 'article', targetId: '00000000-0000-4000-8000-000000000009', outcome: 'success', statusCode: 201,
+      ipHash: 'hash:127.0.0.1', details: { title: 'Portal Guide', fields: ['content', 'tagIds', 'title'] },
+    });
+    assert.match(logs.written[0].requestId!, /^[0-9a-f]{8}-[0-9a-f]{4}-4/);
+    assert.doesNotMatch(JSON.stringify(logs.written[0]), /Enough Markdown content/);
+  });
+
+  it('audits failures with the error code and failed field names, never the values', async () => {
+    await send('PUT', '/api/articles/00000000-0000-4000-8000-000000000001', { headers: moderatorToken, body: JSON.stringify({ title: 1 }) });
+    await eventually(() => logs.written.length === 1);
+    assertMatches(logs.written[0], {
+      action: 'updateArticle', outcome: 'failure', statusCode: 400, targetType: 'article', targetId: '00000000-0000-4000-8000-000000000001',
+      details: { error: 'validation_failed' },
+    });
+    assert.ok(Array.isArray(logs.written[0].details.fields));
+  });
+
+  it('audits denied admin requests, including reads, but not ordinary reads, health or unknown routes', async () => {
+    await send('GET', '/api/admin/users');
+    await send('GET', '/api/member/session');
+    await send('GET', '/api/health');
+    await send('GET', '/api/nothing-here');
+    await send('GET', '/api/admin/stats', { headers: adminCookie });
+    await eventually(() => logs.written.length >= 1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(logs.written.length, 1);
+    assertMatches(logs.written[0], { actorType: 'anonymous', actor: null, action: 'listUsers', outcome: 'denied', statusCode: 401, details: { error: 'unauthorized' } });
+  });
+
+  it('audits sensitive reads marked audit: true, and rate-limited requests', async () => {
+    await send('GET', '/api/admin/backup', { headers: adminCookie });
+    await eventually(() => logs.written.length === 1);
+    assertMatches(logs.written[0], { actorType: 'admin', actor: 'atlas', action: 'downloadBackup', outcome: 'success' });
+    await app.close();
+    await start('rateLimits:\n  login:\n    max: 1\n');
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await send('POST', '/api/member/login', { headers: csrf, body: JSON.stringify({ username: 'apollo', password: 'wrong-password' }) });
+    }
+    await eventually(() => logs.written.length === 2);
+    assert.deepEqual(logs.written.map((entry) => entry.outcome), ['denied', 'rate_limited']);
+  });
+
+  it('names the Admin on a successful sign-in, and only that a password change happened', async () => {
+    const expiresAt = new Date(Date.now() + 3_600_000);
+    mocks.login.mock.mockImplementationOnce(async () => ({ token: 't', expiresAt, identity: { username: 'atlas' } }));
+    await send('POST', '/api/admin/login', { headers: csrf, body: JSON.stringify({ username: 'atlas', password: 'Permanent123!xyz' }) });
+    mocks.changePassword.mock.mockImplementationOnce(async () => ({ token: 't2', expiresAt, identity: { username: 'atlas' } }));
+    await send('POST', '/api/admin/password', { headers: { ...adminCookie, ...csrf }, body: JSON.stringify({ currentPassword: 'Permanent123!xyz', password: 'Another-Pass-123!' }) });
+    await eventually(() => logs.written.length === 2);
+    assertMatches(logs.written[0], { actorType: 'admin', actor: 'atlas', action: 'createAdminSession', outcome: 'success', details: {} });
+    assertMatches(logs.written[1], { action: 'changeAdminPassword', details: { passwordChanged: true } });
+    assert.doesNotMatch(JSON.stringify(logs.written), /Permanent123|Another-Pass/);
   });
 });
 

@@ -5,6 +5,7 @@ import { parseConfig, type AppConfig } from '../config.js';
 import type { AppContext } from '../context.js';
 import type { Database } from '../db.js';
 import { errorReply, MaintenanceError } from '../http.js';
+import type { AuditEntry, LogSink, ServerEntry } from '../logs.js';
 import type { Operations, OperationState } from '../operation.js';
 import type { ApiRequest, ApiResponse } from '../routes.js';
 
@@ -174,6 +175,24 @@ export const untouchedDatabase: Database = {
   },
 };
 
+/** A log store for tests: it records audit entries and serves the given server log entries. */
+export function testLogs(server: ServerEntry[] = [], audit: AuditEntry[] = []) {
+  const written: Array<Omit<AuditEntry, 'id' | 'at' | 'lastAt' | 'count'>> = [];
+  const sink: LogSink & { written: typeof written; seen: number; cleared: number } = {
+    written,
+    seen: 0,
+    cleared: 0,
+    async audit(entry) { written.push(entry); },
+    ipHash: (address) => (address ? `hash:${address}` : null),
+    async listServer(_filters, _after, limit) { return server.slice(0, limit); },
+    async listAudit(_filters, _after, limit) { return audit.slice(0, limit); },
+    async summary() { return { unseenWarnings: 0, unseenErrors: 0 }; },
+    async markSeen() { sink.seen += 1; },
+    async clearServer() { sink.cleared += 1; return server.length; },
+  };
+  return sink;
+}
+
 /**
  * An operation lock for tests: admits every request while `state` allows it,
  * and runs operations at once without any database lock.
@@ -212,6 +231,7 @@ export function testContext(overrides: Partial<Omit<AppContext, 'config'>> & { c
     setupPassword: null,
     version: '1.0.0',
     operations: testOperations(),
+    logs: testLogs(),
     toolPath: '/usr/bin',
     ...rest,
   };

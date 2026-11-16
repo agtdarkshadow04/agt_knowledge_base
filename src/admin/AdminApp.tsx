@@ -1,12 +1,13 @@
-import { Archive, Braces, Database, KeyRound, LockKeyhole, LogIn, LogOut, Settings, ShieldCheck, Users } from 'lucide-react';
+import { Archive, Braces, ClipboardList, Database, KeyRound, LockKeyhole, LogIn, LogOut, ScrollText, Settings, ShieldCheck, Users } from 'lucide-react';
 import { type FormEvent, lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { LoadingState } from '../components/States';
 import { AccountPanel } from './AccountPanel';
-import { adminUnauthorizedEvent, completeSetup, getSession, getSetupStatus, signIn, signOut } from './api';
+import { adminUnauthorizedEvent, completeSetup, getServerLogSummary, getSession, getSetupStatus, markServerLogSeen, signIn, signOut } from './api';
 import { BackupPanel } from './BackupPanel';
 import { DataPanel } from './DataPanel';
+import { LogPanel } from './LogPanel';
 import { SettingsPanel } from './SettingsPanel';
-import type { AdminSession, SetupStatus } from './types';
+import type { AdminSession, ServerLogSummary, SetupStatus } from './types';
 import { UsersPanel } from './UsersPanel';
 
 type Phase =
@@ -16,7 +17,7 @@ type Phase =
   | { name: 'login'; notice?: string }
   | { name: 'dashboard'; session: AdminSession };
 
-type Tab = 'users' | 'data' | 'settings' | 'backup' | 'account' | 'api';
+type Tab = 'users' | 'data' | 'settings' | 'backup' | 'serverLog' | 'auditLog' | 'account' | 'api';
 
 // The API reference is loaded only when the API tab is opened.
 const ApiPanel = lazy(async () => ({ default: (await import('./ApiPanel')).ApiPanel }));
@@ -26,6 +27,8 @@ const tabs: { id: Tab; label: string; icon: typeof Users }[] = [
   { id: 'data', label: 'Data', icon: Database },
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'backup', label: 'Backup & restore', icon: Archive },
+  { id: 'serverLog', label: 'Server log', icon: ScrollText },
+  { id: 'auditLog', label: 'Audit log', icon: ClipboardList },
   { id: 'account', label: 'Account', icon: KeyRound },
   { id: 'api', label: 'API', icon: Braces },
 ];
@@ -120,6 +123,24 @@ function Dashboard({ session, onSessionChange, onSignedOut }: {
   onSignedOut(notice?: string): void;
 }) {
   const [tab, setTab] = useState<Tab>('users');
+  const [summary, setSummary] = useState<ServerLogSummary | null>(null);
+
+  // LOG-21: the summary when the dashboard loads and whenever the tab changes, never in the background.
+  // Opening the Server log tab marks it seen.
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      try {
+        if (tab === 'serverLog') await markServerLogSeen();
+        const next = await getServerLogSummary();
+        if (current) setSummary(next);
+      } catch {
+        if (current) setSummary(null);
+      }
+    })();
+    return () => { current = false; };
+  }, [tab]);
+  const unseen = summary ? summary.unseenWarnings + summary.unseenErrors : 0;
 
   async function leave() {
     try { await signOut(); } finally { onSignedOut('You have signed out.'); }
@@ -140,10 +161,21 @@ function Dashboard({ session, onSessionChange, onSignedOut }: {
           <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code> is still set on the server. It is no longer needed: remove it from <code>.env</code> and restart the stack.
         </div>
       )}
+      {unseen > 0 && tab !== 'serverLog' && (
+        <div className="inline-notice admin-log-link" role="status">
+          The server log has {unseen} new {unseen === 1 ? 'warning or error' : 'warnings or errors'}.{' '}
+          <button className="link-button" type="button" onClick={() => setTab('serverLog')}>Open the server log</button>
+        </div>
+      )}
       <nav className="admin-tabs" aria-label="Administration sections">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button key={id} type="button" className={tab === id ? 'active' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
             <Icon aria-hidden="true" />{label}
+            {id === 'serverLog' && unseen > 0 && tab !== 'serverLog' && (
+              <span className={`admin-badge${summary!.unseenErrors > 0 ? ' admin-badge-error' : ''}`}>
+                {unseen}<span className="sr-only"> unseen {summary!.unseenErrors > 0 ? 'errors and warnings' : 'warnings'}</span>
+              </span>
+            )}
           </button>
         ))}
       </nav>
@@ -151,6 +183,8 @@ function Dashboard({ session, onSessionChange, onSignedOut }: {
       {tab === 'data' && <DataPanel />}
       {tab === 'settings' && <SettingsPanel />}
       {tab === 'backup' && <BackupPanel onRestored={() => onSignedOut('The backup was restored. Sign in with the Admin account from the backup.')} />}
+      {tab === 'serverLog' && <LogPanel key="server" kind="server" />}
+      {tab === 'auditLog' && <LogPanel key="audit" kind="audit" />}
       {tab === 'account' && <AccountPanel session={session} onSessionRenewed={onSessionChange} />}
       {tab === 'api' && <Suspense fallback={<LoadingState message="Loading the API reference…" />}><ApiPanel /></Suspense>}
     </div>
