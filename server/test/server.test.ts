@@ -757,12 +757,15 @@ describe('audit log (LOG-10, LOG-11, LOG-14)', () => {
 });
 
 describe('static files (SRV-9)', () => {
-  it('serves the two entries, member pages and hashed assets, and nothing else', async () => {
+  it('serves the two entries, the public files and hashed assets, redirects the 1.x page paths, and nothing else', async () => {
     const dist = mkdtempSync(join(tmpdir(), 'agt-dist-'));
     mkdirSync(join(dist, 'assets'));
     writeFileSync(join(dist, 'index.html'), '<!doctype html><title>member</title>');
     writeFileSync(join(dist, 'admin.html'), '<!doctype html><title>admin</title>');
     writeFileSync(join(dist, 'assets', 'main-abc123.js'), 'console.log(1)');
+    writeFileSync(join(dist, 'AgtOfficialLogo.webp'), 'logo');
+    mkdirSync(join(dist, 'fonts'));
+    writeFileSync(join(dist, 'fonts', 'NMSFuturaProBook-OFL.txt'), 'licence');
     const site = buildApp(testContext(), { staticDir: dist });
     try {
       const home = await site.inject({ method: 'GET', url: '/' });
@@ -779,9 +782,28 @@ describe('static files (SRV-9)', () => {
       assert.equal(slash.statusCode, 301);
       assert.equal(slash.headers.location, '/admin');
 
-      for (const path of ['/login', '/tags', '/articles/00000000-0000-4000-8000-000000000001', '/articles/new']) {
-        assert.match((await site.inject({ method: 'GET', url: path })).body, /member/, path);
+      // FE-4: the 1.x page paths redirect to their deep links on /.
+      for (const [path, target] of [
+        ['/login', '/?view=login'],
+        ['/tags', '/?view=tags'],
+        ['/articles/new', '/?view=new'],
+        ['/articles/00000000-0000-4000-8000-000000000001', '/?article=00000000-0000-4000-8000-000000000001'],
+        ['/articles/00000000-0000-4000-8000-000000000001/history', '/?article=00000000-0000-4000-8000-000000000001&view=history'],
+        ['/articles/00000000-0000-4000-8000-000000000001/edit?x=1', '/?article=00000000-0000-4000-8000-000000000001&view=edit'],
+      ]) {
+        const reply = await site.inject({ method: 'GET', url: path });
+        assert.equal(reply.statusCode, 301, path);
+        assert.equal(reply.headers.location, target, path);
       }
+      const unknownArticle = await site.inject({ method: 'GET', url: '/articles/not-an-id' });
+      assert.equal(unknownArticle.statusCode, 404);
+      assert.match(String(unknownArticle.headers['content-type']), /^application\/json/);
+
+      // UI-15: the files from public/ at their own paths, with the SEC-3 headers.
+      const logo = await site.inject({ method: 'GET', url: '/AgtOfficialLogo.webp' });
+      assert.equal(logo.statusCode, 200);
+      assert.equal(logo.headers['cache-control'], 'no-store, no-cache, must-revalidate, max-age=0');
+      assert.equal((await site.inject({ method: 'GET', url: '/fonts/NMSFuturaProBook-OFL.txt' })).statusCode, 200);
 
       const asset = await site.inject({ method: 'GET', url: '/assets/main-abc123.js' });
       assert.equal(asset.statusCode, 200);

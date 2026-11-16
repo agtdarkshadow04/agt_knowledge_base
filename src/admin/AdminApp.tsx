@@ -1,14 +1,18 @@
-import { Archive, Braces, ClipboardList, Database, KeyRound, LockKeyhole, LogIn, LogOut, ScrollText, Settings, ShieldCheck, Users } from 'lucide-react';
-import { type FormEvent, lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { formErrors, TextField } from '../components/Field';
+import { MaintenanceNotice } from '../components/MaintenanceNotice';
+import { parseAdminSetup, parseCredentials, validate } from '../lib/validation';
 import { LoadingState } from '../components/States';
 import { AccountPanel } from './AccountPanel';
 import { adminUnauthorizedEvent, completeSetup, getServerLogSummary, getSession, getSetupStatus, markServerLogSeen, signIn, signOut } from './api';
 import { BackupPanel } from './BackupPanel';
 import { DataPanel } from './DataPanel';
-import { LogPanel } from './LogPanel';
+import { AuditLogPanel } from './AuditLogPanel';
+import { ServerLogPanel } from './ServerLogPanel';
 import { SettingsPanel } from './SettingsPanel';
 import type { AdminSession, ServerLogSummary, SetupStatus } from './types';
 import { UsersPanel } from './UsersPanel';
+import { ArchiveIcon, BracesIcon, ClipboardListIcon, DatabaseIcon, KeyRoundIcon, LockKeyholeIcon, LogInIcon, LogOutIcon, ScrollTextIcon, SettingsIcon, ShieldCheckIcon, UsersIcon } from '../components/Icons';
 
 type Phase =
   | { name: 'loading' }
@@ -22,62 +26,72 @@ type Tab = 'users' | 'data' | 'settings' | 'backup' | 'serverLog' | 'auditLog' |
 // The API reference is loaded only when the API tab is opened.
 const ApiPanel = lazy(async () => ({ default: (await import('./ApiPanel')).ApiPanel }));
 
-const tabs: { id: Tab; label: string; icon: typeof Users }[] = [
-  { id: 'users', label: 'Users', icon: Users },
-  { id: 'data', label: 'Data', icon: Database },
-  { id: 'settings', label: 'Settings', icon: Settings },
-  { id: 'backup', label: 'Backup & restore', icon: Archive },
-  { id: 'serverLog', label: 'Server log', icon: ScrollText },
-  { id: 'auditLog', label: 'Audit log', icon: ClipboardList },
-  { id: 'account', label: 'Account', icon: KeyRound },
-  { id: 'api', label: 'API', icon: Braces },
+/** UI-8: the resource tabs, then Settings, Server log, Audit log, Backup & restore and Account; the API reference last. */
+const tabs: { id: Tab; label: string; icon: typeof UsersIcon }[] = [
+  { id: 'users', label: 'Users', icon: UsersIcon },
+  { id: 'data', label: 'Data', icon: DatabaseIcon },
+  { id: 'settings', label: 'Settings', icon: SettingsIcon },
+  { id: 'serverLog', label: 'Server log', icon: ScrollTextIcon },
+  { id: 'auditLog', label: 'Audit log', icon: ClipboardListIcon },
+  { id: 'backup', label: 'Backup & restore', icon: ArchiveIcon },
+  { id: 'account', label: 'Account', icon: KeyRoundIcon },
+  { id: 'api', label: 'API', icon: BracesIcon },
 ];
+
+/** A tab's button and panel IDs (WAI-ARIA tabs). */
+const tabId = (tab: Tab) => `admin-tab-${tab}`;
+const panelId = (tab: Tab) => `admin-panel-${tab}`;
 
 function failure(cause: unknown, fallback: string) {
   return cause instanceof Error ? cause.message : fallback;
 }
 
+type Errors = { fields: Record<string, string>; form: string };
+const noErrors: Errors = { fields: {}, form: '' };
+
 function SetupScreen({ status, onComplete }: { status: SetupStatus; onComplete(session: AdminSession): void }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState<Errors>(noErrors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const input = {
+      setupPassword: String(data.get('setupPassword')),
+      username: String(data.get('username')),
+      password: String(data.get('password')),
+      passwordConfirmation: String(data.get('passwordConfirmation')),
+    };
+    const checked = validate(parseAdminSetup, input);
+    setErrors(formErrors(checked, ''));
+    if (!checked.ok) return;
     setBusy(true);
-    setError('');
     try {
-      onComplete(await completeSetup({
-        setupPassword: String(data.get('setupPassword')),
-        username: String(data.get('username')),
-        password: String(data.get('password')),
-        passwordConfirmation: String(data.get('passwordConfirmation')),
-      }));
+      onComplete(await completeSetup(input));
     } catch (cause) {
-      setError(failure(cause, 'Setup could not be completed.'));
+      setErrors(formErrors(cause, 'Setup could not be completed.'));
     } finally { setBusy(false); }
   }
 
   return (
     <section className="auth-card setup-card" aria-labelledby="admin-setup-title">
-      <ShieldCheck aria-hidden="true" className="auth-icon" />
+      <ShieldCheckIcon aria-hidden="true" className="auth-icon" />
       <p className="eyebrow">First-run setup</p>
       <h1 id="admin-setup-title">Create the Admin account</h1>
       {!status.setupPasswordConfigured ? (
-        <div className="inline-alert" role="alert">
+        <div className="admin-notice danger" role="alert">
           Setup is unavailable: <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code> is not set. Set it in <code>.env</code> and restart.
         </div>
       ) : (
         <>
           <p>Enter the one-time setup password from <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code>, then choose the Admin username and a new password. The Admin manages members and the installation; it cannot write articles.</p>
-          {error && <div className="inline-alert" role="alert">{error}</div>}
-          <form className="stack-form" onSubmit={(event) => void submit(event)}>
-            <label className="field"><span>Setup password</span><input name="setupPassword" type="password" autoComplete="off" required /></label>
-            <label className="field"><span>Admin username</span><input name="username" autoComplete="username" required /></label>
-            <label className="field"><span>New password</span><input name="password" type="password" autoComplete="new-password" minLength={12} required /></label>
-            <label className="field"><span>Confirm new password</span><input name="passwordConfirmation" type="password" autoComplete="new-password" minLength={12} required /></label>
-            <p className="field-help">At least 12 characters with uppercase, lowercase, a number, and a symbol; it must differ from the setup password.</p>
-            <button className="button button-primary" disabled={busy} type="submit"><ShieldCheck aria-hidden="true" />{busy ? 'Creating…' : 'Complete setup'}</button>
+          {errors.form && <p className="error-note" role="alert">{errors.form}</p>}
+          <form className="stack-form" noValidate onSubmit={(event) => void submit(event)}>
+            <TextField label="Setup password" name="setupPassword" type="password" autoComplete="off" required error={errors.fields.setupPassword} />
+            <TextField label="Admin username" name="username" autoComplete="username" required error={errors.fields.username} />
+            <TextField label="New password" name="password" type="password" autoComplete="new-password" required error={errors.fields.password} help="At least 12 characters with uppercase, lowercase, a number and a symbol; it must differ from the setup password." />
+            <TextField label="Confirm new password" name="passwordConfirmation" type="password" autoComplete="new-password" required error={errors.fields.passwordConfirmation} />
+            <button className="button button-primary" disabled={busy} type="submit"><ShieldCheckIcon aria-hidden="true" />{busy ? 'Creating…' : 'Complete setup'}</button>
           </form>
         </>
       )}
@@ -87,31 +101,34 @@ function SetupScreen({ status, onComplete }: { status: SetupStatus; onComplete(s
 
 function LoginScreen({ notice, onSignedIn }: { notice?: string; onSignedIn(session: AdminSession): void }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState<Errors>(noErrors);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const input = { username: String(data.get('username')), password: String(data.get('password')) };
+    const checked = validate(parseCredentials, input);
+    setErrors(formErrors(checked, ''));
+    if (!checked.ok) return;
     setBusy(true);
-    setError('');
     try {
-      onSignedIn(await signIn(String(data.get('username')), String(data.get('password'))));
+      onSignedIn(await signIn(input.username, input.password));
     } catch (cause) {
-      setError(failure(cause, 'Sign-in failed.'));
+      setErrors(formErrors(cause, 'Sign-in failed.'));
     } finally { setBusy(false); }
   }
 
   return (
     <section className="auth-card" aria-labelledby="admin-login-title">
-      <LockKeyhole aria-hidden="true" className="auth-icon" />
+      <LockKeyholeIcon aria-hidden="true" className="auth-icon" />
       <p className="eyebrow">Installation administration</p>
       <h1 id="admin-login-title">Admin sign-in</h1>
-      {notice && <div className="inline-notice" role="status">{notice}</div>}
-      {error && <div className="inline-alert" role="alert">{error}</div>}
-      <form className="stack-form" onSubmit={(event) => void submit(event)}>
-        <label className="field"><span>Username</span><input name="username" autoComplete="username" required /></label>
-        <label className="field"><span>Password</span><input name="password" type="password" autoComplete="current-password" required /></label>
-        <button className="button button-primary" disabled={busy} type="submit"><LogIn aria-hidden="true" />{busy ? 'Signing in…' : 'Sign in'}</button>
+      <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
+      {errors.form && <p className="error-note" role="alert">{errors.form}</p>}
+      <form className="stack-form" noValidate onSubmit={(event) => void submit(event)}>
+        <TextField label="Username" name="username" autoComplete="username" required error={errors.fields.username} />
+        <TextField label="Password" name="password" type="password" autoComplete="current-password" required error={errors.fields.password} />
+        <button className="button button-primary" disabled={busy} type="submit"><LogInIcon aria-hidden="true" />{busy ? 'Signing in…' : 'Sign in'}</button>
       </form>
     </section>
   );
@@ -142,35 +159,43 @@ function Dashboard({ session, onSessionChange, onSignedOut }: {
   }, [tab]);
   const unseen = summary ? summary.unseenWarnings + summary.unseenErrors : 0;
 
-  async function leave() {
-    try { await signOut(); } finally { onSignedOut('You have signed out.'); }
+  function selectWithKeys(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const moves: Record<string, number> = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 };
+    if (!(event.key in moves)) return;
+    event.preventDefault();
+    const next = tabs[(moves[event.key] + tabs.length) % tabs.length].id;
+    setTab(next);
+    document.getElementById(tabId(next))?.focus();
   }
 
   return (
-    <div className="page admin-page">
-      <header className="admin-header">
-        <div><p className="eyebrow">Installation control panel</p><h1>Administration</h1></div>
-        <div className="admin-identity">
-          <span className="admin-version">Version {session.version}</span>
-          <span className="identity-badge admin"><ShieldCheck aria-hidden="true" /> {session.username}</span>
-          <button className="icon-button" type="button" onClick={() => void leave()} title="Sign out"><LogOut aria-hidden="true" /><span className="sr-only">Sign out</span></button>
-        </div>
-      </header>
+    <>
       {session.setupPasswordStillSet && (
-        <div className="inline-alert" role="alert">
+        <div className="admin-notice danger" role="alert">
           <code>AGT_KNOWLEDGE_BASE_SETUP_PASSWORD</code> is still set on the server. It is no longer needed: remove it from <code>.env</code> and restart the stack.
         </div>
       )}
       {unseen > 0 && tab !== 'serverLog' && (
-        <div className="inline-notice admin-log-link" role="status">
+        <div className="admin-notice admin-log-link" role="status">
           The server log has {unseen} new {unseen === 1 ? 'warning or error' : 'warnings or errors'}.{' '}
           <button className="link-button" type="button" onClick={() => setTab('serverLog')}>Open the server log</button>
         </div>
       )}
-      <nav className="admin-tabs" aria-label="Administration sections">
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button key={id} type="button" className={tab === id ? 'active' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
-            <Icon aria-hidden="true" />{label}
+      <div className="admin-tabs" role="tablist" aria-label="Administration sections">
+        {tabs.map(({ id, label, icon: Icon }, index) => (
+          <button
+            key={id}
+            id={tabId(id)}
+            type="button"
+            role="tab"
+            className="button"
+            aria-selected={tab === id}
+            aria-controls={panelId(id)}
+            tabIndex={tab === id ? 0 : -1}
+            onClick={() => setTab(id)}
+            onKeyDown={(event) => selectWithKeys(event, index)}
+          >
+            <Icon />{label}
             {id === 'serverLog' && unseen > 0 && tab !== 'serverLog' && (
               <span className={`admin-badge${summary!.unseenErrors > 0 ? ' admin-badge-error' : ''}`}>
                 {unseen}<span className="sr-only"> unseen {summary!.unseenErrors > 0 ? 'errors and warnings' : 'warnings'}</span>
@@ -178,16 +203,18 @@ function Dashboard({ session, onSessionChange, onSignedOut }: {
             )}
           </button>
         ))}
-      </nav>
-      {tab === 'users' && <UsersPanel />}
-      {tab === 'data' && <DataPanel />}
-      {tab === 'settings' && <SettingsPanel />}
-      {tab === 'backup' && <BackupPanel onRestored={() => onSignedOut('The backup was restored. Sign in with the Admin account from the backup.')} />}
-      {tab === 'serverLog' && <LogPanel key="server" kind="server" />}
-      {tab === 'auditLog' && <LogPanel key="audit" kind="audit" />}
-      {tab === 'account' && <AccountPanel session={session} onSessionRenewed={onSessionChange} />}
-      {tab === 'api' && <Suspense fallback={<LoadingState message="Loading the API reference…" />}><ApiPanel /></Suspense>}
-    </div>
+      </div>
+      <div className="admin-tab-panel" role="tabpanel" id={panelId(tab)} aria-labelledby={tabId(tab)} tabIndex={0}>
+        {tab === 'users' && <UsersPanel />}
+        {tab === 'data' && <DataPanel />}
+        {tab === 'settings' && <SettingsPanel />}
+        {tab === 'serverLog' && <ServerLogPanel />}
+        {tab === 'auditLog' && <AuditLogPanel />}
+        {tab === 'backup' && <BackupPanel onRestored={() => onSignedOut('The backup was restored. Sign in with the Admin account from the backup.')} />}
+        {tab === 'account' && <AccountPanel session={session} onSessionRenewed={onSessionChange} />}
+        {tab === 'api' && <Suspense fallback={<LoadingState message="Loading the API reference…" />}><ApiPanel /></Suspense>}
+      </div>
+    </>
   );
 }
 
@@ -219,20 +246,42 @@ export function AdminApp() {
     return () => window.removeEventListener(adminUnauthorizedEvent, expired);
   }, []);
 
+  async function leave() {
+    try { await signOut(); } finally { setPhase({ name: 'login', notice: 'You have signed out.' }); }
+  }
+
+  const session = phase.name === 'dashboard' ? phase.session : null;
   return (
-    <div className="app-shell admin-shell">
-      <main id="main-content" className="main-content" tabIndex={-1}>
+    <div className="admin-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <header className="admin-header">
+        <div className="admin-title">
+          <img className="brand-logo" src="/AgtOfficialLogo.webp" alt="" aria-hidden="true" width="40" height="40" />
+          <div>
+            <p className="eyebrow">AGT Knowledge Base</p>
+            <h1>Administration</h1>
+          </div>
+        </div>
+        <div className="admin-identity">
+          {session && <span className="admin-version">Version {session.version}</span>}
+          {session && <span className="identity-badge admin"><ShieldCheckIcon /> {session.username}</span>}
+          <a className="button button-secondary" href="/">View site</a>
+          {session && <button className="button button-secondary" type="button" onClick={() => void leave()}><LogOutIcon />Sign out</button>}
+        </div>
+      </header>
+      <MaintenanceNotice />
+      <main id="main-content" className="admin-main" tabIndex={-1}>
         {phase.name === 'loading' && <LoadingState message="Checking the Admin session…" />}
         {phase.name === 'error' && (
-          <div className="page auth-page"><section className="auth-card"><div className="inline-alert" role="alert">{phase.message}</div>
+          <div className="auth-page"><section className="auth-card"><div className="admin-notice danger" role="alert">{phase.message}</div>
             <button className="button button-secondary" type="button" onClick={() => { setPhase({ name: 'loading' }); void load(); }}>Try again</button></section></div>
         )}
-        {phase.name === 'setup' && <div className="page auth-page"><SetupScreen status={phase.status} onComplete={(session) => setPhase({ name: 'dashboard', session })} /></div>}
-        {phase.name === 'login' && <div className="page auth-page"><LoginScreen notice={phase.notice} onSignedIn={(session) => setPhase({ name: 'dashboard', session })} /></div>}
+        {phase.name === 'setup' && <div className="auth-page"><SetupScreen status={phase.status} onComplete={(next) => setPhase({ name: 'dashboard', session: next })} /></div>}
+        {phase.name === 'login' && <div className="auth-page"><LoginScreen notice={phase.notice} onSignedIn={(next) => setPhase({ name: 'dashboard', session: next })} /></div>}
         {phase.name === 'dashboard' && (
           <Dashboard
             session={phase.session}
-            onSessionChange={(session) => setPhase({ name: 'dashboard', session })}
+            onSessionChange={(next) => setPhase({ name: 'dashboard', session: next })}
             onSignedOut={(notice) => setPhase({ name: 'login', notice })}
           />
         )}

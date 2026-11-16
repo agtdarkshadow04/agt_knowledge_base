@@ -106,7 +106,27 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   `503 maintenance`; while a backup runs, writes wait for it. If you run your own reverse proxy, allow several minutes
   for `POST /api/admin/restore` ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 
+- **Member pages moved to query-parameter addresses on `/`** (`/?article=<id>`, `/?view=login`, …). Old links and
+  bookmarks keep working: the server redirects the 1.x paths to them. A reverse proxy needs no change ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- **Browser preferences moved to `agt_knowledge_base_*` keys.** The settings dialog's text size replaces the 1.x
+  "UI scale" and "font size" choices; a stored "large" or "extra large" font size becomes 1.25× ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+
 ### Added
+- `src/lib/client.ts`: every browser request goes through `apiRequest()`, same-origin with `cache: 'no-store'`, the
+  CSRF header on writes and `x-agt-client: web` (so the audit log records `client: web`), and failures become
+  `ApiError(status, message, code, fields)`. A `503 maintenance` shows a notice and is retried once after
+  `Retry-After` (FE-2, FE-5, LOG-13, BAK-8) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- Forms check their input with the server's own parsers from `src/lib/validation.ts` and show each field error next
+  to its field, linked with `aria-invalid` and `aria-describedby` (FE-6, A11Y-5) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- The AGT design system (§15): the logo, NMS Futura, the flag font and both font licence files copied unmodified from
+  the spec's v6.0.0 `assets/` and checked by SHA-256, `src/agt-base.css` imported first, and a test that the app's
+  CSS never redefines a base token or restyles a UI-9 class (UI-1..UI-16). The README has a **Credits** section (UI-15) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- One dialog behaviour for every dialog, `useDialog` (focus in, Tab trapped, Escape closes, focus returns, page
+  scroll locked), with confirmation dialogs in place of the browser's `confirm()` (A11Y-2) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- A text size from 1× to 2× in the settings dialog; all text is sized in `rem` (A11Y-6) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- Browser tests in `tests/e2e/` (`npm run test:e2e`, Playwright): the rich editor and the PDF export under the
+  production CSP (#48 §2), both entries loading without CSP violations or console errors, and every page fitting
+  300 px (UI-12). New dev dependency `@playwright/test`, which STACK-1 names for TEST-6 ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
 - The server log and the audit log (§13), in a `logs` schema of their own with `LOG_MIGRATIONS`
   (`server/migrations/logs/`), never part of a backup or touched by a restore (LOG-1, LOG-2, LOG-17). The server logs
   with pino to stdout (`server.logLevel`) and, from `info` up, to the server log: startup, configuration warnings,
@@ -177,6 +197,16 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ### Changed
 
+- The member UI has no router: pages are query parameters on `/` and links are rewritten with
+  `history.replaceState` when normalized (STACK-2, FE-4); the server serves `index.html` only at `/` (SRV-9) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- Icons are inline SVG components in `src/components/Icons.tsx` (FE-7) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- UI-7 public chrome: the brand lockup with the AGT logo, round icon buttons with labels, and the support link from
+  `site.supportUrl`. UI-8 admin shell: header with **View site** and **Sign out**, and the tabs as a `tablist` in the
+  standard order (Users, Data, Settings, Server log, Audit log, Backup & restore, Account, then API) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- MDXEditor gets its strings through its `translation` prop (English until the Phase 9 string tables), its colours
+  from the AGT tokens through its own CSS variables, and focus returns to its block-type select after Escape ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- Zod runs jitless, so validating in the browser never trips the CSP's `script-src` with an `eval` probe ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- Status messages are announced through live regions (`role="status"`); errors use `role="alert"` (A11Y-4) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
 - Request IDs are random UUIDs, so they link audit and server log entries across restarts ([#56](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/56)).
 
 - The API now runs on Fastify 5 instead of a hand-written Node.js HTTP server, with the same routes, authentication,
@@ -233,6 +263,9 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ### Deprecated
 
+- The 1.x member page paths `/login`, `/tags`, `/articles/new`, `/articles/<id>`, `/articles/<id>/history` and
+  `/articles/<id>/edit`, which now redirect (`301`) to their query-parameter addresses ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+
 These keep working unchanged and are removed in 3.0.0 ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)):
 
 - `POST /api/admin/backup/restore?action=preview|restore` with the raw ZIP body (use the multipart
@@ -271,6 +304,8 @@ These keep working and are removed in 3.0.0:
 
 ### Removed
 
+- The runtime dependencies `react-router-dom` and `lucide-react` (STACK-2, FE-7), the `VITE_API_URL` build variable
+  (the API is always same-origin, FE-2), and `public/assets/agt-icon.png` (replaced by `/AgtOfficialLogo.webp`) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
 - The 1.x backup format (`database.json` with a table dump, `formatVersion: 2`) and the staging-schema restore
   (agreed in #48) ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 - The error codes `invalid_backup` and `pre_restore_backup_failed`, replaced by `422 archive_rejected` and

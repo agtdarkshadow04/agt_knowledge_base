@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { screen } from '@testing-library/react';
+import { renderAt } from '../test/navigation';
 import { describe, expect, it } from 'vitest';
-import type { ArticleSummary } from '../types';
+import type { ArticleSummary } from '../lib/api';
 import { ArticleCard } from './ArticleCard';
 
 const article: ArticleSummary = {
@@ -24,7 +24,7 @@ const article: ArticleSummary = {
 
 describe('ArticleCard', () => {
   it('shows visibility, verified, pinned, and protected status indicators', () => {
-    const { container } = render(<MemoryRouter><ArticleCard article={article} /></MemoryRouter>);
+    const { container } = renderAt('/', <ArticleCard article={article} />);
 
     expect(screen.getByText('Internal')).toHaveClass('visibility-internal');
     expect(container.querySelector('.visibility-eye-icon')).toBeInTheDocument();
@@ -34,7 +34,7 @@ describe('ArticleCard', () => {
   });
 
   it('positions status indicators between the title and excerpt', () => {
-    const { container } = render(<MemoryRouter><ArticleCard article={article} /></MemoryRouter>);
+    const { container } = renderAt('/', <ArticleCard article={article} />);
     const heading = container.querySelector('.article-card-heading');
     const status = container.querySelector('.article-card-status');
     const excerpt = container.querySelector('.excerpt');
@@ -46,7 +46,7 @@ describe('ArticleCard', () => {
   });
 
   it('labels AGT-standard numeric visibility values', () => {
-    render(<MemoryRouter><ArticleCard article={{ ...article, visibility: 3 }} /></MemoryRouter>);
+    renderAt('/', <ArticleCard article={{ ...article, visibility: 3 }} />);
 
     expect(screen.getByText('Top Secret')).toHaveClass('visibility-top-secret');
   });

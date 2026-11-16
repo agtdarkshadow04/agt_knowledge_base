@@ -1,14 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { preferencesChangedEvent } from '../lib/preferences';
 import { SettingsModal } from './SettingsModal';
 
 describe('SettingsModal', () => {
   beforeEach(() => {
     localStorage.clear();
-    delete document.documentElement.dataset.searchResults;
-    delete document.documentElement.dataset.uiScale;
-    delete document.documentElement.dataset.fontSize;
   });
 
   it('shows public account fallbacks and closes with Escape', async () => {
@@ -16,9 +14,10 @@ describe('SettingsModal', () => {
     const user = userEvent.setup();
     render(<SettingsModal user={null} onClose={onClose} />);
 
-    expect(screen.getByText('Public user')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveAttribute('aria-modal', 'true');
+    expect(screen.getByText('Not signed in')).toBeInTheDocument();
     expect(screen.getAllByText('N/A')).toHaveLength(2);
-    expect(screen.queryByRole('combobox', { name: 'Allow Downloads' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Article downloads' })).not.toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -35,11 +34,13 @@ describe('SettingsModal', () => {
     );
 
     expect(screen.getByText(accountType)).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Allow Downloads' })).toHaveValue('false');
+    expect(screen.getByRole('combobox', { name: 'Article downloads' })).toHaveValue('false');
   });
 
-  it('displays account details and persists interface and accessibility settings', async () => {
+  it('displays account details and stores the preferences under agt_knowledge_base_* keys (FE-3, A11Y-6)', async () => {
     const user = userEvent.setup();
+    const changed = vi.fn();
+    window.addEventListener(preferencesChangedEvent, changed);
     render(
       <SettingsModal
         user={{
@@ -59,22 +60,22 @@ describe('SettingsModal', () => {
 
     expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual([
       'Account',
-      'User Interface',
+      'User interface',
       'Accessibility',
     ]);
-    expect(screen.getByRole('combobox', { name: 'Search Results' })).toHaveValue('cards');
-    expect(screen.getByRole('combobox', { name: 'Allow Downloads' })).toHaveValue('false');
+    expect(screen.getByRole('combobox', { name: 'Search results' })).toHaveValue('cards');
+    expect(screen.getByRole('combobox', { name: 'Article downloads' })).toHaveValue('false');
+    const scale = screen.getByRole('combobox', { name: 'Text size' });
+    expect([...scale.querySelectorAll('option')].map((option) => option.value)).toEqual(['1', '1.25', '1.5', '1.75', '2']);
 
-    await user.selectOptions(screen.getByLabelText('Search Results'), 'rows');
-    await user.selectOptions(screen.getByLabelText('Allow Downloads'), 'true');
-    await user.selectOptions(screen.getByLabelText('UI scale'), '1.50');
-    await user.selectOptions(screen.getByLabelText('Font size'), 'large');
-    expect(localStorage.getItem('agt-search-results')).toBe('rows');
-    expect(localStorage.getItem('agt-allow-downloads')).toBe('true');
-    expect(localStorage.getItem('agt-ui-scale')).toBe('1.50');
-    expect(localStorage.getItem('agt-font-size')).toBe('large');
-    expect(document.documentElement).toHaveAttribute('data-search-results', 'rows');
-    expect(document.documentElement).toHaveAttribute('data-ui-scale', '1.50');
-    expect(document.documentElement).toHaveAttribute('data-font-size', 'large');
+    await user.selectOptions(screen.getByLabelText('Search results'), 'rows');
+    await user.selectOptions(screen.getByLabelText('Article downloads'), 'true');
+    await user.selectOptions(scale, '1.5');
+    expect(localStorage.getItem('agt_knowledge_base_search_results')).toBe('"rows"');
+    expect(localStorage.getItem('agt_knowledge_base_allow_downloads')).toBe('true');
+    expect(localStorage.getItem('agt_knowledge_base_font_scale')).toBe('"1.5"');
+    expect(Object.keys(localStorage).every((key) => key.startsWith('agt_knowledge_base_'))).toBe(true);
+    expect(changed).toHaveBeenCalledTimes(3);
+    window.removeEventListener(preferencesChangedEvent, changed);
   });
 });

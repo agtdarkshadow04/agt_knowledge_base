@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '../services/api';
+import { ApiError } from '../lib/client';
 import { AdminApp } from './AdminApp';
 
 const mocks = vi.hoisted(() => ({
@@ -109,8 +109,18 @@ describe('AdminApp', () => {
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
-    const tabs = screen.getByRole('navigation', { name: 'Administration sections' });
-    expect([...tabs.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Users', 'Data', 'Settings', 'Backup & restore', 'Server log', 'Audit log', 'Account', 'API']);
+    // UI-8: a tablist in the standard order, the selected tab marked with aria-selected.
+    const tabs = within(screen.getByRole('tablist', { name: 'Administration sections' })).getAllByRole('tab');
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Users', 'Data', 'Settings', 'Server log', 'Audit log', 'Backup & restore', 'Account', 'API']);
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel', { name: 'Users' })).toBeInTheDocument();
+    // Arrow keys move between tabs (WAI-ARIA tabs).
+    tabs[0].focus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'Data' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Data' })).toHaveFocus();
+    await user.keyboard('{ArrowLeft}{ArrowLeft}');
+    expect(screen.getByRole('tab', { name: 'API' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     // The member session is untouched.
     expect(localStorage.length).toBe(0);
@@ -118,7 +128,7 @@ describe('AdminApp', () => {
 
   it('shows sign-in errors without leaving the login screen', async () => {
     const user = userEvent.setup();
-    mocks.signIn.mockRejectedValue(new ApiError('Invalid username or password.', 401));
+    mocks.signIn.mockRejectedValue(new ApiError(401, 'Invalid username or password.', 'invalid_credentials'));
     render(<AdminApp />);
     await screen.findByRole('heading', { name: 'Admin sign-in' });
     await user.type(screen.getByLabelText('Username'), 'atlas');
@@ -147,7 +157,7 @@ describe('AdminApp', () => {
       render(<AdminApp />);
       await screen.findByRole('heading', { name: 'Administration' });
       expect(screen.getByText('Version 2.0.0')).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'API' }));
+      await user.click(screen.getByRole('tab', { name: 'API' }));
 
       expect(await screen.findByRole('heading', { name: 'AGT Knowledge Base API' })).toBeInTheDocument();
       expect(fetchMock).toHaveBeenCalledWith('/api/openapi.json', expect.anything());
@@ -167,9 +177,9 @@ describe('AdminApp', () => {
     mocks.getSession.mockResolvedValue(session);
     render(<AdminApp />);
     await screen.findByRole('heading', { name: 'Administration' });
-    act(() => { window.dispatchEvent(new Event('agt-admin-unauthorized')); });
+    act(() => { window.dispatchEvent(new Event('agt_knowledge_base_admin_unauthorized')); });
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Admin sign-in' })).toBeInTheDocument());
-    expect(screen.getByRole('status')).toHaveTextContent('session has ended');
+    expect(screen.getByText(/session has ended/).closest('[role="status"]')).not.toBeNull();
   });
 });
 
@@ -203,7 +213,7 @@ describe('bundle separation', () => {
     render(<AdminApp />);
 
     expect(await screen.findByText(/The server log has 3 new warnings or errors\./)).toBeInTheDocument();
-    const tab = screen.getByRole('button', { name: /^Server log/ });
+    const tab = screen.getByRole('tab', { name: /^Server log/ });
     expect(tab.querySelector('.admin-badge-error')).toHaveTextContent('3 unseen errors and warnings');
     expect(mocks.markServerLogSeen).not.toHaveBeenCalled();
 

@@ -1,9 +1,10 @@
-import { Download, Search, Trash2 } from 'lucide-react';
 import { type FormEvent, Fragment, useCallback, useEffect, useState } from 'react';
+import { ConfirmDialog } from '../components/Dialog';
 import { LoadingState } from '../components/States';
 import { clearServerLog, exportLog, listAuditLog, listServerLog, type LogKind } from './api';
 import { saveFile } from './download';
 import type { AuditLogEntry, LogFilters, ServerLogEntry } from './types';
+import { DownloadIcon, SearchIcon, TrashIcon } from '../components/Icons';
 
 /**
  * The Server log and Audit log tabs (LOG-19, LOG-20): filters, a table with
@@ -120,8 +121,8 @@ export function LogPanel({ kind }: { kind: LogKind }) {
           : 'Who did what, when, with what outcome: every change, sign-in and denied attempt. Addresses are stored only as pseudonymous hashes. The audit log cannot be edited or cleared.'}
         {' '}Logs are not part of backups.
       </p>
-      {error && <div className="inline-alert" role="alert">{error}</div>}
-      {notice && <div className="inline-notice" role="status">{notice}</div>}
+      {error && <p className="error-note" role="alert">{error}</p>}
+      <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
       <form className="log-filters" onSubmit={apply} aria-label={`${title} filters`}>
         {kind === 'server' ? (
           <>
@@ -141,7 +142,7 @@ export function LogPanel({ kind }: { kind: LogKind }) {
         <TextFilter label="To" name="to" type="datetime-local" value={draft.to ?? ''} onChange={set('to')} />
         <TextFilter label="Search" name="q" value={draft.q ?? ''} onChange={set('q')} />
         <div className="dialog-actions">
-          <button className="button button-secondary" type="submit" disabled={busy}><Search aria-hidden="true" /> Apply filters</button>
+          <button className="button button-secondary" type="submit" disabled={busy}><SearchIcon aria-hidden="true" /> Apply filters</button>
         </div>
       </form>
       <div className="dialog-actions log-actions">
@@ -151,19 +152,21 @@ export function LogPanel({ kind }: { kind: LogKind }) {
             <option value="csv">CSV</option>
           </select>
         </label>
-        <button className="button button-secondary" type="button" onClick={() => void download()}><Download aria-hidden="true" /> Export</button>
-        {kind === 'server' && !confirmClear && (
-          <button className="button button-danger" type="button" onClick={() => { setConfirmClear(true); setNotice(''); }}><Trash2 aria-hidden="true" /> Clear log</button>
+        <button className="button button-secondary" type="button" onClick={() => void download()}><DownloadIcon aria-hidden="true" /> Export</button>
+        {kind === 'server' && (
+          <button className="button button-danger" type="button" aria-haspopup="dialog" aria-expanded={confirmClear} onClick={() => { setConfirmClear(true); setNotice(''); }}><TrashIcon aria-hidden="true" /> Clear log</button>
         )}
       </div>
       {kind === 'server' && confirmClear && (
-        <div className="inline-alert" role="alertdialog" aria-labelledby="clear-log-question">
-          <p id="clear-log-question">Delete every server log entry? This cannot be undone. The audit log is not affected.</p>
-          <div className="dialog-actions">
-            <button className="button button-danger" type="button" disabled={busy} onClick={() => void clear()}>Clear the server log</button>
-            <button className="button button-secondary" type="button" onClick={() => setConfirmClear(false)}>Cancel</button>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Clear the server log?"
+          description="Every server log entry is deleted. This cannot be undone. The audit log is not affected."
+          confirmLabel={busy ? 'Clearing…' : 'Clear the server log'}
+          danger
+          busy={busy}
+          onConfirm={() => void clear()}
+          onCancel={() => setConfirmClear(false)}
+        />
       )}
       {entries === null ? <LoadingState message="Loading the log…" /> : entries.length === 0 ? (
         <p className="field-help">No entries match.</p>

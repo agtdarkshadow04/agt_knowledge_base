@@ -1,2 +1,7 @@
 # Keep the pinned spec copy byte-identical to its release tag (SPEC-2).
 docs/agt-webapp-spec.md -text
+# The AGT assets are copied unmodified from the spec repository and checked by SHA-256 (UI-15, UI-16).
+src/agt-base.css -text
+public/AgtOfficialLogo.webp binary
+public/NMSFuturaProBook_Kerned.ttf binary
+public/fonts/* -text

@@ -1,5 +1,5 @@
-import type { ArticleVisibility } from '../types';
-import { visibilityClassName, visibilityLabel } from '../visibility';
+import type { ArticleVisibility } from '../lib/api';
+import { visibilityClassName, visibilityLabel } from '../lib/visibility';
 
 function VisibilityEyeIcon() {
   return (

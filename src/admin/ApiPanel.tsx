@@ -25,7 +25,7 @@ export function ApiPanel() {
     return () => controller.abort();
   }, []);
 
-  if (error) return <div className="inline-alert" role="alert">{error}</div>;
+  if (error) return <p className="error-note" role="alert">{error}</p>;
   if (!document) return <LoadingState message="Loading the API reference…" />;
 
   return (

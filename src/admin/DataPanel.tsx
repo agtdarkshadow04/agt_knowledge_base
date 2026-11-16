@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { LoadingState } from '../components/States';
-import type { ArticleListResponse, ArticleVisibilityFilter } from '../types';
-import { agtVisibilityOptions, legacyVisibilityOptions, visibilityFilterValue, visibilityLabel } from '../visibility';
+import type { ArticleListResponse, ArticleVisibilityFilter } from '../lib/api';
+import { agtVisibilityOptions, legacyVisibilityOptions, visibilityFilterValue, visibilityLabel } from '../lib/visibility';
 import { getStats, listArticles } from './api';
 import type { AdminStats } from './types';
 
@@ -46,7 +46,7 @@ export function DataPanel() {
     return () => controller.abort();
   }, [load]);
 
-  if (error) return <div className="inline-alert" role="alert">{error}</div>;
+  if (error) return <p className="error-note" role="alert">{error}</p>;
   if (!stats || !articles) return <LoadingState message="Loading archive data…" />;
 
   return (
