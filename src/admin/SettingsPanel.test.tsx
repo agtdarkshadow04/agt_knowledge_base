@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../lib/client';
 import { SettingsPanel } from './SettingsPanel';
 import type { AdminSettingsView } from './types';
 
@@ -59,15 +60,15 @@ describe('SettingsPanel', () => {
         'backup.maxEntries': null,
       },
     });
-    expect(await screen.findByRole('status')).toHaveTextContent('Settings saved.');
+    expect(await screen.findByRole('status')).toHaveTextContent('The settings were saved.');
   });
 
   it('shows errors from the API', async () => {
     const user = userEvent.setup();
-    mocks.updateSettings.mockRejectedValue(new Error('site.title is defined in the configuration file and cannot be changed from the dashboard.'));
+    mocks.updateSettings.mockRejectedValue(new ApiError(409, 'site.title is defined in the configuration file and cannot be changed from the dashboard.', 'defined_in_config', [], { key: 'site.title' }));
     render(<SettingsPanel />);
     await user.click(await screen.findByRole('button', { name: 'Save settings' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('defined in the configuration file');
+    expect(await screen.findByRole('alert')).toHaveTextContent('site.title is set in config.yaml and cannot be changed here.');
   });
 
   it('shows defaults as placeholders for limits left at their default', async () => {

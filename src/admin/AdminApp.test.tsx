@@ -134,7 +134,8 @@ describe('AdminApp', () => {
     await user.type(screen.getByLabelText('Username'), 'atlas');
     await user.type(screen.getByLabelText('Password'), 'nope');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid username or password.');
+    // I18N-6: the translated text of the error code.
+    expect(await screen.findByRole('alert')).toHaveTextContent('The username or password is wrong.');
   });
 
   it('resumes an existing session, and signs out to the login screen', async () => {

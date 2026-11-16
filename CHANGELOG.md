@@ -108,8 +108,12 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 - **Member pages moved to query-parameter addresses on `/`** (`/?article=<id>`, `/?view=login`, …). Old links and
   bookmarks keep working: the server redirects the 1.x paths to them. A reverse proxy needs no change ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
-- **Browser preferences moved to `agt_knowledge_base_*` keys.** The settings dialog's text size replaces the 1.x
-  "UI scale" and "font size" choices; a stored "large" or "extra large" font size becomes 1.25× ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- **Browser preferences moved to one `localStorage` object, `agt_knowledge_base_settings`**, shared by the
+  knowledge base and the admin dashboard. The settings dialog's text size replaces the 1.x "UI scale" and "font
+  size" choices; a stored "large" or "extra large" font size becomes 1.25×, and the other 1.x `agt-*` preferences
+  move over once ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57), [#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58))
+- **The interface can be shown in ten languages**, chosen in the settings dialog; it stays in English until a reader
+  picks another. Nothing needs to change on the server ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
 
 ### Added
 - `src/lib/client.ts`: every browser request goes through `apiRequest()`, same-origin with `cache: 'no-store'`, the
@@ -127,6 +131,24 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 - Browser tests in `tests/e2e/` (`npm run test:e2e`, Playwright): the rich editor and the PDF export under the
   production CSP (#48 §2), both entries loading without CSP violations or console errors, and every page fitting
   300 px (UI-12). New dev dependency `@playwright/test`, which STACK-1 names for TEST-6 ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- The knowledge base and the admin dashboard in English, French, German, Spanish, Brazilian Portuguese, Italian,
+  Thai, Simplified Chinese, Hindi and Japanese: every UI string comes from `src/translations.ts` (member UI) or
+  `src/admin/i18n.ts` (admin UI), with the LOCALES list, flags and `<html lang>` (I18N-1..I18N-3). MDXEditor's
+  toolbar and dialogs get their strings through its `translation` prop from the same tables (I18N-3) ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
+- Language, time zone and text size in the settings dialog of both entries (the admin dashboard's behind a new gear
+  button in its header), stored in `agt_knowledge_base_settings`; the time zone is the browser's own or a fixed UTC
+  offset (I18N-4) ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
+- Dates, times, numbers and byte sizes are formatted with `Intl` in the reader's language and time zone, with the
+  offset shown beside each time (`src/lib/format.ts`, I18N-5) ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
+- Errors are shown in the reader's language from their `error` code and `params`, and field errors from their field
+  code and the translated field label (`errorText()`, `fieldErrorText()` in `src/lib/errors.ts`, I18N-6) ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
+- API: `422 archive_rejected` carries `params.reason` (which check refused the archive), and restore previews and
+  reports carry `warningCodes` beside `warnings`, so clients can translate them; the codes are listed in
+  `docs/API.md` (I18N-6) ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
+- Tests: every locale has every key with the English placeholders and no untranslated English sentence; every error
+  code the server sends, every field code, archive rejection reason and restore warning has a string; no component
+  has hard-coded text; switching the language changes the dialog and `<html lang>`; and the browser tests check
+  300 px in German, Thai and Hindi (I18N-2, I18N-3, UI-12) ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
 - The server log and the audit log (§13), in a `logs` schema of their own with `LOG_MIGRATIONS`
   (`server/migrations/logs/`), never part of a backup or touched by a restore (LOG-1, LOG-2, LOG-17). The server logs
   with pino to stdout (`server.logLevel`) and, from `info` up, to the server log: startup, configuration warnings,
@@ -207,6 +229,10 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   from the AGT tokens through its own CSS variables, and focus returns to its block-type select after Escape ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
 - Zod runs jitless, so validating in the browser never trips the CSP's `script-src` with an `eval` probe ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
 - Status messages are announced through live regions (`role="status"`); errors use `role="alert"` (A11Y-4) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
+- The admin panel's backup tab explains a refused archive in the reader's language and keeps the server's English
+  text under **Technical details** ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
+- Long words wrap (with hyphenation where the language allows) instead of widening the sign-in pages past 300 px
+  (UI-12) ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
 - Request IDs are random UUIDs, so they link audit and server log entries across restarts ([#56](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/56)).
 
 - The API now runs on Fastify 5 instead of a hand-written Node.js HTTP server, with the same routes, authentication,

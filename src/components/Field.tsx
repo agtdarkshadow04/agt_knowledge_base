@@ -1,6 +1,8 @@
 import { type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, useId } from 'react';
 import { ApiError } from '../lib/client';
-import { fieldMessages, type Validation } from '../lib/validation';
+import { errorText, fieldErrorText, type FieldError } from '../lib/errors';
+import type { Validation } from '../lib/validation';
+import type { Translations } from '../translations';
 
 /**
  * Form fields with the UI-9 `.field` markup (A11Y-5): a visible label, the help
@@ -52,15 +54,37 @@ export function SelectField({ label, help, error, children, ...select }: FieldPa
   );
 }
 
-/** The field messages of a failed check or request, and the message for the whole form, if any. */
-export function formErrors(result: Validation<unknown> | ApiError | unknown, fallback: string): { fields: Record<string, string>; form: string } {
+export interface FormErrors {
+  /** The translated message for each field, keyed by top-level field name. */
+  fields: Record<string, string>;
+  /** The translated message for the whole form, if any. */
+  form: string;
+}
+
+/** No errors; frozen, so a caller that adds to the result of `formErrors()` never changes it. */
+export const noFormErrors: FormErrors = Object.freeze({ fields: Object.freeze({}), form: '' }) as FormErrors;
+
+/**
+ * The reader's messages for a failed check or request (I18N-6, FE-6): each field
+ * error through `fieldErrorText()` with the translated field label, the request's
+ * error through `errorText()`. The browser's check and the server's answer give
+ * the same text, because both report the same field codes.
+ */
+export function formErrors(result: Validation<unknown> | unknown, t: Translations): FormErrors {
+  const label = (field: string) => t.fields[field as keyof Translations['fields']] ?? field;
+  const translate = (errors: readonly FieldError[]) => {
+    const fields: Record<string, string> = {};
+    for (const error of errors) {
+      const name = error.field.split('.')[0] || '_';
+      fields[name] ??= fieldErrorText(error, label(name), t);
+    }
+    return fields;
+  };
   if (result && typeof result === 'object' && 'ok' in result) {
     const checked = result as Validation<unknown>;
-    return checked.ok ? { fields: {}, form: '' } : { fields: fieldMessages(checked.fields), form: '' };
+    return { fields: checked.ok ? {} : translate(checked.fields), form: '' };
   }
-  if (result instanceof ApiError) {
-    // The form message too, in case a field error names a field the form does not show.
-    return { fields: fieldMessages(result.fields), form: result.message };
-  }
-  return { fields: {}, form: result instanceof Error ? result.message : fallback };
+  // The form message too, in case a field error names a field the form does not show.
+  if (result instanceof ApiError) return { fields: translate(result.fields), form: errorText(result, t) };
+  return { fields: {}, form: errorText(result, t) };
 }

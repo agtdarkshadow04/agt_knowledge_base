@@ -11,6 +11,7 @@ import { applyAppMigrations, migrationId, MIGRATIONS, schemaVersion, type Connec
 import { ping } from './repository.js';
 import * as sqlBackup from './repository/backup.js';
 import { advisoryUnlock, tryAdvisoryLock } from './repository/control.js';
+import { restoreWarnings, type RestoreWarningCode } from './backupCodes.js';
 import { ArchiveRejectedError, HttpError } from './http.js';
 import { diffLines, type DiffLine } from './line-diff.js';
 import type { OperationRun, Operations, RecoverySession } from './operation.js';
@@ -90,7 +91,10 @@ export interface RestorePreview {
   };
   /** Dashboard settings in the backup that config.yaml now defines; a restore drops them (CFG-7). */
   ignoredSettings: string[];
+  /** English text of each warning, for humans and logs. */
   warnings: string[];
+  /** The same warnings as stable codes, for clients to translate (I18N-6). */
+  warningCodes: RestoreWarningCode[];
 }
 
 export interface RestoreReport extends RestorePreview {
@@ -231,7 +235,8 @@ const allowedTables = new Set<string>([...EXPECTED_TABLES, 'schema_migrations'])
  * sequences, defaults, constraints and indexes in `public` are kept, and
  * anything else rejects the archive, naming the entry.
  */
-export function allowlistToc(listing: string): { list: string; warnings: string[] } {
+
+export function allowlistToc(listing: string): { list: string; warnings: string[]; warningCodes: RestoreWarningCode[] } {
   const kept: string[] = [];
   let ignoredLogs = false;
   for (const line of listing.split('\n')) {
@@ -248,10 +253,11 @@ export function allowlistToc(listing: string): { list: string; warnings: string[
       ((type === 'TABLE' || type === 'TABLE DATA') && allowedTables.has(name))
       || (publicStructureTypes.has(type) && tableName !== '')
     );
-    if (!allowed) throw new ArchiveRejectedError(`The database dump contains an entry that is not allowed: ${line.trim().slice(0, 200)}`);
+    if (!allowed) throw new ArchiveRejectedError('disallowed_entry', `The database dump contains an entry that is not allowed: ${line.trim().slice(0, 200)}`);
     kept.push(line);
   }
-  return { list: `${kept.join('\n')}\n`, warnings: ignoredLogs ? ['The dump contains log or control tables; they are ignored.'] : [] };
+  const warningCodes: RestoreWarningCode[] = ignoredLogs ? ['log_tables_ignored'] : [];
+  return { list: `${kept.join('\n')}\n`, warnings: warningCodes.map((code) => restoreWarnings[code]), warningCodes };
 }
 
 // --- The service ------------------------------------------------------------------
@@ -409,7 +415,7 @@ export class BackupService {
   private async validate(upload: string, directory: string): Promise<ValidatedArchive> {
     const limits = await this.settings.values();
     const { size } = await stat(upload);
-    if (size > limits['backup.maxZipBytes']) throw new ArchiveRejectedError('The file exceeds the backup size limit.');
+    if (size > limits['backup.maxZipBytes']) throw new ArchiveRejectedError('too_large', 'The file exceeds the backup size limit.');
     const head = Buffer.alloc(4);
     const handle = await open(upload, 'r');
     try {
@@ -417,7 +423,7 @@ export class BackupService {
     } finally {
       await handle.close();
     }
-    if (head.toString('latin1') !== 'PK\u0003\u0004') throw new ArchiveRejectedError('The file is not a ZIP archive.');
+    if (head.toString('latin1') !== 'PK\u0003\u0004') throw new ArchiveRejectedError('not_zip', 'The file is not a ZIP archive.');
 
     let entries: ExtractedEntry[];
     try {
@@ -426,64 +432,64 @@ export class BackupService {
         maxUncompressedBytes: limits['backup.maxUncompressedBytes'],
       });
     } catch (error) {
-      if (error instanceof ZipRejectedError) throw new ArchiveRejectedError(error.message);
+      if (error instanceof ZipRejectedError) throw new ArchiveRejectedError('unsafe_zip', error.message);
       throw error;
     }
     const byPath = new Map(entries.map((entry) => [entry.path, entry]));
     const manifestEntry = byPath.get(manifestFile);
-    if (!manifestEntry) throw new ArchiveRejectedError(`The archive has no ${manifestFile}.`);
-    if (manifestEntry.size > 1024 * 1024) throw new ArchiveRejectedError(`${manifestFile} is too large.`);
+    if (!manifestEntry) throw new ArchiveRejectedError('missing_manifest', `The archive has no ${manifestFile}.`);
+    if (manifestEntry.size > 1024 * 1024) throw new ArchiveRejectedError('invalid_manifest', `${manifestFile} is too large.`);
     let raw: unknown;
     try {
       raw = JSON.parse(await readFile(manifestEntry.file, 'utf8'));
     } catch {
-      throw new ArchiveRejectedError(`${manifestFile} is not valid JSON.`);
+      throw new ArchiveRejectedError('invalid_manifest', `${manifestFile} is not valid JSON.`);
     }
     const manifestObject = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
     // A 1.x archive: database.json, or a manifest with `migrations` or a `files` object.
     if (byPath.has(legacyDatabaseFile) || 'migrations' in manifestObject
       || (manifestObject.files !== undefined && typeof manifestObject.files === 'object' && !Array.isArray(manifestObject.files))) {
-      throw new ArchiveRejectedError(legacyArchiveMessage);
+      throw new ArchiveRejectedError('legacy_format', legacyArchiveMessage);
     }
     if (manifestObject.format !== undefined && manifestObject.format !== backupFormat) {
-      throw new ArchiveRejectedError('The archive is not an AGT Knowledge Base backup.');
+      throw new ArchiveRejectedError('not_a_backup', 'The archive is not an AGT Knowledge Base backup.');
     }
     if (typeof manifestObject.formatVersion === 'number' && manifestObject.formatVersion > backupFormatVersion) {
-      throw new ArchiveRejectedError(`The backup has format version ${manifestObject.formatVersion}; this version of AGT Knowledge Base restores up to ${backupFormatVersion}. Upgrade first.`);
+      throw new ArchiveRejectedError('newer_format', `The backup has format version ${manifestObject.formatVersion}; this version of AGT Knowledge Base restores up to ${backupFormatVersion}. Upgrade first.`);
     }
     const parsed = manifestSchema.safeParse(raw);
-    if (!parsed.success) throw new ArchiveRejectedError(`${manifestFile} is invalid (${parsed.error.issues[0].path.join('.') || 'root'}).`);
+    if (!parsed.success) throw new ArchiveRejectedError('invalid_manifest', `${manifestFile} is invalid (${parsed.error.issues[0].path.join('.') || 'root'}).`);
     const manifest = parsed.data;
     const listed = new Map(manifest.files.map((file) => [file.path, file]));
-    if (listed.size !== manifest.files.length) throw new ArchiveRejectedError('The manifest lists a file more than once.');
+    if (listed.size !== manifest.files.length) throw new ArchiveRejectedError('invalid_manifest', 'The manifest lists a file more than once.');
     for (const entry of entries) {
       if (entry.path === manifestFile) continue;
       const expected = listed.get(entry.path);
-      if (!expected) throw new ArchiveRejectedError(`${entry.path} is not listed in the manifest.`);
+      if (!expected) throw new ArchiveRejectedError('unlisted_file', `${entry.path} is not listed in the manifest.`);
       if (expected.size !== entry.size || expected.sha256 !== entry.sha256) {
-        throw new ArchiveRejectedError(`The checksum of ${entry.path} does not match the manifest.`);
+        throw new ArchiveRejectedError('checksum_mismatch', `The checksum of ${entry.path} does not match the manifest.`);
       }
     }
     for (const path of listed.keys()) {
-      if (!byPath.has(path)) throw new ArchiveRejectedError(`The manifest lists ${path}, which the archive does not contain.`);
+      if (!byPath.has(path)) throw new ArchiveRejectedError('missing_file', `The manifest lists ${path}, which the archive does not contain.`);
     }
     const dumpEntry = byPath.get(databaseFile);
-    if (!dumpEntry) throw new ArchiveRejectedError(`The archive has no ${databaseFile}.`);
+    if (!dumpEntry) throw new ArchiveRejectedError('missing_file', `The archive has no ${databaseFile}.`);
     const latest = MIGRATIONS.at(-1)!.version;
     if (manifest.schemaVersion > latest) {
-      throw new ArchiveRejectedError(`The backup's database schema (version ${manifest.schemaVersion}) is newer than this version of AGT Knowledge Base supports (${latest}). Upgrade first.`);
+      throw new ArchiveRejectedError('newer_schema', `The backup's database schema (version ${manifest.schemaVersion}) is newer than this version of AGT Knowledge Base supports (${latest}). Upgrade first.`);
     }
     const configEntry = byPath.get(configFile);
     const configText = configEntry ? await readFile(configEntry.file, 'utf8') : null;
     const dumpFile = join(directory, databaseFile);
     await rename(dumpEntry.file, dumpFile);
 
-    const { list, warnings } = await this.allowlist(dumpFile);
+    const { list, warningCodes } = await this.allowlist(dumpFile);
     const listFile = join(directory, 'database.list');
     await writeFile(listFile, list, { mode: 0o600 });
     const checked = await this.checkInPreviewDatabase(dumpFile, listFile);
     if (checked.schemaVersion !== manifest.schemaVersion) {
-      throw new ArchiveRejectedError(`The dump's schema version (${checked.schemaVersion}) does not match the manifest (${manifest.schemaVersion}).`);
+      throw new ArchiveRejectedError('schema_mismatch', `The dump's schema version (${checked.schemaVersion}) does not match the manifest (${manifest.schemaVersion}).`);
     }
 
     const currentConfig = this.context.configFile.text;
@@ -505,7 +511,8 @@ export class BackupService {
         identical: configText !== null && configText === currentConfig,
       },
       ignoredSettings: checked.ignoredSettings,
-      warnings: [...warnings, ...checked.warnings],
+      warnings: [...warningCodes, ...checked.warningCodes].map((code) => restoreWarnings[code]),
+      warningCodes: [...warningCodes, ...checked.warningCodes],
     };
     return { manifest, dumpFile, listFile, configText, preview };
   }
@@ -517,7 +524,7 @@ export class BackupService {
       listing = (await this.tools('pg_restore', ['--list', dumpFile], {})).stdout;
     } catch (error) {
       this.log.warn(`pg_restore --list rejected an uploaded dump: ${message(error)}`);
-      throw new ArchiveRejectedError(`${databaseFile} is not a valid PostgreSQL custom-format dump.`);
+      throw new ArchiveRejectedError('invalid_dump', `${databaseFile} is not a valid PostgreSQL custom-format dump.`);
     }
     return allowlistToc(listing);
   }
@@ -546,7 +553,7 @@ export class BackupService {
           ], { timeoutMilliseconds: restoreTimeoutMilliseconds });
         } catch (error) {
           this.log.warn(`An uploaded dump could not be restored into the preview database: ${message(error)}`);
-          throw new ArchiveRejectedError(`${databaseFile} could not be restored. It is damaged or was not made by AGT Knowledge Base.`);
+          throw new ArchiveRejectedError('invalid_dump', `${databaseFile} could not be restored. It is damaged or was not made by AGT Knowledge Base.`);
         }
         return await inspectRestored(preview, lockedSettingKeys(this.context.config));
       } finally {
@@ -723,19 +730,19 @@ export class BackupService {
 /** BAK-3 step 4: the checks on the dump restored into the preview database. */
 async function inspectRestored(client: Pick<pg.Client, 'query'>, locked: string[]) {
   const tables = await sqlBackup.publicTables(client);
-  if (!tables.has('schema_migrations')) throw new ArchiveRejectedError('The dump has no schema_migrations table.');
+  if (!tables.has('schema_migrations')) throw new ArchiveRejectedError('missing_tables', 'The dump has no schema_migrations table.');
   const version = await schemaVersion(client);
   const missing = EXPECTED_TABLES.filter((table) => !tables.has(table));
-  if (missing.length) throw new ArchiveRejectedError(`The dump lacks the tables ${missing.join(', ')}.`);
+  if (missing.length) throw new ArchiveRejectedError('missing_tables', `The dump lacks the tables ${missing.join(', ')}.`);
   const counts: Record<string, number> = {};
   for (const table of EXPECTED_TABLES) {
     if (!sessionTables.includes(table as typeof sessionTables[number])) counts[table] = await sqlBackup.rowCount(client, table);
   }
   const admins = await sqlBackup.adminPasswordHashes(client);
-  if (admins.length > 1) throw new ArchiveRejectedError('The backup contains more than one Admin account.');
+  if (admins.length > 1) throw new ArchiveRejectedError('invalid_admin', 'The backup contains more than one Admin account.');
   if (admins.length === 1 && !parseHash(admins[0])) {
-    throw new ArchiveRejectedError('The Admin password hash in the backup is malformed or uses unsupported parameters, so it could never sign in.');
+    throw new ArchiveRejectedError('invalid_admin', 'The Admin password hash in the backup is malformed or uses unsupported parameters, so it could never sign in.');
   }
-  const warnings = admins.length === 0 ? ['The backup has no Admin account; first-run setup will be needed after the restore.'] : [];
-  return { schemaVersion: version, counts, ignoredSettings: await sqlBackup.storedSettingKeys(client, locked), warnings };
+  const warningCodes: RestoreWarningCode[] = admins.length === 0 ? ['no_admin'] : [];
+  return { schemaVersion: version, counts, ignoredSettings: await sqlBackup.storedSettingKeys(client, locked), warningCodes };
 }

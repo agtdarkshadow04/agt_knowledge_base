@@ -10,10 +10,13 @@ import { ArrowDownIcon, ArrowUpIcon, SearchIcon, SlidersHorizontalIcon } from '.
 import { Link, useNavigation } from './Navigation';
 import { loginHref } from './RequireAuth';
 import { routeHref } from '../lib/routes';
+import { formatTranslation } from '../translations';
+import { useI18n } from './I18n';
 
 export function HomePage() {
   const { user } = useAuth();
   const { settings } = useAppSettings();
+  const { t, number, error: describe } = useI18n();
   const viewerSub = user?.sub;
   const { params: searchParams, navigate } = useNavigation();
   const setSearchParams = useCallback((next: URLSearchParams) => {
@@ -61,7 +64,7 @@ export function HomePage() {
         setResult(await listArticles(params, controller.signal, Boolean(viewerSub)));
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === 'AbortError') return;
-        setError(cause instanceof Error ? cause.message : 'The archive could not be loaded.');
+        setError(describe(cause));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -84,7 +87,7 @@ export function HomePage() {
         setTags(await listTags('', controller.signal, Boolean(viewerSub)));
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === 'AbortError') return;
-        setTagsError(cause instanceof Error ? cause.message : 'Tags could not be loaded.');
+        setTagsError(describe(cause));
       } finally {
         if (!controller.signal.aborted) setTagsLoading(false);
       }
@@ -109,7 +112,7 @@ export function HomePage() {
       const next = await listArticles({ ...params, cursor: result.nextCursor }, undefined, Boolean(viewerSub));
       setResult((current) => current && { ...next, items: [...current.items, ...next.items] });
     } catch (cause) {
-      setMoreError(cause instanceof Error ? cause.message : 'More articles could not be loaded.');
+      setMoreError(describe(cause));
     } finally {
       setLoadingMore(false);
     }
@@ -133,105 +136,105 @@ export function HomePage() {
   return (
     <div className="page home-page">
       <section className="hero" aria-labelledby="home-title">
-        <p className="eyebrow">Galactic archive // public terminal</p>
+        <p className="eyebrow">{t.home.eyebrow}</p>
         <div className="hero-heading">
           <div>
             <h1 id="home-title">{settings.site.title}</h1>
             <p>{settings.site.subtitle}</p>
           </div>
-          {user && <Link className="button button-primary" to={routeHref({ page: 'new' })}>Create article</Link>}
+          {user && <Link className="button button-primary" to={routeHref({ page: 'new' })}>{t.home.createArticle}</Link>}
         </div>
       </section>
 
       {!user && !settings.access.allowPublicBrowsing ? (
         <section className="admin-panel public-browsing-disabled" aria-labelledby="public-access-title">
-          <h2 id="public-access-title">Sign in to browse the archive</h2>
-          <p>Public browsing is disabled for this installation.</p>
-          <Link className="button button-primary" to={loginHref()}>Sign in</Link>
+          <h2 id="public-access-title">{t.home.closedTitle}</h2>
+          <p>{t.home.closedText}</p>
+          <Link className="button button-primary" to={loginHref()}>{t.home.signIn}</Link>
         </section>
       ) : <><section className="filter-panel" aria-labelledby="filter-title">
-        <div className="section-label"><SlidersHorizontalIcon aria-hidden="true" /><h2 id="filter-title">Search archive</h2></div>
+        <div className="section-label"><SlidersHorizontalIcon aria-hidden="true" /><h2 id="filter-title">{t.home.filterTitle}</h2></div>
         <form className="filter-form" onSubmit={handleSearch}>
           <label className="field search-field">
-            <span>Search title and content</span>
-            <span className="input-with-icon"><SearchIcon aria-hidden="true" /><input name="search" defaultValue={params.search} placeholder="e.g. portal navigation" /></span>
+            <span>{t.home.search}</span>
+            <span className="input-with-icon"><SearchIcon aria-hidden="true" /><input name="search" defaultValue={params.search} placeholder={t.home.searchPlaceholder} /></span>
           </label>
           <label className="field">
-            <span>Tag</span>
+            <span>{t.home.tag}</span>
             <select
               name="tagId"
               value={params.tagId}
               disabled={tagsLoading || Boolean(tagsError)}
               onChange={(event) => updateParam('tagId', event.target.value)}
             >
-              <option value="">All tags</option>
-              {selectedTagMissing && <option value={params.tagId}>Unavailable tag</option>}
+              <option value="">{t.home.allTags}</option>
+              {selectedTagMissing && <option value={params.tagId}>{t.home.unavailableTag}</option>}
               {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
             </select>
             {tagsError && (
               <span className="filter-tag-error">
-                Tag filter unavailable.
-                <button type="button" onClick={() => setTagsReloadKey((value) => value + 1)}>Retry</button>
+                {t.home.tagFilterUnavailable}
+                <button type="button" onClick={() => setTagsReloadKey((value) => value + 1)}>{t.home.retry}</button>
               </span>
             )}
           </label>
-          <button className="button button-primary" type="submit">Search</button>
+          <button className="button button-primary" type="submit">{t.home.submit}</button>
         </form>
         <div className="sort-row">
-          <label>Visibility
+          <label>{t.home.visibility}
             <select value={params.visibility} onChange={(event) => updateParam('visibility', event.target.value)}>
-              <option value="all">All visible</option>
-              <optgroup label="AGT standard">
-                {agtVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}
+              <option value="all">{t.home.allVisible}</option>
+              <optgroup label={t.visibility.agtGroup}>
+                {agtVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{t.visibility[option.className]}</option>)}
               </optgroup>
-              <optgroup label="Legacy">
-                {legacyVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{option.label}</option>)}
+              <optgroup label={t.visibility.legacyGroup}>
+                {legacyVisibilityOptions.map((option) => <option key={option.value} value={visibilityFilterValue(option.value)}>{t.visibility[option.className]}</option>)}
               </optgroup>
             </select>
           </label>
-          <label>Pin status
+          <label>{t.home.pinStatus}
             <select value={params.pinned} onChange={(event) => updateParam('pinned', event.target.value)}>
-              <option value="all">All articles</option>
-              <option value="pinned">Pinned only</option>
+              <option value="all">{t.home.allArticles}</option>
+              <option value="pinned">{t.home.pinnedOnly}</option>
             </select>
           </label>
-          <label>Protection
+          <label>{t.home.protection}
             <select value={params.protection} onChange={(event) => updateParam('protection', event.target.value)}>
-              <option value="all">All articles</option>
-              <option value="unprotected">Open to editors</option>
-              <option value="protected">Protected</option>
+              <option value="all">{t.home.allArticles}</option>
+              <option value="unprotected">{t.home.unprotected}</option>
+              <option value="protected">{t.home.protected}</option>
             </select>
           </label>
-          <label>Verified
+          <label>{t.home.verified}
             <select value={params.verification} onChange={(event) => updateParam('verification', event.target.value)}>
-              <option value="all">All</option>
-              <option value="verified">Verified</option>
-              <option value="unverified">Unverified</option>
+              <option value="all">{t.home.all}</option>
+              <option value="verified">{t.home.verifiedOnly}</option>
+              <option value="unverified">{t.home.unverifiedOnly}</option>
             </select>
           </label>
-          <label>Sort by
+          <label>{t.home.sortBy}
             <select value={params.sort} onChange={(event) => updateParam('sort', event.target.value)}>
-              <option value="modifiedAt">Last modified</option>
-              <option value="createdAt">Creation date</option>
-              <option value="title">Title</option>
+              <option value="modifiedAt">{t.home.sortModified}</option>
+              <option value="createdAt">{t.home.sortCreated}</option>
+              <option value="title">{t.home.sortTitle}</option>
             </select>
           </label>
           <button
             className="button button-ghost compact"
             type="button"
             onClick={() => updateParam('direction', params.direction === 'asc' ? 'desc' : 'asc')}
-            aria-label={`Sort ${params.direction === 'asc' ? 'descending' : 'ascending'}`}
+            aria-label={params.direction === 'asc' ? t.home.sortDescending : t.home.sortAscending}
           >
             {params.direction === 'asc' ? <ArrowUpIcon aria-hidden="true" /> : <ArrowDownIcon aria-hidden="true" />}
-            {params.direction === 'asc' ? 'Ascending' : 'Descending'}
+            {params.direction === 'asc' ? t.home.ascending : t.home.descending}
           </button>
         </div>
       </section>
 
       <section className="results-section" aria-labelledby="results-title">
         <div className="results-heading">
-          <div><p className="eyebrow">Transmissions</p><h2 id="results-title">Published articles</h2></div>
-          {result && <p aria-live="polite">{result.total.toLocaleString()} results • {result.items.length.toLocaleString()} shown</p>}
+          <div><p className="eyebrow">{t.home.resultsEyebrow}</p><h2 id="results-title">{t.home.resultsTitle}</h2></div>
+          {result && <p aria-live="polite">{formatTranslation(t.home.resultCount, { total: number(result.total), shown: number(result.items.length) })}</p>}
         </div>
 
         {loading && <LoadingState />}
@@ -241,9 +244,9 @@ export function HomePage() {
           <>
             <div className="article-grid">{result.items.map((article) => <ArticleCard key={article.id} article={article} />)}</div>
             {result.nextCursor && (
-              <nav className="pagination" aria-label="More articles">
+              <nav className="pagination" aria-label={t.home.moreArticles}>
                 <button className="button button-secondary" disabled={loadingMore} onClick={() => void loadMore()}>
-                  {loadingMore ? 'Loading…' : 'Load more'}
+                  {loadingMore ? t.common.loading : t.home.loadMore}
                 </button>
               </nav>
             )}

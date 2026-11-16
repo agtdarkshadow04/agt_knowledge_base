@@ -80,16 +80,16 @@ describe('ArticlePage', () => {
     renderAt(`/?article=${article.id}`, <ArticlePage id={article.id} />);
 
     await screen.findByText('Created by');
-    expect(screen.queryByRole('button', { name: 'Download Markdown Source' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download Markdown source' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Download PDF' })).not.toBeInTheDocument();
   });
 
   it('offers Markdown and PDF downloads to Editors when enabled', async () => {
-    localStorage.setItem('agt_knowledge_base_allow_downloads', 'true');
+    localStorage.setItem('agt_knowledge_base_settings', JSON.stringify({ allowDownloads: true }));
     mocks.user = { sub: 'standard', username: 'apollo', displayName: 'Apollo', role: 'Editor' };
     renderAt(`/?article=${article.id}`, <ArticlePage id={article.id} />);
 
-    expect(await screen.findByRole('button', { name: 'Download Markdown Source' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Download Markdown source' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download PDF' })).toBeInTheDocument();
   });
 
@@ -97,24 +97,24 @@ describe('ArticlePage', () => {
     renderAt(`/?article=${article.id}`, <ArticlePage id={article.id} />);
 
     await screen.findByText('Created by');
-    localStorage.setItem('agt_knowledge_base_allow_downloads', 'true');
+    localStorage.setItem('agt_knowledge_base_settings', JSON.stringify({ allowDownloads: true }));
     window.dispatchEvent(new Event(preferencesChangedEvent));
 
-    expect(await screen.findByRole('button', { name: 'Download Markdown Source' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Download Markdown source' })).toBeInTheDocument();
   });
 
   it('does not offer downloads to anonymous visitors', async () => {
-    localStorage.setItem('agt_knowledge_base_allow_downloads', 'true');
+    localStorage.setItem('agt_knowledge_base_settings', JSON.stringify({ allowDownloads: true }));
     mocks.user = null;
     renderAt(`/?article=${article.id}`, <ArticlePage id={article.id} />);
 
     await screen.findByText('Created by');
-    expect(screen.queryByRole('button', { name: 'Download Markdown Source' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download Markdown source' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Download PDF' })).not.toBeInTheDocument();
   });
 
   it('downloads the unmodified Markdown source', async () => {
-    localStorage.setItem('agt_knowledge_base_allow_downloads', 'true');
+    localStorage.setItem('agt_knowledge_base_settings', JSON.stringify({ allowDownloads: true }));
     const createObjectURL = vi.fn((blob: Blob) => {
       void blob;
       return 'blob:article';
@@ -129,7 +129,7 @@ describe('ArticlePage', () => {
     const user = userEvent.setup();
     renderAt(`/?article=${article.id}`, <ArticlePage id={article.id} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Download Markdown Source' }));
+    await user.click(await screen.findByRole('button', { name: 'Download Markdown source' }));
 
     const blob = createObjectURL.mock.calls[0][0] as Blob;
     const contents = await new Promise<string>((resolve, reject) => {
@@ -145,7 +145,7 @@ describe('ArticlePage', () => {
   });
 
   it('renders and saves the sanitized article as a client-side PDF', async () => {
-    localStorage.setItem('agt_knowledge_base_allow_downloads', 'true');
+    localStorage.setItem('agt_knowledge_base_settings', JSON.stringify({ allowDownloads: true }));
     let finishPdf!: () => void;
     mocks.pdfWorker.save.mockReturnValue(new Promise<void>((resolve) => { finishPdf = resolve; }));
     const user = userEvent.setup();

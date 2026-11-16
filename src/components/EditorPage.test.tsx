@@ -77,15 +77,15 @@ describe('EditorPage', () => {
   it('provides the toolbar actions as icon-only controls in the required order', async () => {
     const user = userEvent.setup();
     const { container } = renderEditor();
-    const guide = screen.getByRole('link', { name: 'Markdown Guide' });
+    const guide = screen.getByRole('link', { name: 'Markdown guide' });
     expect(guide).toHaveAttribute('href', 'https://www.markdownguide.org/basic-syntax/');
     expect(guide).toHaveAttribute('target', '_blank');
-    expect(guide).toHaveAttribute('title', 'Markdown Guide');
+    expect(guide).toHaveAttribute('title', 'Markdown guide');
 
     expect(screen.getByRole('button', { name: 'Exit without saving' })).toHaveAttribute('title', 'Exit without saving');
     expect(screen.getByRole('button', { name: 'Save article' })).toHaveAttribute('title', 'Save article');
     expect(Array.from(container.querySelectorAll('.editor-toolbar-actions > *')).map((control) => control.getAttribute('title'))).toEqual([
-      'Markdown Guide',
+      'Markdown guide',
       'Exit without saving',
       'Save article',
       'Show preview',
@@ -115,8 +115,8 @@ describe('EditorPage', () => {
 
     expect(mocks.createArticle).not.toHaveBeenCalled();
     const dialog = screen.getByRole('dialog', { name: 'Review changes before saving' });
-    expect(within(dialog).getByRole('heading', { name: 'Current revision content' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('heading', { name: 'New revision content' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('heading', { name: 'Current content' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('heading', { name: 'New content' })).toBeInTheDocument();
     expect(within(dialog).getByText('No content')).toBeInTheDocument();
     expect(within(dialog).getByText(/Safe instructions for travellers/)).toBeInTheDocument();
 

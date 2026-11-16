@@ -9,11 +9,19 @@
 
 export type AuthMode = 'none' | 'member' | 'admin';
 
+/** A schema limit, as data: the API tab words it in the reader's language (I18N-3). */
+export type SchemaConstraint =
+  | { kind: 'length' | 'value' | 'items'; min?: number; max?: number }
+  | { kind: 'unique' }
+  | { kind: 'pattern'; pattern: string }
+  /** `value` is the default as JSON-like text; null for an empty string. */
+  | { kind: 'default'; value: string | null };
+
 export interface SchemaField {
   name: string;
   type: string;
   required: boolean;
-  constraints: string[];
+  constraints: SchemaConstraint[];
   description?: string;
 }
 
@@ -140,21 +148,19 @@ export function parseOpenApi(source: unknown): ApiDocument {
     return described.join(' | ') || 'any';
   }
 
-  function constraints(schema: unknown): string[] {
+  function constraints(schema: unknown): SchemaConstraint[] {
     if (!isNode(schema) || typeof schema.$ref === 'string') return [];
-    const result: string[] = [];
-    const number = (value: number) => (Math.abs(value) >= 10_000 ? value.toLocaleString('en-US') : String(value));
-    const range = (min: unknown, max: unknown, unit: string) => {
-      if (typeof min === 'number' && typeof max === 'number') result.push(`${number(min)}–${number(max)}${unit}`);
-      else if (typeof min === 'number') result.push(`at least ${number(min)}${unit}`);
-      else if (typeof max === 'number') result.push(`at most ${number(max)}${unit}`);
+    const result: SchemaConstraint[] = [];
+    const range = (kind: 'length' | 'value' | 'items', min: unknown, max: unknown) => {
+      if (typeof min !== 'number' && typeof max !== 'number') return;
+      result.push({ kind, ...(typeof min === 'number' ? { min } : {}), ...(typeof max === 'number' ? { max } : {}) });
     };
-    range(schema.minLength, schema.maxLength, ' characters');
-    range(schema.minimum, schema.maximum, '');
-    range(schema.minItems, schema.maxItems, ' items');
-    if (schema.uniqueItems === true) result.push('unique items');
-    if (typeof schema.pattern === 'string') result.push(`pattern ${schema.pattern}`);
-    if (schema.default !== undefined) result.push(`default ${schema.default === '' ? 'empty' : literal(schema.default)}`);
+    range('length', schema.minLength, schema.maxLength);
+    range('value', schema.minimum, schema.maximum);
+    range('items', schema.minItems, schema.maxItems);
+    if (schema.uniqueItems === true) result.push({ kind: 'unique' });
+    if (typeof schema.pattern === 'string') result.push({ kind: 'pattern', pattern: schema.pattern });
+    if (schema.default !== undefined) result.push({ kind: 'default', value: schema.default === '' ? null : literal(schema.default) });
     return result;
   }
 

@@ -1,4 +1,5 @@
 import { type ReactNode, type RefObject, useId, useRef } from 'react';
+import { useI18n } from './I18n';
 import { CloseIcon } from './Icons';
 import { useDialog } from './useDialog';
 
@@ -15,7 +16,7 @@ export function Dialog({
   initialFocusRef = null,
   className = '',
   role = 'dialog',
-  closeLabel = 'Close',
+  closeLabel,
   children,
   footer,
 }: {
@@ -26,10 +27,13 @@ export function Dialog({
   initialFocusRef?: RefObject<HTMLElement | null> | null;
   className?: string;
   role?: 'dialog' | 'alertdialog';
+  /** The close button's label; "Close" in the reader's language by default. */
   closeLabel?: string;
   children?: ReactNode;
   footer?: ReactNode;
 }) {
+  const { t } = useI18n();
+  const close = closeLabel ?? t.dialog.close;
   const titleId = useId();
   const descriptionId = useId();
   const dialog = useRef<HTMLElement>(null);
@@ -50,7 +54,7 @@ export function Dialog({
             {eyebrow && <p className="eyebrow">{eyebrow}</p>}
             <h2 id={titleId}>{title}</h2>
           </div>
-          <button className="button button-icon modal-close" type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel}>
+          <button className="button button-icon modal-close" type="button" onClick={onClose} aria-label={close} title={close}>
             <CloseIcon />
           </button>
         </header>
@@ -69,7 +73,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
-  cancelLabel = 'Cancel',
+  cancelLabel,
   danger = false,
   busy = false,
   onConfirm,
@@ -88,6 +92,7 @@ export function ConfirmDialog({
 }) {
   // The safe choice gets the initial focus, so Enter never confirms by accident.
   const cancel = useRef<HTMLButtonElement>(null);
+  const { t } = useI18n();
   return (
     <Dialog
       title={title}
@@ -99,7 +104,7 @@ export function ConfirmDialog({
       footer={(
         <>
           <button className={`button ${danger ? 'button-danger' : 'button-primary'}`} type="button" disabled={busy} onClick={onConfirm}>{confirmLabel}</button>
-          <button ref={cancel} className="button button-secondary" type="button" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
+          <button ref={cancel} className="button button-secondary" type="button" disabled={busy} onClick={onCancel}>{cancelLabel ?? t.common.cancel}</button>
         </>
       )}
     >

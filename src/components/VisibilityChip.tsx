@@ -1,5 +1,6 @@
 import type { ArticleVisibility } from '../lib/api';
-import { visibilityClassName, visibilityLabel } from '../lib/visibility';
+import { visibilityClassName } from '../lib/visibility';
+import { useI18n } from './I18n';
 
 function VisibilityEyeIcon() {
   return (
@@ -11,9 +12,10 @@ function VisibilityEyeIcon() {
 }
 
 export function VisibilityChip({ visibility }: { visibility: ArticleVisibility }) {
+  const { t } = useI18n();
   return (
     <span className={`status-chip visibility-${visibilityClassName(visibility)}`}>
-      <VisibilityEyeIcon />{visibilityLabel(visibility)}
+      <VisibilityEyeIcon />{t.visibility[visibilityClassName(visibility)]}
     </span>
   );
 }

@@ -1,4 +1,5 @@
 import { ZodError } from 'zod';
+import type { ArchiveRejectionReason } from './backupCodes.js';
 import { fieldError, fieldErrorsFromIssues, type FieldCode, type FieldError } from '../src/lib/errors.js';
 
 export type ErrorParams = Record<string, string | number | boolean>;
@@ -192,9 +193,10 @@ export function operationConflict(busy = false) {
   return new HttpError(409, 'conflict', busy ? 'The server is busy. Try again.' : 'A backup or restore is already running.');
 }
 
-/** BAK-3, BAK-7: the archive failed a check; nothing changed. */
+
+/** BAK-3, BAK-7: the archive failed a check; nothing changed. The English `message` names the details. */
 export class ArchiveRejectedError extends HttpError {
-  constructor(message: string) {
-    super(422, 'archive_rejected', message, { legacyCode: 'INVALID_BACKUP' });
+  constructor(reason: ArchiveRejectionReason, message: string) {
+    super(422, 'archive_rejected', message, { params: { reason }, legacyCode: 'INVALID_BACKUP' });
   }
 }

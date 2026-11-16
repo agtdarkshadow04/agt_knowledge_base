@@ -102,7 +102,7 @@ The admin panel is a separate page reachable only by visiting `/admin` directly;
 
 Members and the Admin sign in with cookie sessions: a random 32-byte token in an `HttpOnly`, `SameSite=Strict`, `Path=/` cookie (`agt_knowledge_base_member_session` for members, `agt_knowledge_base_session` for the Admin) that page scripts cannot read. Only its SHA-256 is stored (`member_sessions`, `sessions`), so signing out revokes it on the server, and sessions last `session.ttlHours`. Every state-changing request must also carry an `x-agt-request: 1` header. The cookies are marked `Secure` when a trusted proxy reports HTTPS (see [HTTPS](#https)); set `session.secureCookie` to `true` or `false` to override this. The member cookie is ignored on admin routes, and the Admin cookie on member routes. Changing a member's role, deactivating them, setting their password or deleting them ends all of their sessions.
 
-Moderators manage canonical tags and clean up orphaned tag references on the **Tags** page of the knowledge base (`/?view=tags`), linked in the header for Moderators only. The **Settings** dialog (the gear button in the header) keeps a few preferences in this browser only: the search-results view, whether the article page offers PDF and Markdown downloads, and the **text size** (1× to 2×). They are stored under `agt_knowledge_base_*` keys in `localStorage`; preferences saved by 1.x under `agt-*` keys are moved there once.
+Moderators manage canonical tags and clean up orphaned tag references on the **Tags** page of the knowledge base (`/?view=tags`), linked in the header for Moderators only. The **Settings** dialog (the gear button in the header) keeps a few preferences in this browser only: the **language** (English, French, German, Spanish, Brazilian Portuguese, Italian, Thai, Simplified Chinese, Hindi or Japanese; English until the reader picks another), the **time zone** that dates and times are shown in (the browser's own, or a fixed UTC offset), the **text size** (1× to 2×), the search-results view, and whether the article page offers PDF and Markdown downloads. The admin dashboard has the same language, time-zone and text-size controls behind its own gear button, and both share one `localStorage` object, `agt_knowledge_base_settings`; preferences saved by 1.x under `agt-*` keys are moved there once. Dates, times, numbers and sizes follow the chosen language's conventions. The interface is translated; article content and the API's English `message` texts are not (the UI shows its own text for each error code).
 
 Pages are addressed with query parameters on `/`: `/?article=<id>` opens an article, `&view=history` and `&view=edit` its history and editor, and `/?view=new`, `/?view=tags` and `/?view=login` the other pages. The article list keeps its search and filters in the address too. Links in the 1.x form (`/articles/<id>`, `/articles/<id>/history`, `/articles/<id>/edit`, `/articles/new`, `/tags`, `/login`) still work: the server redirects them to the new address. These redirects are removed in 3.0.0.
 
@@ -383,8 +383,8 @@ Schema changes are numbered SQL files, `server/migrations/NNNN_<name>.sql`, list
 ## Repository layout
 
 ```text
-src/              Member UI: src/components/ (pages, dialogs, icons), src/agt-base.css (AGT base stylesheet), src/styles.css
-src/admin/        Admin panel (separate entry: admin.html) and admin.css
+src/              Member UI: src/components/ (pages, dialogs, icons), src/translations.ts (the 10 locales), src/agt-base.css (AGT base stylesheet), src/styles.css
+src/admin/        Admin panel (separate entry: admin.html), its strings (i18n.ts) and admin.css
 public/           AGT logo, fonts and font licences, copied unmodified from the spec (UI-15)
 server/           Fastify API: entry point, app, route table, domain services, authorization, PostgreSQL adapter
 server/test/      Server tests (node:test)

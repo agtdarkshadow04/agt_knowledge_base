@@ -237,7 +237,8 @@ const restorePreviewFields = {
     identical: Type.Boolean(),
   }),
   ignoredSettings: Type.Array(Type.String(), { description: 'Dashboard settings in the backup that config.yaml defines; a restore drops them.' }),
-  warnings: Type.Array(Type.String()),
+  warnings: Type.Array(Type.String(), { description: 'English text of each warning.' }),
+  warningCodes: Type.Array(Type.Union([Type.Literal('log_tables_ignored'), Type.Literal('no_admin')]), { description: 'The warnings as codes, for translation: `log_tables_ignored`, `no_admin`.' }),
 };
 
 export const RestorePreview = object(restorePreviewFields);

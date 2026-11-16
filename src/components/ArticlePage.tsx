@@ -10,11 +10,9 @@ import { deleteArticle, getArticle, setArticlePinned, setArticleProtection, setA
 import type { Article } from '../lib/api';
 import { preferencesChangedEvent, readPreferences } from '../lib/preferences';
 import { routeHref } from '../lib/routes';
+import { formatTranslation } from '../translations';
+import { useI18n } from './I18n';
 import { BadgeCheckIcon, ClockIcon, DownloadIcon, EditIcon, FileTextIcon, HistoryIcon, LockKeyholeIcon, PinIcon, ShieldCheckIcon, TrashIcon, UnlockKeyholeIcon, UserRoundIcon } from './Icons';
-
-function formatTimestamp(value: string) {
-  return `${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`;
-}
 
 function downloadFilename(title: string, extension: 'md' | 'pdf') {
   const basename = title
@@ -30,6 +28,7 @@ function downloadFilename(title: string, extension: 'md' | 'pdf') {
 export function ArticlePage({ id }: { id: string }) {
   const { navigate } = useNavigation();
   const { user } = useAuth();
+  const { t, dateTime, error: describe } = useI18n();
   const viewerSub = user?.sub;
   const articleBodyRef = useRef<HTMLElement>(null);
   const [article, setArticle] = useState<Article | null>(null);
@@ -45,9 +44,9 @@ export function ArticlePage({ id }: { id: string }) {
     setLoading(true);
     setError('');
     try { setArticle(await getArticle(id, undefined, Boolean(viewerSub))); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Article not found.'); }
+    catch (cause) { setError(describe(cause)); }
     finally { setLoading(false); }
-  }, [id, viewerSub]);
+  }, [describe, id, viewerSub]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -110,7 +109,7 @@ export function ArticlePage({ id }: { id: string }) {
         .from(pdfSource)
         .save();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'PDF could not be created.');
+      setError(cause instanceof Error && !('code' in cause) ? t.article.pdfFailed : describe(cause));
     } finally {
       setPdfBusy(false);
     }
@@ -123,8 +122,8 @@ export function ArticlePage({ id }: { id: string }) {
     setNotice('');
     try {
       setArticle(await setArticleProtection(article.id, !article.isProtected, article.version));
-      setNotice(article.isProtected ? 'The article is no longer protected.' : 'The article is protected.');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Protection status could not be changed.'); }
+      setNotice(article.isProtected ? t.article.unprotectedNotice : t.article.protectedNotice);
+    } catch (cause) { setError(describe(cause)); }
     finally { setActionBusy(false); }
   }
 
@@ -135,8 +134,8 @@ export function ArticlePage({ id }: { id: string }) {
     setNotice('');
     try {
       setArticle(await setArticlePinned(article.id, !article.isPinned, article.version));
-      setNotice(article.isPinned ? 'The article was unpinned.' : 'The article was pinned.');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Pin status could not be changed.'); }
+      setNotice(article.isPinned ? t.article.unpinned : t.article.pinned);
+    } catch (cause) { setError(describe(cause)); }
     finally { setActionBusy(false); }
   }
 
@@ -147,8 +146,8 @@ export function ArticlePage({ id }: { id: string }) {
     setNotice('');
     try {
       setArticle(await setArticleVerified(article.id, !article.isVerified, article.version));
-      setNotice(article.isVerified ? 'The article is no longer verified.' : 'The article was verified.');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Verification status could not be changed.'); }
+      setNotice(article.isVerified ? t.article.unverifiedNotice : t.article.verifiedNotice);
+    } catch (cause) { setError(describe(cause)); }
     finally { setActionBusy(false); }
   }
 
@@ -159,71 +158,71 @@ export function ArticlePage({ id }: { id: string }) {
       await deleteArticle(article.id, article.version);
       navigate('/');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Article could not be deleted.');
+      setError(describe(cause));
       setActionBusy(false);
       setConfirmDelete(false);
     }
   }
 
-  if (loading) return <LoadingState message="Opening transmission…" />;
-  if (!article) return <ErrorState message={error || 'Article not found.'} onRetry={() => void load()} />;
+  if (loading) return <LoadingState message={t.article.loading} />;
+  if (!article) return <ErrorState message={error || t.article.notFound} onRetry={() => void load()} />;
 
   return (
     <div className="page article-page">
-      <nav className="breadcrumbs" aria-label="Breadcrumb"><Link to="/">Knowledge Base</Link><span>/</span><span aria-current="page">{article.title}</span></nav>
+      <nav className="breadcrumbs" aria-label={t.common.breadcrumb}><Link to="/">{t.common.knowledgeBase}</Link><span>/</span><span aria-current="page">{article.title}</span></nav>
       {error && <p className="error-note" role="alert">{error}</p>}
       <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
       <header className="article-header">
         <div className="article-title-row">
           <div>
-            <p className="eyebrow">Archive entry // version {article.version}</p>
+            <p className="eyebrow">{formatTranslation(t.article.eyebrow, { version: article.version })}</p>
             <h1>{article.title}</h1>
           </div>
           <div className="article-status">
             <VisibilityChip visibility={article.visibility} />
-            {article.isVerified && <span className="status-chip verified"><BadgeCheckIcon aria-hidden="true" />Verified</span>}
-            {article.isPinned && <span className="status-chip pinned"><PinIcon aria-hidden="true" />Pinned</span>}
-            {article.isProtected && <span className="status-chip protected"><LockKeyholeIcon aria-hidden="true" />Protected</span>}
+            {article.isVerified && <span className="status-chip verified"><BadgeCheckIcon />{t.status.verified}</span>}
+            {article.isPinned && <span className="status-chip pinned"><PinIcon />{t.status.pinned}</span>}
+            {article.isProtected && <span className="status-chip protected"><LockKeyholeIcon />{t.status.protected}</span>}
           </div>
         </div>
         <div className="tag-list">{article.tags.map((tag) => <TagChip key={tag.id} tag={tag} />)}</div>
         <dl className="audit-grid">
-          <div><dt><UserRoundIcon aria-hidden="true" />Created by</dt><dd>{article.createdByName}</dd></div>
-          <div><dt><ClockIcon aria-hidden="true" />Created</dt><dd>{formatTimestamp(article.createdAt)}</dd></div>
-          <div><dt><UserRoundIcon aria-hidden="true" />Last edited by</dt><dd>{article.modifiedByName}</dd></div>
-          <div><dt><ClockIcon aria-hidden="true" />Last modified</dt><dd>{formatTimestamp(article.modifiedAt)}</dd></div>
+          <div><dt><UserRoundIcon />{t.article.createdBy}</dt><dd>{article.createdByName}</dd></div>
+          <div><dt><ClockIcon />{t.article.created}</dt><dd><time dateTime={article.createdAt}>{dateTime(article.createdAt)}</time></dd></div>
+          <div><dt><UserRoundIcon />{t.article.modifiedBy}</dt><dd>{article.modifiedByName}</dd></div>
+          <div><dt><ClockIcon />{t.article.modified}</dt><dd><time dateTime={article.modifiedAt}>{dateTime(article.modifiedAt)}</time></dd></div>
         </dl>
         {user && (
           <div className="article-actions">
             {allowDownloads && (
               <>
                 <button className="button button-secondary" onClick={downloadMarkdown}>
-                  <DownloadIcon aria-hidden="true" /> Download Markdown Source
+                  <DownloadIcon /> {t.article.downloadMarkdown}
                 </button>
                 <button className="button button-secondary" disabled={pdfBusy} onClick={() => void downloadPdf()}>
-                  <FileTextIcon aria-hidden="true" />{pdfBusy ? 'Creating PDF…' : 'Download PDF'}
+                  <FileTextIcon />{pdfBusy ? t.article.creatingPdf : t.article.downloadPdf}
                 </button>
               </>
             )}
-            <Link className="button button-secondary" to={routeHref({ page: 'history', id: article.id })}><HistoryIcon aria-hidden="true" />Revision history</Link>
-            {canEdit && <Link className="button button-primary" to={routeHref({ page: 'edit', id: article.id })}><EditIcon aria-hidden="true" />Edit article</Link>}
+            <Link className="button button-secondary" to={routeHref({ page: 'history', id: article.id })}><HistoryIcon />{t.article.history}</Link>
+            {canEdit && <Link className="button button-primary" to={routeHref({ page: 'edit', id: article.id })}><EditIcon />{t.article.edit}</Link>}
             {isModerator && (
               <button className="button button-secondary" disabled={actionBusy} onClick={() => void togglePinned()}>
-                <PinIcon aria-hidden="true" />{article.isPinned ? 'Unpin' : 'Pin'}
+                <PinIcon />{article.isPinned ? t.article.unpin : t.article.pin}
               </button>
             )}
             {isModerator && (
               <button className="button button-secondary" disabled={actionBusy} onClick={() => void toggleVerified()}>
-                <BadgeCheckIcon aria-hidden="true" />{article.isVerified ? 'Unverify' : 'Verify'}
+                <BadgeCheckIcon />{article.isVerified ? t.article.unverify : t.article.verify}
               </button>
             )}
             {isModerator && (
               <button className="button button-secondary" disabled={actionBusy} onClick={() => void toggleProtection()}>
                 {article.isProtected ? <UnlockKeyholeIcon aria-hidden="true" /> : <ShieldCheckIcon aria-hidden="true" />}
-                {article.isProtected ? 'Unprotect' : 'Protect'}
+                {article.isProtected ? t.article.unprotect : t.article.protect}
               </button>
             )}
-            {isModerator && <button className="button button-danger" disabled={actionBusy} aria-haspopup="dialog" aria-expanded={confirmDelete} onClick={() => setConfirmDelete(true)}><TrashIcon aria-hidden="true" />Delete</button>}
+            {isModerator && <button className="button button-danger" disabled={actionBusy} aria-haspopup="dialog" aria-expanded={confirmDelete} onClick={() => setConfirmDelete(true)}><TrashIcon />{t.article.delete}</button>}
           </div>
         )}
       </header>
@@ -231,7 +230,7 @@ export function ArticlePage({ id }: { id: string }) {
       <div className={`article-layout ${headings.length ? '' : 'without-toc'}`}>
         {headings.length > 0 && (
           <aside className="toc" aria-labelledby="toc-title">
-            <h2 id="toc-title">Contents</h2>
+            <h2 id="toc-title">{t.article.contents}</h2>
             <ol>{headings.map((heading) => <li className={`depth-${heading.depth}`} key={heading.id}><a href={`#${heading.id}`}>{heading.text}</a></li>)}</ol>
           </aside>
         )}
@@ -239,9 +238,9 @@ export function ArticlePage({ id }: { id: string }) {
       </div>
       {confirmDelete && (
         <ConfirmDialog
-          title="Delete this article?"
-          description={`“${article.title}” and its revision history will be deleted permanently.`}
-          confirmLabel={actionBusy ? 'Deleting…' : 'Delete permanently'}
+          title={t.article.deleteTitle}
+          description={formatTranslation(t.article.deleteText, { title: article.title })}
+          confirmLabel={actionBusy ? t.common.deleting : t.article.deleteConfirm}
           danger
           busy={actionBusy}
           onConfirm={() => void removeArticle()}

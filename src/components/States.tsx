@@ -1,31 +1,35 @@
+import { useI18n } from './I18n';
 import { DatabaseIcon, SearchXIcon, SpinnerIcon, WarningIcon } from './Icons';
 
-export function LoadingState({ message = 'Loading galactic archives…' }: { message?: string }) {
+export function LoadingState({ message }: { message?: string }) {
+  const { t } = useI18n();
   return (
     <div className="state-panel" role="status" aria-live="polite">
-      <SpinnerIcon className="spin" aria-hidden="true" />
-      <p>{message}</p>
+      <SpinnerIcon className="spin" />
+      <p>{message ?? t.states.loading}</p>
     </div>
   );
 }
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="state-panel error-panel" role="alert">
-      <WarningIcon aria-hidden="true" />
-      <h2>Archive connection interrupted</h2>
+      <WarningIcon />
+      <h2>{t.states.errorTitle}</h2>
       <p>{message}</p>
-      {onRetry && <button className="button button-secondary" onClick={onRetry}>Try again</button>}
+      {onRetry && <button className="button button-secondary" onClick={onRetry}>{t.common.retry}</button>}
     </div>
   );
 }
 
 export function EmptyState({ filtered }: { filtered: boolean }) {
+  const { t } = useI18n();
   return (
     <div className="state-panel">
-      {filtered ? <SearchXIcon aria-hidden="true" /> : <DatabaseIcon aria-hidden="true" />}
-      <h2>{filtered ? 'No matching transmissions' : 'The archive is ready'}</h2>
-      <p>{filtered ? 'Adjust the search or filters and try again.' : 'No articles have been published yet.'}</p>
+      {filtered ? <SearchXIcon /> : <DatabaseIcon />}
+      <h2>{filtered ? t.states.noMatchesTitle : t.states.emptyTitle}</h2>
+      <p>{filtered ? t.states.noMatchesText : t.states.emptyText}</p>
     </div>
   );
 }

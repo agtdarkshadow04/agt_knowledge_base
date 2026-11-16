@@ -63,7 +63,7 @@ describe('ManageTagsPanel', () => {
 
     await user.type(screen.getByLabelText('Name'), 'portal');
     await user.click(screen.getByRole('button', { name: 'Create tag' }));
-    expect(screen.getByText(/unique, regardless of capitalization/i)).toBeInTheDocument();
+    expect(screen.getByText(/unique, whatever their capitalization/i)).toBeInTheDocument();
     expect(mocks.createTag).not.toHaveBeenCalled();
 
     await user.clear(screen.getByLabelText('Name'));
@@ -71,7 +71,7 @@ describe('ManageTagsPanel', () => {
     await user.clear(screen.getByLabelText('Color'));
     await user.type(screen.getByLabelText('Color'), 'orange');
     await user.click(screen.getByRole('button', { name: 'Create tag' }));
-    expect(screen.getByText(/#RRGGBB format/i)).toBeInTheDocument();
+    expect(screen.getByText(/Color is not in the right format/i)).toBeInTheDocument();
     expect(mocks.createTag).not.toHaveBeenCalled();
   });
 
@@ -125,7 +125,7 @@ describe('ManageTagsPanel', () => {
     const opener = screen.getByRole('button', { name: 'Delete Portal' });
     await user.click(opener);
     let dialog = screen.getByRole('alertdialog', { name: 'Delete “Portal”?' });
-    expect(dialog).toHaveTextContent(/references are kept and stay unresolved/i);
+    expect(dialog).toHaveTextContent(/keep their references to it until a Moderator removes them/i);
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(mocks.deleteTag).not.toHaveBeenCalled();
     expect(opener).toHaveFocus();

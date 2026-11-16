@@ -2,6 +2,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionUser } from '../lib/api';
+import { ApiError } from '../lib/client';
 import { currentUrl, renderAt, RouteProbe } from '../test/navigation';
 import { LoginPage } from './LoginPage';
 
@@ -40,7 +41,7 @@ describe('LoginPage', () => {
   it('describes local credentials', () => {
     renderLogin();
 
-    expect(screen.getByText(/locally managed AGT account/i)).toBeInTheDocument();
+    expect(screen.getByText(/AGT Knowledge Base account/i)).toBeInTheDocument();
     expect(screen.queryByText(/cognito/i)).not.toBeInTheDocument();
   });
 
@@ -62,12 +63,13 @@ describe('LoginPage', () => {
   });
 
   it('shows the sign-in error and stays on the page', async () => {
-    mocks.signIn.mockRejectedValue(new Error('Invalid username or password.'));
+    // I18N-6: the reader sees the translation of the error code, not the server's English message.
+    mocks.signIn.mockRejectedValue(new ApiError(401, 'Invalid username or password.', 'invalid_credentials'));
     renderLogin();
 
     await submitCredentials('darkshadow04', 'wrong-password');
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid username or password.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('The username or password is wrong.');
     expect(screen.getByRole('button', { name: /^sign in$/i })).toBeEnabled();
     expect(screen.getByTestId('route')).toHaveTextContent('login');
   });

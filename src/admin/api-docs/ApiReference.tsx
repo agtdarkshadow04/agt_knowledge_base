@@ -1,23 +1,41 @@
 import { Markdown } from '../../components/Markdown';
-import type { ApiDocument, ApiOperation, AuthMode, SchemaField } from '../../lib/openapi';
+import { useI18n } from '../../components/I18n';
+import type { ApiDocument, ApiOperation, AuthMode, SchemaConstraint, SchemaField } from '../../lib/openapi';
 import { GaugeIcon, KeyRoundIcon, LockKeyholeIcon, LockOpenIcon, ShieldCheckIcon, ShieldHalfIcon } from '../../components/Icons';
+import { formatTranslation } from '../../translations';
+import { useAdminI18n } from '../context';
 
 /**
  * Renders a parsed OpenAPI document. Descriptions go through the one Markdown
  * component (SEC-12, raw HTML shown as text); everything else is text.
- * Shared by the member API page and the admin panel's API tab, so it must not
- * import from src/admin/.
+ * Shown only in the admin panel's API tab (API-14). The document's own text
+ * (summaries, descriptions) is the API's, in English; the labels are translated.
  */
 
-const authLabels: Record<AuthMode, { label: string; icon: typeof LockOpenIcon }> = {
-  none: { label: 'Public', icon: LockOpenIcon },
-  member: { label: 'Member session', icon: KeyRoundIcon },
-  admin: { label: 'Admin session', icon: LockKeyholeIcon },
-};
+const authIcons: Record<AuthMode, typeof LockOpenIcon> = { none: LockOpenIcon, member: KeyRoundIcon, admin: LockKeyholeIcon };
 
 function AuthBadge({ auth }: { auth: AuthMode }) {
-  const { label, icon: Icon } = authLabels[auth];
-  return <span className={`api-badge api-auth-${auth}`}><Icon aria-hidden="true" />{label}</span>;
+  const { a } = useAdminI18n();
+  const Icon = authIcons[auth];
+  const label = { none: a.api.public, member: a.api.memberSession, admin: a.api.adminSession }[auth];
+  return <span className={`api-badge api-auth-${auth}`}><Icon />{label}</span>;
+}
+
+function ConstraintText({ constraint }: { constraint: SchemaConstraint }) {
+  const { a } = useAdminI18n();
+  const { number } = useI18n();
+  const c = a.api.constraints;
+  switch (constraint.kind) {
+    case 'unique': return c.unique;
+    case 'pattern': return formatTranslation(c.pattern, { pattern: constraint.pattern });
+    case 'default': return constraint.value === null ? c.defaultEmpty : formatTranslation(c.defaultValue, { value: constraint.value });
+    default: {
+      const texts = { length: [c.lengthRange, c.lengthMin, c.lengthMax], value: [c.valueRange, c.valueMin, c.valueMax], items: [c.itemsRange, c.itemsMin, c.itemsMax] }[constraint.kind];
+      const values = { min: constraint.min === undefined ? '' : number(constraint.min), max: constraint.max === undefined ? '' : number(constraint.max) };
+      const text = constraint.min !== undefined && constraint.max !== undefined ? texts[0] : constraint.min !== undefined ? texts[1] : texts[2];
+      return formatTranslation(text, values);
+    }
+  }
 }
 
 function FieldTable({ fields, caption, showLocation = false }: {
@@ -25,29 +43,30 @@ function FieldTable({ fields, caption, showLocation = false }: {
   caption: string;
   showLocation?: boolean;
 }) {
+  const { a } = useAdminI18n();
   return (
     <div className="table-scroll">
       <table className="api-table">
         <caption className="sr-only">{caption}</caption>
         <thead>
           <tr>
-            <th scope="col">Name</th>
-            {showLocation && <th scope="col">In</th>}
-            <th scope="col">Type</th>
-            <th scope="col">Details</th>
+            <th scope="col">{a.api.colName}</th>
+            {showLocation && <th scope="col">{a.api.colIn}</th>}
+            <th scope="col">{a.api.colType}</th>
+            <th scope="col">{a.api.colDetails}</th>
           </tr>
         </thead>
         <tbody>
           {fields.map((field) => (
             <tr key={`${field.location ?? ''}:${field.name}`}>
-              <td><code>{field.name}</code>{field.required && <span className="api-required"> required</span>}</td>
+              <td><code>{field.name}</code>{field.required && <span className="api-required"> {a.api.required}</span>}</td>
               {showLocation && <td>{field.location}</td>}
               <td><code>{field.type}</code></td>
               <td>
                 {field.description && <Markdown content={field.description} />}
                 {field.constraints.length > 0 && (
                   <ul className="api-constraints">
-                    {field.constraints.map((constraint) => <li key={constraint}>{constraint}</li>)}
+                    {field.constraints.map((constraint, index) => <li key={index}><ConstraintText constraint={constraint} /></li>)}
                   </ul>
                 )}
               </td>
@@ -60,7 +79,9 @@ function FieldTable({ fields, caption, showLocation = false }: {
 }
 
 function Operation({ operation }: { operation: ApiOperation }) {
+  const { a } = useAdminI18n();
   const titleId = `${operation.id}-title`;
+  const name = `${operation.method} ${operation.path}`;
   return (
     <article className="api-operation" id={operation.id} aria-labelledby={titleId}>
       <header className="api-operation-header">
@@ -72,43 +93,43 @@ function Operation({ operation }: { operation: ApiOperation }) {
         <div className="api-badges">
           <AuthBadge auth={operation.auth} />
           {operation.requiredRole && (
-            <span className="api-badge api-role"><ShieldCheckIcon aria-hidden="true" />{operation.requiredRole} only</span>
+            <span className="api-badge api-role"><ShieldCheckIcon />{formatTranslation(a.api.roleOnly, { role: operation.requiredRole })}</span>
           )}
           {operation.csrfHeader && (
-            <span className="api-badge api-csrf"><ShieldHalfIcon aria-hidden="true" />x-agt-request: 1</span>
+            <span className="api-badge api-csrf"><ShieldHalfIcon />x-agt-request: 1</span>
           )}
           {operation.rateLimit && (
-            <span className="api-badge api-rate"><GaugeIcon aria-hidden="true" />Rate-limited ({operation.rateLimit})</span>
+            <span className="api-badge api-rate"><GaugeIcon />{formatTranslation(a.api.rateLimited, { limit: operation.rateLimit })}</span>
           )}
-          {operation.deprecated && <span className="api-badge api-deprecated">Deprecated</span>}
+          {operation.deprecated && <span className="api-badge api-deprecated">{a.api.deprecated}</span>}
         </div>
       </header>
       {operation.description && <Markdown content={operation.description} />}
 
       {operation.parameters.length > 0 && (
         <section className="api-subsection">
-          <h4>Parameters</h4>
-          <FieldTable fields={operation.parameters} caption={`Parameters of ${operation.method} ${operation.path}`} showLocation />
+          <h4>{a.api.parameters}</h4>
+          <FieldTable fields={operation.parameters} caption={formatTranslation(a.api.parametersOf, { operation: name })} showLocation />
         </section>
       )}
 
       {operation.requestBody && (
         <section className="api-subsection">
-          <h4>Request body</h4>
+          <h4>{a.api.requestBody}</h4>
           <p className="api-media"><code>{operation.requestBody.contentType}</code> · <code>{operation.requestBody.type}</code></p>
           {operation.requestBody.fields.length > 0 && (
-            <FieldTable fields={operation.requestBody.fields} caption={`Request body of ${operation.method} ${operation.path}`} />
+            <FieldTable fields={operation.requestBody.fields} caption={formatTranslation(a.api.requestBodyOf, { operation: name })} />
           )}
         </section>
       )}
 
       <section className="api-subsection">
-        <h4>Responses</h4>
+        <h4>{a.api.responses}</h4>
         <div className="table-scroll">
           <table className="api-table">
-            <caption className="sr-only">{`Responses of ${operation.method} ${operation.path}`}</caption>
+            <caption className="sr-only">{formatTranslation(a.api.responsesOf, { operation: name })}</caption>
             <thead>
-              <tr><th scope="col">Status</th><th scope="col">Description</th><th scope="col">Body</th></tr>
+              <tr><th scope="col">{a.api.colStatus}</th><th scope="col">{a.api.colDescription}</th><th scope="col">{a.api.colBody}</th></tr>
             </thead>
             <tbody>
               {operation.responses.map((response) => (
@@ -117,7 +138,7 @@ function Operation({ operation }: { operation: ApiOperation }) {
                   <td>
                     {response.description && <Markdown content={response.description} />}
                     {response.errorCodes.length > 0 && (
-                      <ul className="api-error-codes" aria-label="Error codes">
+                      <ul className="api-error-codes" aria-label={a.api.errorCodes}>
                         {response.errorCodes.map((code) => <li key={code}><code>{code}</code></li>)}
                       </ul>
                     )}
@@ -134,10 +155,11 @@ function Operation({ operation }: { operation: ApiOperation }) {
 }
 
 export function ApiReference({ document }: { document: ApiDocument }) {
+  const { a } = useAdminI18n();
   return (
     <div className="api-reference">
-      <nav className="toc api-toc" aria-label="API contents">
-        <h2>Contents</h2>
+      <nav className="toc api-toc" aria-label={a.api.contents}>
+        <h2>{a.api.contentsTitle}</h2>
         <ol>
           {document.groups.map((group) => (
             <li key={group.slug}>
@@ -151,7 +173,7 @@ export function ApiReference({ document }: { document: ApiDocument }) {
               </ol>
             </li>
           ))}
-          {document.schemas.length > 0 && <li><a href="#api-schemas">Schemas</a></li>}
+          {document.schemas.length > 0 && <li><a href="#api-schemas">{a.api.schemas}</a></li>}
         </ol>
       </nav>
 
@@ -168,13 +190,13 @@ export function ApiReference({ document }: { document: ApiDocument }) {
 
         {document.schemas.length > 0 && (
           <section id="api-schemas" className="api-group" aria-labelledby="api-schemas-title">
-            <h2 id="api-schemas-title">Schemas</h2>
+            <h2 id="api-schemas-title">{a.api.schemas}</h2>
             {document.schemas.map((schema) => (
               <article key={schema.name} id={`schema-${schema.name}`} className="api-operation api-schema" aria-labelledby={`schema-${schema.name}-title`}>
                 <h3 id={`schema-${schema.name}-title`}>{schema.name}</h3>
                 <p className="api-media"><code>{schema.type}</code></p>
                 {schema.description && <Markdown content={schema.description} />}
-                {schema.fields.length > 0 && <FieldTable fields={schema.fields} caption={`Fields of ${schema.name}`} />}
+                {schema.fields.length > 0 && <FieldTable fields={schema.fields} caption={formatTranslation(a.api.fieldsOf, { schema: schema.name })} />}
               </article>
             ))}
           </section>

@@ -1,5 +1,5 @@
 import '@mdxeditor/editor/style.css';
-import { type RefObject, useEffect, useRef } from 'react';
+import { type RefObject, useEffect, useMemo, useRef } from 'react';
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -16,8 +16,8 @@ import {
   UndoRedo,
 } from '@mdxeditor/editor';
 import { editorTranslation } from '../lib/editorTranslation';
+import { useI18n } from './I18n';
 
-const translation = editorTranslation();
 
 interface RichMarkdownEditorProps {
   value: string;
@@ -58,6 +58,8 @@ function useSelectFocusReturn(shell: RefObject<HTMLDivElement | null>) {
 export function RichMarkdownEditor({ value, onChange }: RichMarkdownEditorProps) {
   const shell = useRef<HTMLDivElement>(null);
   useSelectFocusReturn(shell);
+  const { t } = useI18n();
+  const translation = useMemo(() => editorTranslation(t.richEditor), [t]);
   return (
     <div className="rich-editor-shell" ref={shell}>
       <MDXEditor

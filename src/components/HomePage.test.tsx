@@ -102,9 +102,9 @@ describe('HomePage', () => {
       .mockResolvedValueOnce({ items: [article('article-2', 'Second article')], nextCursor: null, total: 2 });
     renderAt('/', <HomePage />);
 
-    expect(await screen.findByText('2 results • 1 shown')).toBeInTheDocument();
+    expect(await screen.findByText('Results: 2 · shown: 1')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Load more' }));
-    expect(await screen.findByText('2 results • 2 shown')).toBeInTheDocument();
+    expect(await screen.findByText('Results: 2 · shown: 2')).toBeInTheDocument();
     expect(screen.getByText('First article')).toBeInTheDocument();
     expect(screen.getByText('Second article')).toBeInTheDocument();
     expect(mocks.listArticles).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'cursor-1', limit: 12 }), undefined, false);
