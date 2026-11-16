@@ -18,6 +18,7 @@ For contributors: the route table, with each route's TypeBox schemas, is `server
 - [Limits and caching](#limits-and-caching)
 - [Settings](#settings)
 - [Backups](#backups)
+- [Logs](#logs)
 
 ## Base URL and formats
 
@@ -230,7 +231,7 @@ Client addresses come from `X-Forwarded-For` only when `server.trustProxy` allow
 
 ## Settings
 
-The dashboard settings (CFG-6) are `site.title`, `site.subtitle`, `site.supportUrl`, `articles.defaultVisibility`, `access.allowPublicBrowsing`, `backup.maxZipBytes`, `backup.maxUncompressedBytes` and `backup.maxEntries`; `config.example.yaml` lists their defaults and allowed values. Each resolves to the value in `config.yaml` if the file sets it, otherwise the dashboard value, otherwise the default (CFG-7).
+The dashboard settings (CFG-6) are `site.title`, `site.subtitle`, `site.supportUrl`, `articles.defaultVisibility`, `access.allowPublicBrowsing`, `backup.maxZipBytes`, `backup.maxUncompressedBytes`, `backup.maxEntries` and the `logs.*` retention settings; `config.example.yaml` lists their defaults and allowed values. Each resolves to the value in `config.yaml` if the file sets it, otherwise the dashboard value, otherwise the default (CFG-7).
 
 - `GET /api/settings/public` returns what the public UI needs, grouped as in `config.yaml`: `{ "site": { "title", "subtitle", "supportUrl" }, "articles": { "defaultVisibility" }, "access": { "allowPublicBrowsing" } }`.
 - `GET /api/admin/settings` returns `states`: one `{ key, value, source, locked, default, description }` per setting, where `source` is `config`, `dashboard` or `default` and `locked` means `config.yaml` sets the key.
@@ -263,3 +264,24 @@ Backups made by AGT Knowledge Base 1.x (a `database.json` table dump) are refuse
 Deprecated until 3.0.0 (VER-10): `POST /api/admin/backup/restore?action=preview|restore`, whose body is the ZIP file itself (`content-type: application/zip`). It answers like `POST /api/admin/restore`. The preview and report field `migrations` (`backup` and `upgrade` migration ids) is deprecated in favour of `schemaVersion`.
 
 See the [Backups section of the README](../README.md#backups) for operational details.
+
+## Logs
+
+The Admin reads the server log and the audit log through these routes (LOG-18). Lists are newest first and paginated with `limit` (1–200, default 50) and the opaque `nextCursor`, passed back as `cursor` (API-8). `from` and `to` are ISO 8601 times; `q` searches the message (server log) or the actor, action, target and details (audit log).
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/admin/logs/server` | `{ items, nextCursor }` of `{ id, at, level, source, message, requestId, details }`; filters `level` (minimum: `info`, `warn`, `error`, `fatal`), `source`, `from`, `to`, `q` |
+| `GET /api/admin/logs/server/export` | The same filters plus `format=jsonl\|csv`; a streamed download |
+| `GET /api/admin/logs/server/summary` | `{ unseenWarnings, unseenErrors }` since the server log was last marked seen |
+| `POST /api/admin/logs/server/seen` | Marks the server log seen now; `204` |
+| `DELETE /api/admin/logs/server` | Deletes every server log entry; `204` |
+| `GET /api/admin/logs/audit` | `{ items, nextCursor }` of `{ id, at, lastAt, count, actorType, actor, ipHash, client, action, method, route, targetType, targetId, outcome, statusCode, requestId, details }`; filters `actorType` (`admin`, `member`, `anonymous`), `action` (an `operationId`), `outcome` (`success`, `denied`, `rate_limited`, `failure`), `targetType`, `targetId`, `from`, `to`, `q` |
+| `GET /api/admin/logs/audit/export` | The same filters plus `format=jsonl\|csv`; a streamed download |
+
+No route edits or deletes audit entries. Every request that changes something, backup downloads, log exports, denied admin requests and rate-limited requests are audited automatically, with the route's `operationId` as `action`. Send `x-agt-client: web` from the app's own UI so entries record `client: web`; the header is informational and never affects authorization. Exports are named `agt-knowledge-base-<server|audit>-log-<timestamp>.<jsonl|csv>`, and CSV cells that start with `=`, `+`, `-`, `@`, a tab or a carriage return get a leading `'`.
+
+```bash
+curl -sS -b admin.cookies "$SITE/api/admin/logs/audit?outcome=denied&limit=20"
+curl -sS -b admin.cookies -OJ "$SITE/api/admin/logs/audit/export?format=csv&from=2026-11-01T00:00:00Z"
+```

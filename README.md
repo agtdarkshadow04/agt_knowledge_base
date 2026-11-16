@@ -94,8 +94,9 @@ The admin panel is a separate page reachable only by visiting `/admin` directly;
 
 - **Users** creates, updates, deactivates, resets passwords for, and deletes member accounts (Editor or Moderator).
 - **Data** shows archive statistics and the inventory of every article at every visibility level.
-- **Settings** edits the site title, subtitle and support link, default article visibility, public browsing, and backup limits. Settings defined in `config.yaml` are shown read-only, marked "Set in the configuration file" (see [Configuration](#configuration)).
+- **Settings** edits the site title, subtitle and support link, default article visibility, public browsing, backup limits and log retention. Settings defined in `config.yaml` are shown read-only, marked "Set in the configuration file" (see [Configuration](#configuration)).
 - **Backup & restore** downloads and restores backups (see [Backups](#backups)).
+- **Server log** and **Audit log** show, filter, search and export the two logs (see [Logs](#logs)). The Server log tab shows a badge while there are unseen warnings or errors.
 - **Account** changes the Admin password. It requires the current password and signs out every other Admin session.
 - **API** renders the API reference from the server's OpenAPI document (`/api/openapi.json`). The header shows the app version.
 
@@ -139,7 +140,7 @@ Compose mounts `config.yaml` read-only at `/app/config.yaml` (the server reads `
 | --- | --- | --- | --- |
 | `server.host`, `server.port` | `127.0.0.1` (`0.0.0.0` in the Docker image), `8081` | API listener | No |
 | `server.trustProxy` | `false` (`config.example.yaml` sets `1`) | Proxies to trust for `X-Forwarded-For` and `X-Forwarded-Proto`: `true`, a proxy IP or CIDR (string or list), or a number of hops. Use `1` for the bundled Nginx and `2` with a TLS proxy in front of it; with `false`, every client shares Nginx's address for rate limits | No |
-| `server.logLevel` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` | No |
+| `server.logLevel` | `info` | What the server writes to standard output: `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent`. The server log always receives `info` and above | No |
 | `storage.dataDir`, `storage.backupsDir` | `data`, `backups` | Persistent files, relative to the working directory (`/app` in Docker); pre-restore backups and upload scratch files go to `dataDir/backupsDir` (the `agt-backups` volume), the failed-restore marker to `dataDir` | No |
 | `database.host`, `.port`, `.name`, `.user`, `.ssl` | `localhost` (or `AGT_KNOWLEDGE_BASE_DATABASE_HOST`), `5432`, `agt_knowledge_base`, `agt_knowledge_base`, `false` | PostgreSQL connection; the password is `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | No |
 | `database.previewName` | `agt_knowledge_base_preview` | The restore preview database, owned by the app role; every preview empties it | No |
@@ -156,6 +157,8 @@ Compose mounts `config.yaml` read-only at `/app/config.yaml` (the server reads `
 | `backup.maxZipBytes` | `209715200` (200 MiB; 1024 to 2 GiB) | Largest backup upload | Yes |
 | `backup.maxUncompressedBytes` | `1073741824` (1 GiB; 1024 to 8 GiB) | Largest uncompressed archive contents | Yes |
 | `backup.maxEntries` | `10000` (1 to 100000) | Most entries in an uploaded archive | Yes |
+| `logs.serverRetentionDays`, `logs.serverMaxEntries` | `30`, `100000` | How long and how many server log entries are kept (1–3650 days, 1000–10000000 entries) | Yes |
+| `logs.auditRetentionDays`, `logs.auditMaxEntries` | `365`, `1000000` | How long and how many audit log entries are kept (30–3650 days, 10000–10000000 entries) | Yes |
 
 A dashboard-editable key resolves to the value in `config.yaml` if the file sets it, otherwise the dashboard value, otherwise the default. **The configuration file always wins**: the API rejects changes to a key the file defines with HTTP `409`, naming the key, and no settings write, migration, or backup restore can override it.
 
@@ -286,6 +289,17 @@ Until the session expires, the Admin who started the restore can still sign in t
 
 The app never clears the failed state by itself because a file is missing: if only one of the two is present (for example after the container was recreated), the start-up error names the missing one; check the data before clearing both.
 
+### Logs
+
+The server keeps two logs in the `logs` schema of its database, shown in the admin panel. **Neither log is part of a backup, and a restore never changes them**, so the audit log keeps its record of a restore and of everything before it.
+
+- **Server log:** what the server did by itself: startup (version, schema versions, address, configuration file), configuration warnings such as the setup-password reminder, every migration, backups and restores, each retention run that deleted entries, and every unexpected error with its message and stack (source `http`, with the request ID). The Admin can filter, search, export and clear it. Everything at `info` and above also goes to standard output (`docker compose logs api`), and `server.logLevel` controls only that output.
+- **Audit log:** what users did: every request that changes something (articles, tags, member accounts, settings with their old and new values, backups and restores, sign-ins, sign-outs, setup and password changes, whether they succeeded or not), backup downloads and log exports, every denied request to the admin API, and every rate-limited request. Each entry records the time, whether the actor was the Admin, a member or anonymous, the Admin's or member's username, the action (the API operation), the route, the affected article, tag or member, the outcome and status code, the request ID, and a short summary of the change. Article bodies, passwords and other submitted values are never recorded, and a failed request records only which fields were invalid. Identical failures from the same address within a minute are counted in one entry. The Admin can filter, search and export it, but no one can edit or clear it through the app.
+
+**Privacy.** The audit log never stores IP addresses. It stores a pseudonymous hash of the client address: the first 16 hex characters of an HMAC-SHA256 with a random key kept in the log store (for IPv6, of the /64 prefix). The hash can tell that two requests came from the same network address without revealing the address. Together with Admin and member usernames, it is kept for `logs.auditRetentionDays` (365 days by default, at least 30). Server log entries are kept for `logs.serverRetentionDays` (30 days). A retention job deletes older entries at startup and every hour, and then the oldest entries beyond `logs.serverMaxEntries` and `logs.auditMaxEntries` (in the audit log, denied, rate-limited and failed requests go before successes).
+
+Exports are JSON Lines or CSV files named `agt-knowledge-base-<server|audit>-log-<timestamp>.<ext>`. CSV cells that a spreadsheet would treat as a formula start with a `'`.
+
 ### Upgrades
 
 1. Back up the database (see above).
@@ -358,7 +372,7 @@ Schema changes are numbered SQL files, `server/migrations/NNNN_<name>.sql`, list
 - Markdown is rendered by one component, `src/components/Markdown.tsx` (`react-markdown` with GFM): raw HTML is shown as text, only `http:`/`https:` and same-site links and images are kept, external links open in a new tab with `rel="noopener noreferrer"`, and external images load lazily without a referrer. Images that authors link in Markdown are loaded by visitors' browsers directly from their hosts; the server itself never makes outbound requests.
 - The API rejects raw HTML, JSX tags, and MDX `import` / `export` statements. MDXEditor is used as a Markdown authoring surface only; content is never executed as MDX.
 - Article writes are validated with Zod and capped at 250,000 characters and 12 tags.
-- API errors do not return database details; a rejected backup says which check failed, never the `pg_restore` output, which the server logs instead. The API logs unexpected failures, with their request ID, as JSON to standard output.
+- API errors do not return database details; a rejected backup says which check failed, never the `pg_restore` output, which the server logs instead. The API logs unexpected failures, with their request ID, to the server log and to standard output, and never logs passwords, tokens, cookies, request bodies or raw IP addresses (see [Logs](#logs)).
 - Backups are available only to the Admin. Archives are checksummed and size- and path-checked, their dump's table of contents is allowlisted, and they are previewed in a separate database before restoring. A restore runs in maintenance, in a single transaction after a pre-restore backup, rolls back if anything fails, and signs everyone out. The app role is not a superuser, so even an allowed dump can only create and fill tables in the two databases it owns.
 - PostgreSQL timestamps are `timestamptz` values generated by the server and serialized as UTC ISO 8601.
 

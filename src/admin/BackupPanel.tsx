@@ -1,6 +1,7 @@
 import { Download, Eye, Upload } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { downloadBackup, previewBackup, restoreBackup } from './api';
+import { saveFile } from './download';
 import type { RestorePreview, RestoreReport } from './types';
 
 const tableLabels: Record<string, string> = {
@@ -12,17 +13,6 @@ const tableLabels: Record<string, string> = {
   settings: 'Dashboard settings',
   admin: 'Admin account',
 };
-
-function saveFile(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
 
 function Counts({ counts }: { counts: Record<string, number> }) {
   return (

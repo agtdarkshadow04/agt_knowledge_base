@@ -248,9 +248,84 @@ export const RestoreReport = object({
 
 export const Health = object({ status: Type.Union([Type.Literal('ok'), Type.Literal('maintenance')], { description: '`maintenance` while a restore runs or has failed (BAK-8).' }) });
 
+const binary = { schema: { type: 'string', format: 'binary' } };
+
+// --- Logs (LOG-7, LOG-10, LOG-18) -------------------------------------------------
+
+const Details = Type.Record(Type.String(), Type.Unknown(), { description: 'A JSON summary; never secrets or bulk content (LOG-9, LOG-14).' });
+
+export const ServerLogEntry = object({
+  id: Id,
+  at: Timestamp,
+  level: Type.Union(['info', 'warn', 'error', 'fatal'].map((level) => Type.Literal(level))),
+  source: Type.String({ description: 'The subsystem: `startup`, `shutdown`, `config`, `migrations`, `retention`, `backup`, `http`, `auth`, `security` or `server`.' }),
+  message: Type.String(),
+  requestId: nullable(Type.String()),
+  details: Details,
+});
+
+export const AuditLogEntry = object({
+  id: Id,
+  at: Timestamp,
+  lastAt: Timestamp,
+  count: Type.Integer({ description: 'Identical failures within 60 seconds are counted in one entry (LOG-11).' }),
+  actorType: Type.Union([Type.Literal('admin'), Type.Literal('member'), Type.Literal('anonymous')]),
+  actor: nullable(Type.String()),
+  ipHash: nullable(Type.String({ description: 'Pseudonymous client address (LOG-12); never the raw IP.' })),
+  client: Type.Union([Type.Literal('web'), Type.Literal('api')]),
+  action: Type.String({ description: 'The route\'s operationId.' }),
+  method: Type.String(),
+  route: Type.String(),
+  targetType: nullable(Type.String()),
+  targetId: nullable(Type.String()),
+  outcome: Type.Union(['success', 'denied', 'rate_limited', 'failure'].map((outcome) => Type.Literal(outcome))),
+  statusCode: Type.Integer(),
+  requestId: nullable(Type.String()),
+  details: Details,
+});
+
+const nextCursor = nullable(Type.String({ description: 'Pass as `cursor` to get the next page; null on the last page.' }));
+export const ServerLogList = object({ items: Type.Array(ServerLogEntry), nextCursor });
+export const AuditLogList = object({ items: Type.Array(AuditLogEntry), nextCursor });
+export const ServerLogSummary = object({
+  unseenWarnings: Type.Integer(),
+  unseenErrors: Type.Integer({ description: 'Unseen `error` and `fatal` entries.' }),
+});
+
+const logPageQuery = {
+  from: Type.Optional(Type.String({ description: 'ISO 8601; entries at or after.' })),
+  to: Type.Optional(Type.String({ description: 'ISO 8601; entries before.' })),
+  q: Type.Optional(Type.String({ description: 'Text to search for.' })),
+  limit: Type.Optional(Type.String({ description: '1–200, default 50.' })),
+  cursor: Type.Optional(Type.String()),
+};
+const formatQuery = { format: Type.Optional(Type.String({ description: '`jsonl` (default) or `csv`.' })) };
+const serverLogFilters = {
+  level: Type.Optional(Type.String({ description: 'Minimum level: `info`, `warn`, `error` or `fatal`.' })),
+  source: Type.Optional(Type.String()),
+  ...logPageQuery,
+};
+const auditLogFilters = {
+  actorType: Type.Optional(Type.String({ description: '`admin`, `member` or `anonymous`.' })),
+  action: Type.Optional(Type.String()),
+  outcome: Type.Optional(Type.String({ description: '`success`, `denied`, `rate_limited` or `failure`.' })),
+  targetType: Type.Optional(Type.String()),
+  targetId: Type.Optional(Type.String()),
+  ...logPageQuery,
+};
+export const ServerLogQuery = object(serverLogFilters);
+export const ServerLogExportQuery = object({ ...serverLogFilters, ...formatQuery });
+export const AuditLogQuery = object(auditLogFilters);
+export const AuditLogExportQuery = object({ ...auditLogFilters, ...formatQuery });
+
+/** A log export: JSON Lines or CSV, streamed (LOG-22). */
+export const LogExport = {
+  description: 'The log entries as JSON Lines or CSV.',
+  content: { 'application/x-ndjson': binary, 'text/csv': binary },
+} as unknown as TSchema;
+
 export const NoContent = Type.Null({ description: 'No content.' });
 
-const binary = { schema: { type: 'string', format: 'binary' } };
 
 /** A backup download: the ZIP archive, not JSON. */
 export const BackupArchive = { description: 'The backup ZIP archive.', content: { 'application/zip': binary } } as unknown as TSchema;

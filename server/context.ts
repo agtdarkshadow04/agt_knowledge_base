@@ -8,6 +8,7 @@ import {
   type SettingValues,
 } from './config.js';
 import type { Database } from './db.js';
+import type { LogSink } from './logs.js';
 import type { Operations } from './operation.js';
 
 /**
@@ -26,6 +27,8 @@ export interface AppContext {
   readonly version: string;
   /** The shared operation lock of backups and restores (BAK-8, BAK-12). */
   readonly operations: Operations;
+  /** The log store: the server log and the audit log (§13). */
+  readonly logs: LogSink;
   /** Where `pg_dump` and `pg_restore` are looked up (the PATH the server started with, BAK-6). */
   readonly toolPath: string;
 }

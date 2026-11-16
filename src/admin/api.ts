@@ -1,6 +1,11 @@
 import { ApiError, errorMessage } from '../services/api';
 import type { ArticleListParams, ArticleListResponse, UserRole } from '../types';
 import type {
+  AuditLogEntry,
+  LogFilters,
+  LogPage,
+  ServerLogEntry,
+  ServerLogSummary,
   AdminSession,
   AdminSettingsView,
   AdminStats,
@@ -151,4 +156,44 @@ export function previewBackup(file: Blob) {
 /** Replaces all data with the backup, after saving a pre-restore backup, and signs everyone out. */
 export function restoreBackup(file: Blob) {
   return uploadBackup<RestoreReport>(file, 'restore');
+}
+
+// --- Logs (LOG-18) ---------------------------------------------------------------
+
+export type LogKind = 'server' | 'audit';
+
+function logQuery(filters: LogFilters, extra: Record<string, string> = {}) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries({ ...filters, ...extra })) if (value) search.set(key, value);
+  const text = search.toString();
+  return text ? `?${text}` : '';
+}
+
+export function listServerLog(filters: LogFilters, cursor = '') {
+  return adminRequest<LogPage<ServerLogEntry>>(`/logs/server${logQuery(filters, { cursor })}`);
+}
+
+export function listAuditLog(filters: LogFilters, cursor = '') {
+  return adminRequest<LogPage<AuditLogEntry>>(`/logs/audit${logQuery(filters, { cursor })}`);
+}
+
+export function getServerLogSummary() {
+  return adminRequest<ServerLogSummary>('/logs/server/summary');
+}
+
+export function markServerLogSeen() {
+  return adminRequest<void>('/logs/server/seen', { method: 'POST' });
+}
+
+/** LOG-20: clears the server log. There is no way to clear the audit log. */
+export function clearServerLog() {
+  return adminRequest<void>('/logs/server', { method: 'DELETE' });
+}
+
+/** Downloads the entries matching `filters` as JSON Lines or CSV (LOG-22). */
+export async function exportLog(log: LogKind, filters: LogFilters, format: 'jsonl' | 'csv') {
+  const response = await adminFetch(`/logs/${log}/export${logQuery(filters, { format })}`);
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `agt-knowledge-base-${log}-log.${format}`;
+  return { blob: await response.blob(), filename };
 }

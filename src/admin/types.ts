@@ -55,6 +55,10 @@ export interface DashboardSettings {
   'backup.maxZipBytes': number;
   'backup.maxUncompressedBytes': number;
   'backup.maxEntries': number;
+  'logs.serverRetentionDays': number;
+  'logs.serverMaxEntries': number;
+  'logs.auditRetentionDays': number;
+  'logs.auditMaxEntries': number;
 }
 
 export type SettingKey = keyof DashboardSettings;
@@ -102,3 +106,48 @@ export interface RestoreReport extends RestorePreview {
   /** Null for a recovery restore after a failed one. */
   preRestoreBackup: string | null;
 }
+
+/** A server log entry (LOG-7). */
+export interface ServerLogEntry {
+  id: string;
+  at: string;
+  level: 'info' | 'warn' | 'error' | 'fatal';
+  source: string;
+  message: string;
+  requestId: string | null;
+  details: Record<string, unknown>;
+}
+
+/** An audit log entry (LOG-10); `member` actors are the AUTH-1 deviation. */
+export interface AuditLogEntry {
+  id: string;
+  at: string;
+  lastAt: string;
+  count: number;
+  actorType: 'admin' | 'member' | 'anonymous';
+  actor: string | null;
+  ipHash: string | null;
+  client: 'web' | 'api';
+  action: string;
+  method: string;
+  route: string;
+  targetType: string | null;
+  targetId: string | null;
+  outcome: 'success' | 'denied' | 'rate_limited' | 'failure';
+  statusCode: number;
+  requestId: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface LogPage<Entry> {
+  items: Entry[];
+  nextCursor: string | null;
+}
+
+export interface ServerLogSummary {
+  unseenWarnings: number;
+  unseenErrors: number;
+}
+
+/** Filters of either log; empty strings are left out of the request. */
+export type LogFilters = Record<string, string>;

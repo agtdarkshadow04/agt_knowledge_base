@@ -57,6 +57,7 @@ describe('settings precedence (CFG-7)', () => {
     assert.deepEqual(settingStates(config, stored).map((state) => state.key), [
       'site.title', 'site.subtitle', 'site.supportUrl', 'articles.defaultVisibility',
       'access.allowPublicBrowsing', 'backup.maxZipBytes', 'backup.maxUncompressedBytes', 'backup.maxEntries',
+      'logs.serverRetentionDays', 'logs.serverMaxEntries', 'logs.auditRetentionDays', 'logs.auditMaxEntries',
     ]);
   });
 

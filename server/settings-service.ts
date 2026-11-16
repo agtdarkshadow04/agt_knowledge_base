@@ -120,6 +120,11 @@ export class SettingsService {
    * not allowed by its schema (`400 invalid_setting`).
    */
   async update(input: SettingsWrite): Promise<AdminSettingsView> {
+    return (await this.updateWithChanges(input)).view;
+  }
+
+  /** `update()`, also returning each changed key's old and new effective value, for the audit log (LOG-14). */
+  async updateWithChanges(input: SettingsWrite): Promise<{ view: AdminSettingsView; changes: Record<string, { old: unknown; new: unknown }> }> {
     const usesLegacy = legacyNames.some((name) => input[name] !== undefined);
     if (input.values !== undefined && (usesLegacy || input.version !== undefined)) {
       throw new HttpError(400, 'invalid_request', 'Send either values or the deprecated 1.x fields, not both.');
@@ -144,10 +149,16 @@ export class SettingsService {
       throw new HttpError(400, 'invalid_setting', `${invalid}: ${EDITABLE_SETTINGS[invalid].description}`, { params: { key: invalid } });
     }
 
-    const stored = await withTransaction(await this.context.db.pool(), async (client) => {
+    const { before, stored } = await withTransaction(await this.context.db.pool(), async (client) => {
+      const previous = await readStoredSettings(client);
       await writeSettings(client, values);
-      return readStoredSettings(client);
+      return { before: previous, stored: await readStoredSettings(client) };
     });
-    return toView(settingStates(this.context.config, stored));
+    const oldValues = settingValues(this.context.config, before);
+    const newValues = settingValues(this.context.config, stored);
+    const changes = Object.fromEntries((Object.keys(newValues) as SettingKey[])
+      .filter((key) => JSON.stringify(oldValues[key]) !== JSON.stringify(newValues[key]))
+      .map((key) => [key, { old: oldValues[key], new: newValues[key] }]));
+    return { view: toView(settingStates(this.context.config, stored)), changes };
   }
 }

@@ -81,6 +81,15 @@ export const EDITABLE_SETTINGS = {
     10_000,
     'Most entries an uploaded backup archive may contain.',
   ),
+  'logs.serverRetentionDays': editable(integer(1, 3650), 30, 'Days the server log keeps an entry.'),
+  'logs.serverMaxEntries': editable(integer(1000, 10_000_000), 100_000, 'Most entries the server log keeps; the oldest go first.'),
+  // LOG-16: at least 30 days, so recent audit history cannot be erased by shortening retention.
+  'logs.auditRetentionDays': editable(integer(30, 3650), 365, 'Days the audit log keeps an entry (at least 30).'),
+  'logs.auditMaxEntries': editable(
+    integer(10_000, 10_000_000),
+    1_000_000,
+    'Most entries the audit log keeps; the oldest failures go first, then the oldest successes.',
+  ),
 } satisfies Record<string, EditableSetting>;
 
 export type SettingKey = keyof typeof EDITABLE_SETTINGS;
@@ -178,6 +187,12 @@ export const ConfigSchema = Type.Object({
   }),
   articles: group({ defaultVisibility: fileSetting('articles.defaultVisibility') }),
   access: group({ allowPublicBrowsing: fileSetting('access.allowPublicBrowsing') }),
+  logs: group({
+    serverRetentionDays: fileSetting('logs.serverRetentionDays'),
+    serverMaxEntries: fileSetting('logs.serverMaxEntries'),
+    auditRetentionDays: fileSetting('logs.auditRetentionDays'),
+    auditMaxEntries: fileSetting('logs.auditMaxEntries'),
+  }),
 }, { additionalProperties: false });
 
 type ParsedConfig = Static<typeof ConfigSchema>;

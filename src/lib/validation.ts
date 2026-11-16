@@ -239,3 +239,57 @@ export function parseListQuery(query: Record<string, string | string[] | undefin
     pageSize: first(query.pageSize),
   });
 }
+
+// --- Logs (LOG-18) -------------------------------------------------------------
+
+const optionalText = (max: number) => z.string().trim().max(max).optional().transform((value) => value || undefined);
+const optionalTime = z.string().optional().transform((value, context) => {
+  if (!value) return undefined;
+  const time = new Date(value);
+  if (Number.isNaN(time.getTime())) {
+    context.addIssue({ code: 'custom', message: 'Use an ISO 8601 date and time.' });
+    return z.NEVER;
+  }
+  return time;
+});
+const logPage = {
+  from: optionalTime,
+  to: optionalTime,
+  q: optionalText(200),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: z.string().max(200).default(''),
+};
+const exportFormat = z.enum(['jsonl', 'csv']).default('jsonl');
+
+const serverLogQuerySchema = z.object({
+  level: z.enum(['info', 'warn', 'error', 'fatal']).optional(),
+  source: optionalText(50),
+  ...logPage,
+});
+
+const auditLogQuerySchema = z.object({
+  actorType: z.enum(['admin', 'member', 'anonymous']).optional(),
+  action: optionalText(100),
+  outcome: z.enum(['success', 'denied', 'rate_limited', 'failure']).optional(),
+  targetType: optionalText(50),
+  targetId: optionalText(100),
+  ...logPage,
+});
+
+type Query = Record<string, string | string[] | undefined>;
+const firstOf = (query: Query) => Object.fromEntries(Object.entries(query).map(([key, value]) => [key, first(value)]));
+
+/** `GET /api/admin/logs/server` filters (LOG-18). */
+export function parseServerLogQuery(query: Query) {
+  return serverLogQuerySchema.parse(firstOf(query));
+}
+
+/** `GET /api/admin/logs/audit` filters (LOG-18). */
+export function parseAuditLogQuery(query: Query) {
+  return auditLogQuerySchema.parse(firstOf(query));
+}
+
+/** The `format` of a log export (LOG-22). */
+export function parseExportFormat(query: Query) {
+  return exportFormat.parse(first(query.format));
+}
