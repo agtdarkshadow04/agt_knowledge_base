@@ -1,24 +1,31 @@
 import fastifyCookie from '@fastify/cookie';
+import fastifyMultipart from '@fastify/multipart';
 import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { Type } from '@sinclair/typebox';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import Fastify, { LogController, type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
-import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { createWriteStream, existsSync } from 'node:fs';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { authenticationHook, createAdminRequestHandler, type AdminRequestHandler } from './adminRoutes.js';
 import { toActor, type AuthenticatedUser } from './auth.js';
 import type { AppConfig } from './config.js';
 import type { AppContext } from './context.js';
 import { createRequestHandler, type RequestHandler } from './handler.js';
-import { BodyTooLargeError, errorReply, RateLimitedError } from './http.js';
+import { withDataWrite } from './dataWrite.js';
+import { BodyTooLargeError, errorReply, HttpError, RateLimitedError } from './http.js';
+import type { Admission } from './operation.js';
 import { registerOpenApi, routeSecurity } from './openapi.js';
 import { sharedRateLimitStore } from './rate-limit.js';
 import { ping } from './repository.js';
 import {
   apiRoutes,
   defaultMaxBodyBytes,
+  type ApiRequestUpload,
   maxBackupBodyBytes,
   type AdminIdentity,
   type ApiResponse,
@@ -29,6 +36,7 @@ import {
   AdminAuthService,
   adminSessionCookie,
   clearedCookie,
+  hashSessionToken,
   legacyAdminSessionCookie,
   MemberAuthService,
   memberSessionCookie,
@@ -74,6 +82,8 @@ export interface BuildAppOptions {
   staticDir?: string;
   /** The rate limiter's clock, for tests. */
   rateLimitClock?: () => number;
+  /** Runs a `writesData` route's work; `withDataWrite()` on the context's database by default (BAK-8). */
+  dataWrite?: <T>(work: () => Promise<T>) => Promise<T>;
   /** Replace the route dispatchers, for tests of the HTTP pipeline. */
   handlers?: { request?: RequestHandler; admin?: AdminRequestHandler };
   /** Replace the authentication and settings services, for tests of the HTTP pipeline. */
@@ -88,12 +98,16 @@ declare module 'fastify' {
   interface FastifyContextConfig {
     /** The route-table entry this Fastify route serves. */
     apiRoute?: CompiledRoute;
+    /** Whether the route changes the main database (BAK-8). */
+    writesData?: boolean;
   }
   interface FastifyRequest {
     member: AuthenticatedUser | null;
     admin: AdminIdentity | null;
     /** The session cookie the authentication hook read, for logout. */
     sessionToken: string | undefined;
+    /** The request's admission under the activity lease (BAK-12); released when the response ends. */
+    admission: Admission | null;
   }
 }
 
@@ -109,10 +123,21 @@ function sendJson(reply: FastifyReply, statusCode: number, body: unknown, header
   return reply.code(statusCode).headers({ ...headers, ...jsonType }).send(body);
 }
 
-function sendApiResponse(reply: FastifyReply, result: ApiResponse) {
+function sendApiResponse(reply: FastifyReply, result: ApiResponse | Outcome) {
   reply.code(result.statusCode).headers(result.headers);
   return result.body === undefined ? reply.send() : reply.send(result.body);
 }
+
+/** A response computed before it is sent, so a data write commits first (BAK-12). */
+interface Outcome {
+  statusCode: number;
+  headers: Record<string, string | string[]>;
+  body?: unknown;
+}
+
+const json = (statusCode: number, body: unknown, headers: Record<string, string | string[]> = {}): Outcome => (
+  { statusCode, body, headers: { ...headers, ...jsonType } }
+);
 
 /**
  * `server.trustProxy`: false uses the socket address, true trusts every
@@ -225,7 +250,12 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   const adminAuth = options.services?.adminAuth ?? new AdminAuthService(context, undefined, authLog);
   const settingsService = options.services?.settings ?? new SettingsService(context);
   const handleRequest = options.handlers?.request ?? createRequestHandler(context);
-  const handleAdminRequest = options.handlers?.admin ?? createAdminRequestHandler(context);
+  const backupLog = {
+    info: (message: string) => app.log.info({ source: 'backup' }, message),
+    warn: (message: string) => app.log.warn({ source: 'backup' }, message),
+    error: (message: string) => app.log.error({ source: 'backup' }, message),
+  };
+  const handleAdminRequest = options.handlers?.admin ?? createAdminRequestHandler(context, { backupLog });
 
   /**
    * Whether session cookies get the Secure attribute (AUTH-8). `auto` sets it
@@ -252,8 +282,8 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
     ];
   }
 
-  function startSession(request: FastifyRequest, reply: FastifyReply, statusCode: number, session: AdminSessionResult) {
-    return sendJson(reply, statusCode, adminSessionBody(session.identity.username), { 'set-cookie': adminCookies(request, session) });
+  function startSession(request: FastifyRequest, statusCode: number, session: AdminSessionResult) {
+    return json(statusCode, adminSessionBody(session.identity.username), { 'set-cookie': adminCookies(request, session) });
   }
 
   /** SEC-4: one warning per process the first time credentials arrive over plain HTTP from another host. */
@@ -275,6 +305,8 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   app.decorateRequest('admin', null);
   app.decorateRequest('sessionToken', undefined);
   app.register(fastifyCookie);
+  // BAK-1: the restore upload; parts are streamed to a temporary file in serve().
+  app.register(fastifyMultipart, { limits: { files: 1, fields: 2, fieldSize: 100, parts: 3 } });
   // SEC-7: per-route limits only, keyed by request.ip (which honours server.trustProxy).
   app.register(fastifyRateLimit, {
     global: false,
@@ -291,6 +323,25 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   });
   app.setNotFoundHandler((_request, reply) => sendError(reply, 404, { error: 'not_found', message: 'Route not found.', code: 'NOT_FOUND' }));
 
+  // BAK-12 admission: every /api/ request except the health check is admitted
+  // under the activity lease, before authentication, so a restore never sees
+  // a request touch the database. The BAK-11 recovery session is recognised here.
+  app.decorateRequest('admission', null);
+  app.addHook('onRequest', async (request, reply) => {
+    const route = request.routeOptions.config.apiRoute;
+    if (!route || route.routeKey === 'GET /api/health') return;
+    const token = request.cookies[adminSessionCookie];
+    const admission = await context.operations.admit({
+      routeKey: route.handlerKey,
+      ...(route.admin && token ? { adminTokenHash: hashSessionToken(token) } : {}),
+    });
+    request.admission = admission;
+    reply.raw.once('close', () => admission.release());
+    if (admission.recovery) {
+      request.admin = { username: admission.recovery.username };
+      request.sessionToken = token;
+    }
+  });
   app.addHook('onRequest', authenticationHook({ adminAuth, memberAuth, secureCookie }));
 
   // Routes are added in a plugin registered after @fastify/swagger and
@@ -305,6 +356,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
         url: route.path.replace(/\{([^}]+)\}/g, ':$1'),
         config: {
           apiRoute: route,
+          writesData: route.writesData,
           // A deprecated path shares its replacement's bucket (groupId), so it adds no attempts.
           ...(limit ? { rateLimit: { max: limit.max, timeWindow: limit.windowMinutes * 60_000, groupId: route.rateLimit } } : {}),
         },
@@ -317,7 +369,8 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
             const limit = (await settingsService.values())['backup.maxZipBytes'];
             const declared = Number(request.headers['content-length']);
             if (Number.isFinite(declared) && declared > limit) throw new BodyTooLargeError(limit);
-            return payload.pipe(limitStream(limit));
+            // @fastify/multipart reads the raw request itself and enforces the limit as fileSize.
+            return route.multipart ? payload : payload.pipe(limitStream(limit));
           },
         } : {}),
         handler: async (request, reply) => serve(route, request, reply),
@@ -327,45 +380,101 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
     if (options.staticDir && existsSync(join(options.staticDir, 'index.html'))) registerStatic(routes, options.staticDir);
   });
 
+  const dataWrite = options.dataWrite ?? (<T>(work: () => Promise<T>) => withDataWrite(context.db, work));
+
+  /** `<dataDir>/<backupsDir>/tmp/<uuid>`: uploads are streamed there and the directory is always deleted (SEC-10). */
+  async function uploadDirectory() {
+    const directory = join(resolve(config.storage.dataDir, config.storage.backupsDir), 'tmp', randomUUID());
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    return directory;
+  }
+
+  /** Reads the multipart restore upload: the `backup` file into `directory`, `action` as text (BAK-1). */
+  async function readUpload(request: FastifyRequest, directory: string) {
+    if (!request.isMultipart()) throw new HttpError(415, 'multipart_required', 'Send the backup as multipart/form-data with the backup file and action.');
+    const maxBytes = (await settingsService.values())['backup.maxZipBytes'];
+    let action: string | undefined;
+    let file: string | undefined;
+    for await (const part of request.parts({ limits: { fileSize: maxBytes, files: 1, fields: 2, fieldSize: 100 } })) {
+      if (part.type === 'field') {
+        if (part.fieldname !== 'action') throw new HttpError(400, 'invalid_request', `Unexpected form field ${part.fieldname.slice(0, 50)}.`);
+        action = String(part.value);
+        continue;
+      }
+      if (part.fieldname !== 'backup' || file) throw new HttpError(400, 'invalid_request', 'Send exactly one file, named backup.');
+      const target = join(directory, 'upload.zip');
+      await pipeline(part.file, createWriteStream(target, { flags: 'wx', mode: 0o600 }));
+      if (part.file.truncated) throw new BodyTooLargeError(maxBytes);
+      file = target;
+    }
+    if (!file) throw new HttpError(400, 'file_required', 'Upload a backup archive as the backup file.');
+    return { action: action ?? '', file };
+  }
+
   async function serve(route: CompiledRoute, request: FastifyRequest, reply: FastifyReply) {
-    const rawBody = route.rawBody && Buffer.isBuffer(request.body) && request.body.length ? request.body : undefined;
-    const body = route.rawBody ? undefined : request.body;
+    let directory: string | undefined;
+    try {
+      let upload: ApiRequestUpload | undefined;
+      if (route.multipart) {
+        directory = await uploadDirectory();
+        upload = await readUpload(request, directory);
+      } else if (route.rawBody) {
+        // The deprecated restore path: the body is the archive itself.
+        directory = await uploadDirectory();
+        const file = join(directory, 'upload.zip');
+        await writeFile(file, Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0), { mode: 0o600 });
+        upload = { action: (request.query as Record<string, string>).action ?? '', file };
+      }
+      const work = () => compute(route, request, upload);
+      const outcome = route.writesData ? await dataWrite(work) : await work();
+      return sendApiResponse(reply, outcome);
+    } finally {
+      if (directory) await rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  async function compute(route: CompiledRoute, request: FastifyRequest, upload?: ApiRequestUpload): Promise<Outcome> {
+    const body = route.rawBody || route.multipart ? undefined : request.body;
 
     switch (route.handlerKey) {
-      case 'GET /api/health':
+      case 'GET /api/health': {
+        // BAK-8: Docker must not restart the container mid-restore (SRV-11).
+        const { state } = context.operations;
+        if (state === 'restore' || state === 'restore_failed') return json(200, { status: 'maintenance' });
         await ping(context.db);
-        return sendJson(reply, 200, { status: 'ok' });
+        return json(200, { status: 'ok' });
+      }
       case 'POST /api/member/login': {
         warnOnPlainHttp(request);
         const input = parseCredentials(body);
         const session = await memberAuth.login(input.username, input.password);
-        return sendJson(reply, 200, session.identity, {
+        return json(200, session.identity, {
           'set-cookie': sessionCookie(memberSessionCookie, session.token, session.expiresAt, secureCookie(request)),
         });
       }
       case 'POST /api/member/logout':
         await memberAuth.logout(request.sessionToken);
-        return reply.code(204).header('set-cookie', clearedCookie(memberSessionCookie, secureCookie(request))).send();
+        return { statusCode: 204, headers: { 'set-cookie': clearedCookie(memberSessionCookie, secureCookie(request)) } };
       case 'GET /api/member/session':
-        return sendJson(reply, 200, request.member);
+        return json(200, request.member);
       case 'GET /api/setup/status':
-        return sendJson(reply, 200, await adminAuth.setupStatus());
+        return json(200, await adminAuth.setupStatus());
       case 'POST /api/setup':
         warnOnPlainHttp(request);
-        return startSession(request, reply, 201, await adminAuth.setup(parseAdminSetup(body)));
+        return startSession(request, 201, await adminAuth.setup(parseAdminSetup(body)));
       case 'POST /api/admin/login': {
         warnOnPlainHttp(request);
         const input = parseCredentials(body);
-        return startSession(request, reply, 200, await adminAuth.login(input.username, input.password));
+        return startSession(request, 200, await adminAuth.login(input.username, input.password));
       }
       case 'POST /api/admin/logout':
         await adminAuth.logout(request.sessionToken);
-        return reply.code(204).header('set-cookie', adminCookies(request, null)).send();
+        return { statusCode: 204, headers: { 'set-cookie': adminCookies(request, null) } };
       case 'GET /api/admin/session':
-        return sendJson(reply, 200, adminSessionBody(request.admin!.username));
+        return json(200, adminSessionBody(request.admin!.username));
       case 'POST /api/admin/password': {
         const input = parseAdminAccountPassword(body);
-        return startSession(request, reply, 200, await adminAuth.changePassword(input.currentPassword, input.password));
+        return startSession(request, 200, await adminAuth.changePassword(input.currentPassword, input.password));
       }
     }
 
@@ -374,13 +483,16 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
       pathParameters: request.params as Record<string, string>,
       query: request.query as Record<string, string>,
       body,
-      rawBody,
+      upload,
+      sessionToken: request.sessionToken,
       requestId: request.id,
     };
     const result = route.admin
       ? await handleAdminRequest({ ...apiRequest, actor: null, admin: request.admin })
       : await handleRequest({ ...apiRequest, actor: request.member ? toActor(request.member) : null });
-    return sendApiResponse(reply, result);
+    // A restore replaces the Admin account, so the caller signs in again (BAK-4 step 6.4).
+    if (result.endsAdminSession) return { ...result, headers: { ...result.headers, 'set-cookie': adminCookies(request, null) } };
+    return result;
   }
 
   return app;

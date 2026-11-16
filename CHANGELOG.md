@@ -97,8 +97,34 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   `docker compose up -d --build --remove-orphans`. The 1.x contract migrations that waited for `MIGRATION_TARGET_ID`
   (`007`, `014`, `016`) now run automatically; `MIGRATION_TARGET_ID` and `npm run db:migrate` no longer exist. A
   database with a migration the server does not know (a newer schema) stops it with a clear message ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+- **Backups are now `pg_dump` archives, and 2.0 cannot restore a 1.x backup.** A 1.x backup (`database.json`) is
+  refused with `422 archive_rejected`: restore it with 1.x before upgrading, or keep a `pg_dump` of the 1.x database.
+  Download a new backup after upgrading. The API image now contains the PostgreSQL 16 client tools; outside Docker,
+  install `pg_dump` and `pg_restore` of your server's major version. The restore preview needs the
+  `agt_knowledge_base_preview` database, which new installations and `deploy/upgrade-database-role.sql` create ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+- **Restores take the app offline briefly.** While a restore runs, every API request answers
+  `503 maintenance`; while a backup runs, writes wait for it. If you run your own reverse proxy, allow several minutes
+  for `POST /api/admin/restore` ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 
 ### Added
+- Backups (§12): `GET /api/admin/backup` downloads `agt-knowledge-base-backup-<timestamp>.zip` with a `pg_dump`
+  custom-format `database.dump` of the `public` schema (without session rows), `config.yaml`, and the BAK-2
+  `manifest.json` (format version 1, schema version, each file's size and SHA-256) (BAK-1, BAK-2, BAK-6, BAK-7) ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+- `POST /api/admin/restore` (multipart `backup` file and `action=preview|restore`). The preview filters the dump's
+  table of contents through an allowlist and restores it into the preview database (`database.previewName`) to check
+  it; the restore checks the upload again, writes a pre-restore backup and its restore list, replaces the database
+  with `pg_restore` in one transaction, migrates and checks it, and rolls back to the pre-restore backup if anything
+  fails (BAK-3, BAK-4, BAK-10). Server-side ZIP handling lives in `server/zip.ts` (SEC-10). New runtime
+  dependency: `@fastify/multipart`, the plugin STACK-1 names for uploads ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+- The BAK-12 shared operation lock: a `control` schema with its own migrations (`server/migrations/control/`), a
+  control connection per process, the operation, activity and write advisory locks, admission of every API request
+  under the activity lease, and following of the shared state. Every route declares `writesData`, and data writes
+  run in `withDataWrite()`. During a restore the API answers `503 maintenance` with `Retry-After: 10` and
+  `GET /api/health` reports `maintenance` (BAK-8, BAK-9, BAK-12) ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+- Failed-restore recovery (BAK-11): a restore whose rollback fails, or whose process dies, leaves every process in
+  maintenance, writes `restore-failed.json` to `storage.dataDir`, and lets only the restoring Admin's session run a
+  recovery restore; the server refuses to start until the operator has cleared the failed state (README,
+  "Recovering from a failed restore") ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 
 - `GET /api/openapi.json`: the OpenAPI 3.1 document of every route, generated from the route schemas, with the app
   version ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
@@ -177,10 +203,20 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   and incoming IDs must be UUIDv4 (DATA-6, DATA-11); `varchar(n)` columns are `text` with the same length checks;
   `articles.modified_at` is renamed `updated_at`, and `app_users` and both session tables gain `updated_at` (DATA-8) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 - All SQL lives in `server/repository/` (SRV-4), except the backup code that Phase 6 replaces ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+  The backup and operation-lock SQL is there too now ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+- The `backup.*` limits follow CFG-5: `maxZipBytes` 1024 to 2 GiB (default 200 MiB), `maxUncompressedBytes` 1024 to
+  8 GiB (default 1 GiB), `maxEntries` 1 to 100000 (default 10000). Values set before stay valid ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+- Restore previews and reports have `formatVersion`, `schemaVersion` (`backup`, `current`) and `warnings`; a
+  report's `preRestoreBackup` is `null` after a recovery restore. Archive problems answer `422 archive_rejected`
+  (1.x `code` `INVALID_BACKUP`) instead of `400 invalid_backup` (API-6) ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+- The server refuses to start when `database.previewName` names the app's own database ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 
 ### Deprecated
 
 These keep working unchanged and are removed in 3.0.0 ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)):
+
+- `POST /api/admin/backup/restore?action=preview|restore` with the raw ZIP body (use the multipart
+  `POST /api/admin/restore`), and the `migrations` field of restore previews and reports (use `schemaVersion`) ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 
 - `GET /api/admin/setup/status`, `POST /api/admin/setup`, `POST /api/admin/auth/login`, `POST /api/admin/auth/logout`,
   `GET /api/admin/auth/session` and `PUT /api/admin/auth/password`: use `GET /api/setup/status`, `POST /api/setup`,
@@ -215,6 +251,11 @@ These keep working and are removed in 3.0.0:
 
 ### Removed
 
+- The 1.x backup format (`database.json` with a table dump, `formatVersion: 2`) and the staging-schema restore
+  (agreed in #48) ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+- The error codes `invalid_backup` and `pre_restore_backup_failed`, replaced by `422 archive_rejected` and
+  `500 internal` ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+
 - The public **API reference** page at `/api-docs` and its footer link; the API reference is now shown only to the
   Admin, in the admin panel (API-14) ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
 - The hand-written `docs/openapi.yaml` and `docs/openapi-admin.yaml`, replaced by `GET /api/openapi.json` ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
@@ -229,6 +270,11 @@ These keep working and are removed in 3.0.0:
 - The `migrate` Compose service, `scripts/migrate.ts`, `npm run db:migrate` and `MIGRATION_TARGET_ID` ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 
 ### Security
+
+- A restore can only run the parts of a dump that the BAK-3 allowlist keeps (tables, data, sequences, defaults,
+  constraints and indexes of the app's tables); functions, triggers, views, extensions, permissions and other
+  schemas reject the archive. The dump is restored into a separate preview database first, and the backup tools get
+  the database password only through `PGPASSWORD` (BAK-3, BAK-6) ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 
 - Member sessions are `HttpOnly` cookies that page scripts cannot read, and every member write needs the CSRF
   header (FE-3, SEC-5) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).

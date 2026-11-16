@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import type { Mock } from 'node:test';
+import { it, type Mock } from 'node:test';
+import { asDataWrite } from '../dataWrite.js';
 import { parseConfig, type AppConfig } from '../config.js';
 import type { AppContext } from '../context.js';
 import type { Database } from '../db.js';
-import { errorReply } from '../http.js';
+import { errorReply, MaintenanceError } from '../http.js';
+import type { Operations, OperationState } from '../operation.js';
 import type { ApiRequest, ApiResponse } from '../routes.js';
 
 type AnyFunction = (...args: never[]) => unknown;
@@ -149,10 +151,14 @@ export function callArgs(fn: Mock<AnyFunction>, index = 0): unknown[] {
 }
 
 /** A `Database` whose pool is the given fake. */
-export function fakeDatabase(pool: unknown): Database {
+const testConnection = { host: 'localhost', port: 5432, database: 'agt_knowledge_base', user: 'agt_knowledge_base', password: 'test-password', ssl: false };
+
+export function fakeDatabase(pool: unknown, client: () => unknown = () => { throw new Error('No client in this test.'); }): Database {
   return {
     pool: async () => pool as Awaited<ReturnType<Database['pool']>>,
     close: async () => undefined,
+    connection: () => ({ ...testConnection }),
+    client: () => client() as ReturnType<Database['client']>,
   };
 }
 
@@ -162,7 +168,39 @@ export const untouchedDatabase: Database = {
     throw new Error('The database must not be used by this test.');
   },
   close: async () => undefined,
+  connection: () => ({ ...testConnection }),
+  client: () => {
+    throw new Error('The database must not be used by this test.');
+  },
 };
+
+/**
+ * An operation lock for tests: admits every request while `state` allows it,
+ * and runs operations at once without any database lock.
+ */
+export function testOperations(state: OperationState = 'idle'): Operations & { state: OperationState; admitted: number; released: number } {
+  const operations = {
+    state,
+    admitted: 0,
+    released: 0,
+    async admit() {
+      if (operations.state === 'restore' || operations.state === 'restore_failed') throw new MaintenanceError();
+      operations.admitted += 1;
+      return { release: () => { operations.released += 1; } };
+    },
+    async run<T>(_kind: string, _options: unknown, work: (run: never) => Promise<T>) {
+      const run = {
+        signal: new AbortController().signal,
+        control: async () => { throw new Error('No control connection in this test.'); },
+        setPreRestoreBackup: async () => undefined,
+        fail: () => undefined,
+        preRestoreBackup: null,
+      };
+      return work(run as never);
+    },
+  };
+  return operations;
+}
 
 /** An app context for tests: default configuration, a database that must not be used, and test secrets. */
 export function testContext(overrides: Partial<Omit<AppContext, 'config'>> & { config?: AppConfig | string } = {}): AppContext {
@@ -173,6 +211,8 @@ export function testContext(overrides: Partial<Omit<AppContext, 'config'>> & { c
     db: untouchedDatabase,
     setupPassword: null,
     version: '1.0.0',
+    operations: testOperations(),
+    toolPath: '/usr/bin',
     ...rest,
   };
 }
@@ -188,4 +228,12 @@ export async function respond(handler: (request: ApiRequest) => Promise<ApiRespo
     const reply = errorReply(error);
     return { statusCode: reply.statusCode, headers: reply.headers, body: reply.body };
   }
+}
+
+/**
+ * `it()` for repository and service tests: each test body runs inside the
+ * data-write mark of `withDataWrite()` (BAK-8), as a declared route's handler does.
+ */
+export function dataWriteIt(name: string, fn: () => Promise<unknown> | unknown) {
+  return it(name, () => asDataWrite(async () => { await fn(); }));
 }

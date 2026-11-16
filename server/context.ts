@@ -8,6 +8,7 @@ import {
   type SettingValues,
 } from './config.js';
 import type { Database } from './db.js';
+import type { Operations } from './operation.js';
 
 /**
  * Everything the routes and services need, built once by `server/index.ts`
@@ -23,6 +24,10 @@ export interface AppContext {
   readonly setupPassword: string | null;
   /** The app version from `package.json`. */
   readonly version: string;
+  /** The shared operation lock of backups and restores (BAK-8, BAK-12). */
+  readonly operations: Operations;
+  /** Where `pg_dump` and `pg_restore` are looked up (the PATH the server started with, BAK-6). */
+  readonly toolPath: string;
 }
 
 export type SettingSource = 'config' | 'dashboard' | 'default';

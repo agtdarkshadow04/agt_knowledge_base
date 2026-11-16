@@ -22,9 +22,9 @@ export const visibilitySchema = z.union([
  * database.json is parsed as one string, which must fit V8's string limit.
  */
 export const backupLimits = {
-  maxZipBytes: { min: 1024 * 1024, max: 1024 * 1024 * 1024 },
-  maxUncompressedBytes: { min: 1024 * 1024, max: 500 * 1024 * 1024 },
-  maxEntries: { min: 3, max: 10_000 },
+  maxZipBytes: { min: 1024, max: 2 * 1024 * 1024 * 1024 },
+  maxUncompressedBytes: { min: 1024, max: 8 * 1024 * 1024 * 1024 },
+  maxEntries: { min: 1, max: 100_000 },
 } as const;
 
 const articleSchema = z.object({

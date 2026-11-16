@@ -68,17 +68,17 @@ export const EDITABLE_SETTINGS = {
   'access.allowPublicBrowsing': editable(Type.Boolean(), true, 'Whether visitors who are not signed in can browse public articles.'),
   'backup.maxZipBytes': editable(
     integer(backupLimits.maxZipBytes.min, backupLimits.maxZipBytes.max),
-    100 * 1024 * 1024,
+    200 * 1024 * 1024,
     'Largest backup upload in bytes.',
   ),
   'backup.maxUncompressedBytes': editable(
     integer(backupLimits.maxUncompressedBytes.min, backupLimits.maxUncompressedBytes.max),
-    256 * 1024 * 1024,
+    1024 * 1024 * 1024,
     'Largest total uncompressed size of an uploaded backup, in bytes.',
   ),
   'backup.maxEntries': editable(
     integer(backupLimits.maxEntries.min, backupLimits.maxEntries.max),
-    16,
+    10_000,
     'Most entries an uploaded backup archive may contain.',
   ),
 } satisfies Record<string, EditableSetting>;

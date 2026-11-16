@@ -23,7 +23,7 @@ For contributors: the route table, with each route's TypeBox schemas, is `server
 
 Every route is under `/api/` on the site's origin (API-1), for example `https://<host>/api/articles`. In development, Vite proxies `/api/` to the API on port 8081, so the same paths work at `http://localhost:5173/api/...`. The examples below use `$SITE` for the origin, for example `SITE=http://localhost:8080`.
 
-Requests and responses are JSON (`application/json`; send `content-type: application/json` with every body), except the backup download and restore upload, which are ZIP archives. Timestamps are ISO 8601 strings in UTC ending in `Z`, and IDs are lowercase UUIDs. Successful deletes and a few other writes answer `204 No Content` with no body. `GET /api/health` answers `{ "status": "ok" }` when the API and its database are up (SRV-11).
+Requests and responses are JSON (`application/json`; send `content-type: application/json` with every body), except the backup download (a ZIP archive) and the restore upload (`multipart/form-data`). Timestamps are ISO 8601 strings in UTC ending in `Z`, and IDs are lowercase UUIDs. Successful deletes and a few other writes answer `204 No Content` with no body. `GET /api/health` answers `{ "status": "ok" }` when the API and its database are up, and `{ "status": "maintenance" }` while a restore runs or has failed (SRV-11, BAK-8).
 
 Every route has one of three authentication modes, declared once in `server/routes.ts`:
 
@@ -182,13 +182,13 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 
 | Status | `error` | Deprecated `code` | Meaning |
 | --- | --- | --- | --- |
-| 400 | `invalid_request` | `INVALID_REQUEST`, `INVALID_JSON` | The body is missing or not valid JSON, a backup upload is empty, or a cursor cannot be used. |
+| 400 | `invalid_request` | `INVALID_REQUEST`, `INVALID_JSON` | The body is missing or not valid JSON, a restore upload has an unexpected part, or a cursor cannot be used. |
+| 400 | `file_required` | `FILE_REQUIRED` | A restore upload has no `backup` file. |
 | 400 | `validation_failed` | `VALIDATION_ERROR`, `INVALID_VERSION`, `INVALID_TAG_IDS`, `PASSWORD_REUSED`, `INVALID_ACTION` | The path, query or body fails validation; see `fields`. |
 | 400 | `no_changes` | `NO_CHANGES` | An article update changes nothing. |
 | 400 | `tag_not_orphaned` | `TAG_NOT_ORPHANED` | The tag is not an unresolved reference on that article. |
 | 400 | `unknown_setting` | — | A settings update names a key (`params.key`) that is not a dashboard setting. |
 | 400 | `invalid_setting` | `INVALID_SETTING` | A settings update gives a key (`params.key`) a value its schema does not allow. |
-| 400 | `invalid_backup` | `INVALID_BACKUP` | The backup archive cannot be restored; the message says why. |
 | 401 | `unauthorized` | `UNAUTHENTICATED` | The member or Admin session cookie is missing, unknown, or expired. |
 | 401 | `invalid_credentials` | `INVALID_CREDENTIALS`, `INVALID_CURRENT_PASSWORD` | Wrong username or password (or an inactive member), or a wrong current password on the Admin password change. |
 | 401 | `invalid_setup_password` | `INVALID_SETUP_PASSWORD` | The setup password is wrong. |
@@ -196,19 +196,21 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 | 403 | `public_browsing_closed` | `PUBLIC_BROWSING_DISABLED` | Anonymous reads are turned off. |
 | 403 | `csrf` | `CSRF_HEADER_REQUIRED` | The request lacks `x-agt-request: 1`. |
 | 404 | `not_found` | `NOT_FOUND`, `INVALID_ID`, `INVALID_TAG_ID`, `INVALID_USER_ID`, `TAG_NOT_FOUND`, `USER_NOT_FOUND` | The route, article, revision, tag or member account does not exist, the ID is malformed, or the caller may not see the article. |
-| 409 | `conflict` | `VERSION_CONFLICT`, `TAG_NAME_CONFLICT`, `USER_CONFLICT` | The article changed since it was read, or a name, username or email is taken. |
+| 409 | `conflict` | `VERSION_CONFLICT`, `TAG_NAME_CONFLICT`, `USER_CONFLICT`, `CONFLICT` | The article changed since it was read, a name, username or email is taken, or a backup or restore is already running or could not start ("The server is busy. Try again."). |
 | 409 | `defined_in_config` | `SETTING_DEFINED_IN_FILE` | The setting (`params.key`) is defined in `config.yaml` and cannot be changed through the API. |
 | 410 | `setup_complete` | `SETUP_ALREADY_COMPLETED` | An Admin already exists, so setup is closed (even while the setup password is still set). |
 | 413 | `file_too_large` | `BODY_TOO_LARGE` | A backup upload exceeds `backup.maxZipBytes` (`params.maxBytes`). |
 | 413 | `body_too_large` | `BODY_TOO_LARGE` | A JSON body exceeds 1 MB. |
+| 415 | `multipart_required` | `MULTIPART_REQUIRED` | `POST /api/admin/restore` was not sent as `multipart/form-data`. |
+| 422 | `archive_rejected` | `INVALID_BACKUP` | The backup archive failed a check (layout, manifest, checksums, limits, the dump's contents, a newer format or schema, or a 1.x backup); the message says why, and nothing changed. |
 | 429 | `rate_limited` | `RATE_LIMITED` | Too many attempts; wait `params.retryAfterSeconds` (also sent as `Retry-After`). |
 | 503 | `setup_password_missing` | `SETUP_DISABLED` | `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` is not set on the server, so setup is unavailable. |
-| 500 | `pre_restore_backup_failed` | `PRE_RESTORE_BACKUP_FAILED` | The pre-restore backup could not be written, so nothing was restored. |
-| 500 | `internal` | `INTERNAL_ERROR` | An unexpected failure. |
+| 500 | `internal` | `INTERNAL_ERROR` | An unexpected failure, or a restore that failed (the message says whether it was rolled back). |
+| 503 | `maintenance` | `MAINTENANCE` | A restore is running or has failed, or a write waited 30 seconds for a backup; retry after `params.retryAfterSeconds` (also sent as `Retry-After`). |
 
 ## Limits and caching
 
-**Body size.** JSON bodies are limited to 1 MB (`413 body_too_large`), except backup restore uploads, which may be up to the effective `backup.maxZipBytes` (100 MB by default; `413 file_too_large`). The limit is checked against `Content-Length` and while reading, after authentication, so anonymous clients cannot make the server buffer large bodies.
+**Body size.** JSON bodies are limited to 1 MB (`413 body_too_large`), except restore uploads, whose `backup` file may be up to the effective `backup.maxZipBytes` (200 MiB by default; `413 file_too_large`). The limit is checked against `Content-Length` and while reading, after authentication, so anonymous clients cannot make the server buffer large bodies.
 
 **Rate limits** (SEC-7, `@fastify/rate-limit`). These routes are limited per client address, right after the CSRF and session checks and before the body is read. An exceeded limit answers `429 rate_limited` with a `Retry-After` header (seconds). Limits are configured under `rateLimits.*` in `config.yaml`, are kept in memory, and reset when the API restarts. A deprecated path shares its replacement's limit.
 
@@ -218,7 +220,7 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 | `POST /api/admin/login` | `rateLimits.login` (deprecated `rateLimits.adminLogin` overrides it) | 10 per 15 minutes |
 | `POST /api/admin/password` | `rateLimits.login` (deprecated `rateLimits.adminPassword` overrides it) | 10 per 15 minutes |
 | `POST /api/setup` | `rateLimits.setup` | 10 per 15 minutes |
-| `POST /api/admin/backup/restore` | `rateLimits.adminUploads` | 120 per 15 minutes |
+| `POST /api/admin/restore` | `rateLimits.adminUploads` | 120 per 15 minutes |
 
 Each route has its own counter, so member sign-in attempts never use up the Admin's.
 
@@ -244,16 +246,20 @@ Deprecated until 3.0.0 (VER-10): `GET /api/settings` (the 1.x body `{ applicatio
 
 ## Backups
 
-- `GET /api/admin/backup` downloads a ZIP of every application table (except Admin sessions) and the current `config.yaml`, named in `Content-Disposition` as `agt-kb-backup-<timestamp>.zip`.
-- `POST /api/admin/backup/restore?action=preview` validates an archive and reports what a restore would do (migrations, row counts, the `config.yaml` difference, and settings `config.yaml` would override); nothing changes.
-- `POST /api/admin/backup/restore?action=restore` writes a pre-restore backup of the current data to `storage.backupsDir`, then replaces all data with the archive. `config.yaml` is never restored, and every Admin session is cleared, so sign in again with the Admin account from the backup.
-
-The restore body is the raw ZIP file, not a multipart form:
+- `GET /api/admin/backup` downloads a ZIP named `agt-knowledge-base-backup-<timestamp>.zip` (BAK-2): `manifest.json` (`format`, `formatVersion` 1, `appVersion`, `schemaVersion`, `createdAt`, and `files` with each entry's `path`, `size` and `sha256`), `database.dump` (a `pg_dump` custom-format dump of the `public` schema without session rows) and the current `config.yaml`.
+- `POST /api/admin/restore` takes `multipart/form-data` with the `backup` file and `action`:
+  - `action=preview` checks the archive (layout, manifest, checksums, limits), filters the dump's table of contents through an allowlist, restores it into the preview database (`database.previewName`) and reports the schema versions, row counts, warnings, the `config.yaml` difference and the settings `config.yaml` would override (`ignoredSettings`). Nothing changes.
+  - `action=restore` runs the same checks again, then puts the app in maintenance in every process, writes a pre-restore backup to `storage.backupsDir`, replaces the database, migrates it and checks it. If anything fails, the pre-restore backup is restored and the request answers `500 internal` ("The restore failed and was rolled back. Nothing was changed."). On success every Admin and member session ends and the caller's cookie is cleared, so sign in with the Admin account from the backup. `config.yaml` is never restored.
 
 ```bash
-curl -sS -b admin.cookies -X POST "$SITE/api/admin/backup/restore?action=preview" \
-  -H 'x-agt-request: 1' -H 'content-type: application/zip' \
-  --data-binary @agt-kb-backup.zip
+curl -sS -b admin.cookies -X POST "$SITE/api/admin/restore" \
+  -H 'x-agt-request: 1' -F action=preview -F backup=@agt-knowledge-base-backup.zip
 ```
+
+Backups made by AGT Knowledge Base 1.x (a `database.json` table dump) are refused with `422 archive_rejected`: restore them with 1.x, then upgrade.
+
+**Maintenance** (BAK-8). While a restore runs, or after one failed and could not be rolled back, every API request except `GET /api/health` answers `503 maintenance` with `Retry-After: 10`. During a backup, reads continue and writes wait for up to 30 seconds before answering `503 maintenance`. Clients retry once after `Retry-After` and never treat `503` as a sign-out.
+
+Deprecated until 3.0.0 (VER-10): `POST /api/admin/backup/restore?action=preview|restore`, whose body is the ZIP file itself (`content-type: application/zip`). It answers like `POST /api/admin/restore`. The preview and report field `migrations` (`backup` and `upgrade` migration ids) is deprecated in favour of `schemaVersion`.
 
 See the [Backups section of the README](../README.md#backups) for operational details.

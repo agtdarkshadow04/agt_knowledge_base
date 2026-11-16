@@ -2,14 +2,15 @@ import { MemberRepository } from './repository/members.js';
 import { json, noContent, parseBody, pathId } from './api-response.js';
 import { ArticleService } from './article-service.js';
 import { requireAdminSession } from './auth.js';
-import { BackupService } from './backup-service.js';
+import { BackupService } from './backup.js';
+import { adminSessionExpiry } from './repository/sessions.js';
 import { HttpError, invalidField } from './http.js';
 import { PostgresArticleRepository } from './repository/articles.js';
 import type { AppContext } from './context.js';
 import type { ApiRequest, ApiResponse } from './routes.js';
 import { SettingsService, type SettingsWrite } from './settings-service.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { adminSessionCookie, clearedCookie, memberSessionCookie, type AdminAuthService, type MemberAuthService } from './session.js';
+import { adminSessionCookie, clearedCookie, hashSessionToken, memberSessionCookie, type AdminAuthService, type MemberAuthService } from './session.js';
 import {
   parseAdminPasswordWrite,
   parseAdminUserCreate,
@@ -51,6 +52,8 @@ export function authenticationHook(options: AuthenticationHookOptions) {
       throw new HttpError(403, 'csrf', `Requests that change data must include the ${csrfHeader}: 1 header.`, { legacyCode: 'CSRF_HEADER_REQUIRED' });
     }
     if (route.auth === 'none') return;
+    // The BAK-11 recovery session was recognised at admission; the restored sessions table is never consulted.
+    if (route.auth === 'admin' && request.admission?.recovery) return;
     const cookie = route.auth === 'admin' ? adminSessionCookie : memberSessionCookie;
     const token = request.cookies[cookie];
     request.sessionToken = token;
@@ -73,9 +76,9 @@ export function authenticationHook(options: AuthenticationHookOptions) {
 const userId = (request: ApiRequest) => pathId(request, 'userId', 'user', 'INVALID_USER_ID');
 
 function restoreAction(request: ApiRequest) {
-  const action = request.query.action;
+  const action = request.upload?.action;
   if (action !== 'preview' && action !== 'restore') {
-    throw invalidField('action', 'not_allowed', 'The action query parameter must be preview or restore.', 'INVALID_ACTION');
+    throw invalidField('action', 'not_allowed', 'The action field must be preview or restore.', 'INVALID_ACTION');
   }
   return action;
 }
@@ -84,12 +87,13 @@ export type AdminRequestHandler = (request: ApiRequest) => Promise<ApiResponse>;
 
 /** Builds the admin route dispatcher. Errors are thrown for the app's error handler (SRV-5). */
 export function createAdminRequestHandler(
-  context: Pick<AppContext, 'config' | 'configFile' | 'db' | 'version'>,
+  context: Pick<AppContext, 'config' | 'configFile' | 'db' | 'version' | 'operations' | 'toolPath'>,
+  options: { backupLog?: { info(message: string): void; warn(message: string): void; error(message: string): void } } = {},
 ): AdminRequestHandler {
   const articleService = new ArticleService(new PostgresArticleRepository(context.db));
   const members = new MemberRepository(context);
   const settingsService = new SettingsService(context);
-  const backupService = new BackupService(context, settingsService);
+  const backupService = new BackupService(context, settingsService, { log: options.backupLog });
 
   return async function handleAdminRequest(request: ApiRequest): Promise<ApiResponse> {
     requireAdminSession(request);
@@ -115,25 +119,31 @@ export function createAdminRequestHandler(
       case 'PUT /api/admin/settings':
         return json(200, await settingsService.update(parseBody(request) as SettingsWrite));
       case 'GET /api/admin/backup': {
-        const backup = await backupService.export();
+        const backup = await backupService.backup();
         return {
           statusCode: 200,
           headers: {
             'content-type': 'application/zip',
             'content-disposition': `attachment; filename="${backup.filename}"`,
-            'cache-control': 'no-store',
-            'x-content-type-options': 'nosniff',
+            'content-length': String(backup.size),
           },
-          body: backup.archive,
+          body: backup.stream,
         };
       }
+      case 'POST /api/admin/restore':
       case 'POST /api/admin/backup/restore': {
         const action = restoreAction(request);
-        const archive = request.rawBody;
-        if (!archive?.length) throw new HttpError(400, 'invalid_request', 'Upload a backup archive.');
-        return json(200, action === 'preview'
-          ? await backupService.preview(archive)
-          : await backupService.restore(archive));
+        const upload = request.upload;
+        if (!upload) throw new HttpError(400, 'file_required', 'Upload a backup archive as the backup file.');
+        if (action === 'preview') return json(200, await backupService.preview(upload.file));
+        // BAK-11: the restoring Admin's session becomes the recovery session.
+        const token = request.sessionToken ?? '';
+        const tokenHash = hashSessionToken(token);
+        const recovery = context.operations.state === 'restore_failed';
+        const expiresAt = recovery ? new Date(0) : await adminSessionExpiry(await context.db.pool(), tokenHash);
+        if (!expiresAt) throw new HttpError(401, 'unauthorized', 'Admin sign-in is required.', { legacyCode: 'UNAUTHENTICATED' });
+        const report = await backupService.restore(upload.file, { tokenHash, username: request.admin!.username, expiresAt }, recovery);
+        return { ...json(200, report), endsAdminSession: true };
       }
       default:
         throw new HttpError(404, 'not_found', 'Route not found.');

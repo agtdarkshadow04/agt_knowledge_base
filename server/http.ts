@@ -179,3 +179,22 @@ export class BodyTooLargeError extends HttpError {
     super(413, 'file_too_large', 'Request body is too large.', { params: { maxBytes }, legacyCode: 'BODY_TOO_LARGE' });
   }
 }
+
+/** BAK-8: a restore is running, or a write waited too long for a backup. Sent with `Retry-After: 10`. */
+export class MaintenanceError extends HttpError {
+  constructor() {
+    super(503, 'maintenance', 'Maintenance in progress. Try again in a moment.', { params: { retryAfterSeconds: 10 } });
+  }
+}
+
+/** BAK-8: `409 conflict` when a backup or restore cannot start. */
+export function operationConflict(busy = false) {
+  return new HttpError(409, 'conflict', busy ? 'The server is busy. Try again.' : 'A backup or restore is already running.');
+}
+
+/** BAK-3, BAK-7: the archive failed a check; nothing changed. */
+export class ArchiveRejectedError extends HttpError {
+  constructor(message: string) {
+    super(422, 'archive_rejected', message, { legacyCode: 'INVALID_BACKUP' });
+  }
+}

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { describe, it, mock } from 'node:test';
+import { describe, mock } from 'node:test';
 import type { Actor } from '../domain.js';
 import { mergeOrphanTagIds, PostgresArticleRepository } from '../repository/articles.js';
-import { fakeDatabase } from './helpers.js';
+import { dataWriteIt, fakeDatabase } from './helpers.js';
 
 type Query = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -24,7 +24,7 @@ function fakeClient(handler: (sql: string, params?: unknown[]) => unknown = () =
 }
 
 describe('orphaned tag IDs (formerly merge_preserved_orphan_tag_ids, DATA-11)', () => {
-  it('keeps every ID no longer in the catalog in its place and fills the others from the submitted IDs', () => {
+  dataWriteIt('keeps every ID no longer in the catalog in its place and fills the others from the submitted IDs', () => {
     const catalog = new Set([a, b, c]);
     assert.deepEqual(mergeOrphanTagIds([a, orphan1, b], catalog, [c, a]), [c, orphan1, a]);
     assert.deepEqual(mergeOrphanTagIds([orphan1, a, orphan2], catalog, [b]), [orphan1, b, orphan2]);
@@ -34,7 +34,7 @@ describe('orphaned tag IDs (formerly merge_preserved_orphan_tag_ids, DATA-11)', 
     assert.deepEqual(mergeOrphanTagIds([], catalog, [a]), [a]);
   });
 
-  it('merges in the update transaction, with the article row locked', async () => {
+  dataWriteIt('merges in the update transaction, with the article row locked', async () => {
     const { query, repository } = fakeClient((sql) => {
       if (sql.startsWith('SELECT id FROM tags WHERE id = ANY($1::uuid[]) FOR KEY SHARE')) return { rows: [{ id: b }], rowCount: 1 };
       if (sql.startsWith('SELECT tag_ids FROM articles')) return { rows: [{ tag_ids: [orphan1, a] }], rowCount: 1 };
@@ -52,7 +52,7 @@ describe('orphaned tag IDs (formerly merge_preserved_orphan_tag_ids, DATA-11)', 
 });
 
 describe('generated IDs (DATA-6)', () => {
-  it('gives a new article and a new tag a crypto.randomUUID() ID', async () => {
+  dataWriteIt('gives a new article and a new tag a crypto.randomUUID() ID', async () => {
     const { query, repository } = fakeClient((sql) => (sql.includes('RETURNING') ? { rows: [{ id: a, name: 'Portal', color: '#FFFFFF' }], rowCount: 1 } : undefined));
     await repository.create({ title: 'Portal Guide', content: 'x'.repeat(20), tagIds: [] }, moderator).catch(() => undefined);
     const article = query.mock.calls.find(({ arguments: [sql] }) => sql.startsWith('INSERT INTO articles'))!;

@@ -45,7 +45,7 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
    cp config.example.yaml config.yaml
    ```
 
-   Pre-restore backups go to `./data/backups` (`storage.dataDir` and `storage.backupsDir`, relative to the working directory).
+   Pre-restore backups go to `./data/backups` (`storage.dataDir` and `storage.backupsDir`, relative to the working directory). Backups need the PostgreSQL 16 client tools (`pg_dump`, `pg_restore`) on the `PATH`.
 
 2. Start PostgreSQL. On first start, `deploy/postgres-init/10-app-role.sh` creates the `agt_knowledge_base` role (with `AGT_KNOWLEDGE_BASE_DB_PASSWORD` from `.env.local`) and its databases:
 
@@ -140,8 +140,9 @@ Compose mounts `config.yaml` read-only at `/app/config.yaml` (the server reads `
 | `server.host`, `server.port` | `127.0.0.1` (`0.0.0.0` in the Docker image), `8081` | API listener | No |
 | `server.trustProxy` | `false` (`config.example.yaml` sets `1`) | Proxies to trust for `X-Forwarded-For` and `X-Forwarded-Proto`: `true`, a proxy IP or CIDR (string or list), or a number of hops. Use `1` for the bundled Nginx and `2` with a TLS proxy in front of it; with `false`, every client shares Nginx's address for rate limits | No |
 | `server.logLevel` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` | No |
-| `storage.dataDir`, `storage.backupsDir` | `data`, `backups` | Persistent files, relative to the working directory (`/app` in Docker); pre-restore backups go to `dataDir/backupsDir` (the `agt-backups` volume) | No |
+| `storage.dataDir`, `storage.backupsDir` | `data`, `backups` | Persistent files, relative to the working directory (`/app` in Docker); pre-restore backups and upload scratch files go to `dataDir/backupsDir` (the `agt-backups` volume), the failed-restore marker to `dataDir` | No |
 | `database.host`, `.port`, `.name`, `.user`, `.ssl` | `localhost` (or `AGT_KNOWLEDGE_BASE_DATABASE_HOST`), `5432`, `agt_knowledge_base`, `agt_knowledge_base`, `false` | PostgreSQL connection; the password is `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | No |
+| `database.previewName` | `agt_knowledge_base_preview` | The restore preview database, owned by the app role; every preview empties it | No |
 | `session.ttlHours` | `12` | Sign-in lifetime (1–168 hours), for the Admin and for members | No |
 | `session.secureCookie` | `auto` | `Secure` attribute of the Admin cookie: `auto`, `true` or `false` | No |
 | `rateLimits.login` | 10 per 15 minutes | Member sign-in, Admin sign-in and Admin password changes, each counted separately | No |
@@ -152,9 +153,9 @@ Compose mounts `config.yaml` read-only at `/app/config.yaml` (the server reads `
 | `site.supportUrl` | `https://www.nms-agt.com/support` | Support link (an absolute `http:` or `https:` URL) | Yes |
 | `articles.defaultVisibility` | `Internal` | Default visibility of new articles | Yes |
 | `access.allowPublicBrowsing` | `true` | Whether visitors who are not signed in can browse public articles | Yes |
-| `backup.maxZipBytes` | `104857600` (100 MB, at most 1 GiB) | Largest backup upload | Yes |
-| `backup.maxUncompressedBytes` | `268435456` (256 MB, at most 500 MB) | Largest uncompressed archive contents | Yes |
-| `backup.maxEntries` | `16` | Most entries in an uploaded archive | Yes |
+| `backup.maxZipBytes` | `209715200` (200 MiB; 1024 to 2 GiB) | Largest backup upload | Yes |
+| `backup.maxUncompressedBytes` | `1073741824` (1 GiB; 1024 to 8 GiB) | Largest uncompressed archive contents | Yes |
+| `backup.maxEntries` | `10000` (1 to 100000) | Most entries in an uploaded archive | Yes |
 
 A dashboard-editable key resolves to the value in `config.yaml` if the file sets it, otherwise the dashboard value, otherwise the default. **The configuration file always wins**: the API rejects changes to a key the file defines with HTTP `409`, naming the key, and no settings write, migration, or backup restore can override it.
 
@@ -215,40 +216,75 @@ Any other proxy (Traefik, Nginx, HAProxy) works the same way. `server.trustProxy
 
 The Admin backs up and restores the installation from **Backup & restore** in the admin panel.
 
-**Download backup** creates `agt-kb-backup-YYYYMMDD-HHMMSS.zip` from one consistent database snapshot. It contains:
+**Download backup** creates `agt-knowledge-base-backup-<timestamp>.zip` (for example `agt-knowledge-base-backup-2026-11-10T06-30-59-123Z.zip`). It contains:
 
-- `database.json`: every article, revision, tag, author record, member account, the Admin account, and the dashboard settings;
-- `config.yaml`, if the installation has one;
-- `manifest.json`: the format version, application version, applied migrations, creation time, and a SHA-256 checksum for every file.
+- `database.dump`: a `pg_dump` custom-format dump of the app's `public` schema (every article, revision, tag, author record, member account, the Admin account and the dashboard settings), without any session rows;
+- `config.yaml`, if the installation has one, byte for byte;
+- `manifest.json`: the format (`agt-knowledge-base-backup`, format version 1), the application version, the database schema version, the creation time, and each file's size and SHA-256 checksum.
 
-Admin sessions and `.env` are never included. **Backups contain the Admin and member password hashes and every restricted article**: store them as securely as the database itself, and never commit them.
+Sessions, `.env` and the `control` schema (the shared backup and restore state) are never included. While the dump is taken, reads continue and writes wait (for at most 30 seconds, then they answer `503`), so the dump is one consistent snapshot. **Backups contain the Admin and member password hashes and every restricted article**: store them as securely as the database itself, and never commit them. **Restore only backups made by an AGT Knowledge Base installation you trust**: a restore runs the SQL in the dump, within the limits below.
 
-**Restoring is two steps: preview, then restore.** Uploading a backup first previews it and changes nothing. The preview checks the manifest checksums, that the archive contains only the expected files (no other paths, directories, symlinks, or `..`), the `backup.maxZipBytes`, `backup.maxEntries`, and `backup.maxUncompressedBytes` limits (checked while decompressing), that it contains exactly one Admin account, and that its schema version is compatible. It then loads the backup into a temporary staging schema, so constraint violations are reported before anything is replaced. The preview shows per-table counts, whether an upgrade will run, a line diff between the backup's `config.yaml` and the current one, and any settings that will be ignored.
+**Restoring is two steps: preview, then restore.** Uploading a backup first previews it and changes nothing:
 
-- **Versions.** A backup restores if its applied migrations are exactly the start of this installation's. Older backups are upgraded during the restore, with this installation's remaining migrations; backups from a newer version, or with migrations this installation does not know, are refused. Backups from before this archive format (JSON files) are not supported.
-- **Pre-restore backup.** Before restoring, the current data is saved as `pre-restore-backup-<timestamp>.zip` in `storage.dataDir/storage.backupsDir` (the `agt-backups` volume). If it cannot be written, nothing is restored. Pre-restore backups are kept indefinitely unless `backup.preRestore.keep` is set, in which case the oldest beyond that number are deleted after a new one is written.
+- The archive may contain only `manifest.json`, `database.dump` and `config.yaml` (no other paths, directories, symlinks or `..`), within the `backup.maxZipBytes`, `backup.maxEntries` and `backup.maxUncompressedBytes` limits (checked while decompressing), and every checksum must match the manifest.
+- The dump's table of contents is checked against an allowlist: only the app's tables, their data, sequences, defaults, constraints and indexes in the `public` schema. A function, trigger, view, extension, permission change or any other schema rejects the archive.
+- The dump is then restored into the separate preview database (`database.previewName`, default `agt_knowledge_base_preview`), which is emptied before and after. That checks that it restores, its schema version, that every table exists and that the Admin's password hash could sign in.
+- The preview shows per-table counts, whether the restore upgrades an older schema, warnings, a line diff between the backup's `config.yaml` and the current one, and the settings that will be ignored.
+
+- **Versions.** Backups from an older version are migrated after the restore; backups from a newer version (a newer format or schema) are refused. **Backups made by 1.x** (a `database.json` file) are refused: restore them with 1.x, then upgrade to 2.0.
+- **Maintenance.** The restore checks the upload again, then puts every API process in maintenance: requests in progress finish (for at most 30 seconds, or the restore is abandoned with `409`), and every other API request answers `503` until it ends. `GET /api/health` answers `{"status":"maintenance"}` meanwhile, so Docker does not restart the container.
+- **Pre-restore backup.** The current data is then saved as `pre-restore-backup-<timestamp>.zip` (with its restore list, `pre-restore-backup-<timestamp>.list`) in `storage.dataDir/storage.backupsDir` (the `agt-backups` volume). If it cannot be written, nothing is restored. Pre-restore backups are kept unless `backup.preRestore.keep` is set; then the oldest beyond that number are deleted, each with its `.list`, after a new one is written.
+- **Rollback.** The database is replaced with `pg_restore` in a single transaction, migrated and checked. If any of that fails, the pre-restore backup is restored, and the restore answers "The restore failed and was rolled back. Nothing was changed."
 - **`config.yaml` is never restored.** Download the backup's copy from the preview and apply any changes by hand. Dashboard settings in the backup for keys the current `config.yaml` defines are dropped and listed in the report.
-- **One transaction.** The restore validates the archive again, then replaces every table in a single transaction: an invalid file, a constraint violation, or any other error leaves the current data unchanged. Afterwards every member and the Admin are signed out; sign in at `/admin` with the Admin account stored in the backup.
+- Afterwards every member and the Admin are signed out; sign in at `/admin` with the Admin account stored in the backup.
 
-The restore creates a temporary schema, so the database role needs the `CREATE` privilege on the database (`agt_knowledge_base` owns it). Nginx streams backup uploads to the API without buffering them, and the API checks the Admin session before reading the body and enforces `backup.maxZipBytes` itself. If a TLS reverse proxy sits in front of the stack, allow request bodies of at least `backup.maxZipBytes` there too.
+The server runs `pg_dump` and `pg_restore` itself, as the `agt_knowledge_base` role, with the password only in the child's environment. They must be at least the PostgreSQL server's major version; the API image ships the PostgreSQL 16 client tools for the Compose stack's `postgres:16`. Outside Docker, install the client tools of your server's version (`postgresql-client-16` on Debian and Ubuntu). The role must own the preview database: new installations and `deploy/upgrade-database-role.sql` create it, and the server refuses to start if `database.previewName` names the app's own database.
 
-For host-level backups, scheduled backups, or moving data between versions, use `pg_dump` from the running `postgres` container:
+Nginx streams backup uploads to the API without buffering them, and the API checks the Admin session before reading the body and enforces `backup.maxZipBytes` itself. If a TLS reverse proxy sits in front of the stack, allow request bodies of at least `backup.maxZipBytes` there too, and timeouts of several minutes for `/api/admin/restore`.
+
+For host-level or scheduled backups, use `pg_dump` from the running `postgres` container:
 
 ```bash
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d agt_knowledge_base --format=custom' \
-  > "agt-backup-$(date +%Y%m%d-%H%M%S).dump"
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d agt_knowledge_base --format=custom --schema=public' \
+  > "agt-knowledge-base-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
-Keep backups off the host and test restores periodically. To restore a backup into the stack, replacing the current data:
+Keep backups off the host and test restores periodically. To restore such a dump into the stack, replacing the current data:
 
 ```bash
 docker compose stop web api
 docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d agt_knowledge_base --clean --if-exists --no-owner --role=agt_knowledge_base' \
-  < agt-backup-YYYYMMDD-HHMMSS.dump
+  < agt-knowledge-base-YYYYMMDD-HHMMSS.dump
 docker compose up -d
 ```
 
 Restoring a `pg_dump` backup from an older version is safe: on start, the server applies any migrations the backup is missing.
+
+#### Recovering from a failed restore
+
+If a restore fails and its rollback fails too (for example because the database became unreachable), or the process running a restore dies, the data may be half restored. The app then stays in maintenance in every process: every API request answers `503`, and the server writes `storage.dataDir/restore-failed.json` naming the pre-restore backup and records `restore_failed` in the `control.operation` row. It refuses to start while either is present.
+
+Until the session expires, the Admin who started the restore can still sign in to the admin panel with that session and run another restore from **Backup & restore** (for example of the pre-restore backup). If it succeeds, the app returns to normal by itself. Otherwise, restore the pre-restore backup by hand:
+
+1. Stop the API: `docker compose stop web api`.
+2. Copy the pre-restore backup and its `.list` file out of the `agt-backups` volume, unzip the backup, and restore its dump with the list, as the app role:
+
+   ```bash
+   unzip pre-restore-backup-<timestamp>.zip database.dump
+   pg_restore -h <host> -U agt_knowledge_base -d agt_knowledge_base --clean --if-exists --single-transaction \
+     --no-owner --no-privileges --exit-on-error --use-list=pre-restore-backup-<timestamp>.list database.dump
+   ```
+
+3. Clear the failed state: delete `restore-failed.json` from the data directory, and run as the app role:
+
+   ```sql
+   UPDATE control.operation SET state = 'idle', pre_restore_backup = NULL, admin_session_hash = NULL,
+     admin_username = NULL, admin_session_expires_at = NULL WHERE id = 1 AND state = 'restore_failed';
+   ```
+
+4. Start the stack: `docker compose up -d`.
+
+The app never clears the failed state by itself because a file is missing: if only one of the two is present (for example after the container was recreated), the start-up error names the missing one; check the data before clearing both.
 
 ### Upgrades
 
@@ -263,7 +299,7 @@ A database whose schema is newer than the version you start stops the server wit
 
 2.0 connects to PostgreSQL as its own non-superuser role, `agt_knowledge_base`, instead of the bootstrap superuser, and refuses to start as a superuser (DATA-11). An existing 1.x database needs the role once:
 
-1. Download a backup from the admin panel (**Backup & restore**) and stop the stack: `docker compose stop`.
+1. Download a backup from the admin panel (**Backup & restore**) and stop the stack: `docker compose stop`. 2.0 cannot restore 1.x backups (they need 1.x), so also take a `pg_dump` of the database (see [Backups](#backups)).
 2. Check out 2.0 and add a new random `AGT_KNOWLEDGE_BASE_DB_PASSWORD` to `.env` (see `docker.env.example`). If your `config.yaml` sets `database.user` or `database.name` to the old superuser or a non-default database, remove `database.user` and keep `database.name` only if your database is not called `agt_knowledge_base`.
 3. Create the role and hand it the database, as the superuser:
 
@@ -322,8 +358,8 @@ Schema changes are numbered SQL files, `server/migrations/NNNN_<name>.sql`, list
 - Markdown is rendered by one component, `src/components/Markdown.tsx` (`react-markdown` with GFM): raw HTML is shown as text, only `http:`/`https:` and same-site links and images are kept, external links open in a new tab with `rel="noopener noreferrer"`, and external images load lazily without a referrer. Images that authors link in Markdown are loaded by visitors' browsers directly from their hosts; the server itself never makes outbound requests.
 - The API rejects raw HTML, JSX tags, and MDX `import` / `export` statements. MDXEditor is used as a Markdown authoring surface only; content is never executed as MDX.
 - Article writes are validated with Zod and capped at 250,000 characters and 12 tags.
-- API errors do not return database details; a rejected backup restore names only the table and constraint the file violated. The API logs unexpected failures, with their request ID, as JSON to standard output.
-- Backups are available only to the Admin. Archives are checksummed, size- and path-checked, previewed before restoring, upgraded in an isolated staging schema, and restored in a single transaction after a pre-restore backup, signing everyone out.
+- API errors do not return database details; a rejected backup says which check failed, never the `pg_restore` output, which the server logs instead. The API logs unexpected failures, with their request ID, as JSON to standard output.
+- Backups are available only to the Admin. Archives are checksummed and size- and path-checked, their dump's table of contents is allowlisted, and they are previewed in a separate database before restoring. A restore runs in maintenance, in a single transaction after a pre-restore backup, rolls back if anything fails, and signs everyone out. The app role is not a superuser, so even an allowed dump can only create and fill tables in the two databases it owns.
 - PostgreSQL timestamps are `timestamptz` values generated by the server and serialized as UTC ISO 8601.
 
 ## Repository layout

@@ -1,5 +1,6 @@
+import { asDataWrite } from '../dataWrite.js';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ import type { AdminIdentity, ApiRequest, ApiResponse } from '../routes.js';
 import { apiRoutes, routeKeys } from '../routes.js';
 import { HttpError } from '../http.js';
 import type { AdminSessionResult, MemberUser, SessionResult } from '../session.js';
-import { assertCalledWith, assertMatches, callArgs, fakeDatabase, match, testContext } from './helpers.js';
+import { assertCalledWith, assertMatches, callArgs, fakeDatabase, match, testContext, testOperations } from './helpers.js';
 
 /** The HTTP pipeline: session separation, CSRF, cookies, body limits and rate limits, over a real socket. */
 
@@ -40,12 +41,18 @@ let now = 0;
 
 let logLines: string[] = [];
 
+/** Where uploads are streamed in these tests (`storage.dataDir`). */
+const dataDir = mkdtempSync(join(tmpdir(), 'agt-server-test-'));
+let operations = testOperations();
+
 async function start(config = '', setupPassword: string | null = null) {
+  operations = testOperations();
   await app?.close();
   logLines = [];
   const stream = new Writable({ write(chunk, _encoding, done) { logLines.push(String(chunk)); done(); } });
-  app = buildApp(testContext({ config, setupPassword }), {
+  app = buildApp(testContext({ config: `${config}\nstorage:\n  dataDir: ${dataDir}\n`, setupPassword, operations }), {
     logger: { level: 'warn', stream },
+    dataWrite: asDataWrite,
     rateLimitClock: () => now,
     handlers: { request: mocks.handleRequest, admin: mocks.handleAdminRequest },
     services: {
@@ -84,6 +91,26 @@ function send(method: string, path: string, options: { headers?: Record<string, 
     request.on('error', reject);
     request.end(options.body);
   });
+}
+
+/** A multipart/form-data body with text fields and, optionally, the `backup` file. */
+function multipart(fields: Record<string, string>, file?: Buffer) {
+  const boundary = 'agt-test-boundary';
+  const parts: Buffer[] = [];
+  for (const [name, value] of Object.entries(fields)) {
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+  }
+  if (file) {
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="backup"; filename="backup.zip"\r\nContent-Type: application/zip\r\n\r\n`), file, Buffer.from('\r\n'));
+  }
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+  return { type: `multipart/form-data; boundary=${boundary}`, body: Buffer.concat(parts) };
+}
+
+/** Waits up to a second for `condition`, which the server meets right after it has replied. */
+async function eventually(condition: () => boolean) {
+  for (let attempt = 0; attempt < 100 && !condition(); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(condition());
 }
 
 const csrf = { 'x-agt-request': '1' };
@@ -330,13 +357,53 @@ describe('request body limits', () => {
     assert.equal(mocks.handleAdminRequest.mock.callCount(), 0);
   });
 
-  it('passes an upload within backup.maxBytes to the handler as raw bytes', async () => {
+  it('passes an upload to the deprecated path within backup.maxZipBytes to the handler as a temporary file', async () => {
     const archive = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xff]);
+    let received: Buffer | undefined;
+    mocks.handleAdminRequest.mock.mockImplementationOnce(async (request) => {
+      received = readFileSync(request.upload!.file);
+      return { statusCode: 200, headers: {}, body: '{}' };
+    });
     await send('POST', '/api/admin/backup/restore?action=preview', { headers: { ...adminCookie, ...csrf }, body: archive });
     const [request] = callArgs(mocks.handleAdminRequest) as [ApiRequest];
-    assert.equal(Buffer.compare(request.rawBody!, archive), 0);
+    assert.equal(Buffer.compare(received!, archive), 0);
     assert.equal(request.body, undefined);
-    assert.deepEqual({ ...request.query }, { action: 'preview' });
+    assert.equal(request.routeKey, 'POST /api/admin/backup/restore');
+    assert.equal(request.upload!.action, 'preview');
+    // The temporary directory under backupsDir is always deleted (SEC-10).
+    await eventually(() => !existsSync(request.upload!.file));
+  });
+
+  it('streams the multipart restore upload to a temporary file and passes the action (BAK-1)', async () => {
+    const archive = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x01, 0x02]);
+    let received: Buffer | undefined;
+    mocks.handleAdminRequest.mock.mockImplementationOnce(async (request) => {
+      received = readFileSync(request.upload!.file);
+      return { statusCode: 200, headers: {}, body: '{}' };
+    });
+    const form = multipart({ action: 'restore' }, archive);
+    const reply = await send('POST', '/api/admin/restore', { headers: { ...adminCookie, ...csrf, 'content-type': form.type }, body: form.body });
+    assert.equal(reply.status, 200, reply.body);
+    const [request] = callArgs(mocks.handleAdminRequest) as [ApiRequest];
+    assert.equal(request.routeKey, 'POST /api/admin/restore');
+    assert.equal(request.upload!.action, 'restore');
+    assert.equal(request.sessionToken, 'admin-token');
+    assert.equal(Buffer.compare(received!, archive), 0);
+    await eventually(() => readdirSync(join(dataDir, 'backups', 'tmp')).length === 0);
+  });
+
+  it('answers 415 multipart_required, 400 file_required and 413 for bad restore uploads', async () => {
+    const plain = await send('POST', '/api/admin/restore', { headers: { ...adminCookie, ...csrf, 'content-type': 'application/zip' }, body: Buffer.from('PK') });
+    assert.equal(plain.status, 415);
+    assertMatches(JSON.parse(plain.body), { error: 'multipart_required' });
+    const noFile = multipart({ action: 'preview' });
+    const missing = await send('POST', '/api/admin/restore', { headers: { ...adminCookie, ...csrf, 'content-type': noFile.type }, body: noFile.body });
+    assert.equal(missing.status, 400);
+    assertMatches(JSON.parse(missing.body), { error: 'file_required' });
+    const huge = multipart({ action: 'preview' }, Buffer.alloc(1001));
+    const hugeReply = await send('POST', '/api/admin/restore', { headers: { ...adminCookie, ...csrf, 'content-type': huge.type }, body: huge.body });
+    assert.equal(hugeReply.status, 413);
+    assert.equal(mocks.handleAdminRequest.mock.callCount(), 0);
   });
 
   it('keeps the default 1 MB limit on other routes', async () => {
@@ -566,6 +633,58 @@ describe('health (SRV-11)', () => {
   it('answers 500 when the database does not', async () => {
     const reply = await app.inject({ method: 'GET', url: '/api/health' });
     assert.equal(reply.statusCode, 500);
+  });
+});
+
+describe('operation lock (BAK-8, BAK-12)', () => {
+  it('admits every API request except the health check under the activity lease and releases it when the response ends', async () => {
+    await send('GET', '/api/member/session', { headers: memberCookie });
+    await send('GET', '/api/health');
+    assert.equal(operations.admitted, 1);
+    await eventually(() => operations.released === 1);
+  });
+
+  it('answers 503 maintenance with Retry-After during a restore, before authentication, and reports maintenance from health', async () => {
+    operations.state = 'restore';
+    const reply = await send('GET', '/api/admin/session', { headers: adminCookie });
+    assert.equal(reply.status, 503);
+    assert.equal(reply.headers['retry-after'], '10');
+    assertMatches(JSON.parse(reply.body), { error: 'maintenance', message: 'Maintenance in progress. Try again in a moment.', params: { retryAfterSeconds: 10 } });
+    assert.equal(mocks.session.mock.callCount(), 0);
+    const health = await send('GET', '/api/health');
+    assert.equal(health.status, 200);
+    assert.deepEqual(JSON.parse(health.body), { status: 'maintenance' });
+  });
+
+  it('accepts the BAK-11 recovery session from admission without consulting the sessions table', async () => {
+    operations.state = 'restore_failed';
+    operations.admit = async () => ({ release: () => undefined, recovery: { username: 'atlas' } });
+    const reply = await send('GET', '/api/admin/session', { headers: { cookie: 'agt_knowledge_base_session=recovery-token' } });
+    assert.equal(reply.status, 200);
+    assert.equal(JSON.parse(reply.body).username, 'atlas');
+    assert.equal(mocks.session.mock.callCount(), 0);
+  });
+
+  it('runs writesData routes through the data-write barrier, and only those', async () => {
+    await app.close();
+    const dataWrite = mock.fn(async <T>(work: () => Promise<T>) => asDataWrite(work));
+    app = buildApp(testContext({ config: `storage:\n  dataDir: ${dataDir}\n`, operations }), {
+      dataWrite,
+      handlers: { request: mocks.handleRequest, admin: mocks.handleAdminRequest },
+      services: { memberAuth: { login: mocks.memberLogin, session: mocks.memberSession, logout: mocks.memberLogout } } as never,
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    port = (app.server.address() as AddressInfo).port;
+    await send('POST', '/api/articles', { headers: moderatorToken, body: JSON.stringify(article) });
+    assert.equal(dataWrite.mock.callCount(), 1);
+    await send('GET', '/api/member/articles', { headers: memberCookie });
+    await send('POST', '/api/member/logout', { headers: moderatorToken });
+    assert.equal(dataWrite.mock.callCount(), 1);
+    for (const route of apiRoutes) {
+      // Sign-out only deletes session rows; the restore is the operation itself (BAK-8).
+      const changesData = route.method !== 'GET' && !route.path.endsWith('/logout') && !/^\/api\/admin\/(backup\/)?restore$/.test(route.path);
+      assert.equal(route.writesData, changesData, route.routeKey);
+    }
   });
 });
 

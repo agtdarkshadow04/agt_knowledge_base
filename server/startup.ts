@@ -1,5 +1,5 @@
 import { defaultConfigPath, loadConfigFile, type AppConfig, type LoadedConfig } from './config.js';
-import type { DatabaseSettings } from './db.js';
+import { connectionParameters, type DatabaseSettings } from './db.js';
 
 /**
  * Turns the process environment into what an entry point needs (CFG-1,
@@ -89,6 +89,8 @@ export interface Startup {
   setupPassword: string | null;
   /** Deprecated keys and variables in use; the entry point logs each one. */
   warnings: string[];
+  /** `PATH`, where the backup child processes find `pg_dump` and `pg_restore` (BAK-6). */
+  toolPath: string;
 }
 
 /** Loads config.yaml and the environment for an entry point. Throws with one clear message (SRV-8). */
@@ -102,6 +104,12 @@ export function loadStartup(env: Env): Startup {
   const configFile = loadConfigFile(path, { defaultHost: env[`${envPrefix}SERVER_HOST`] || undefined });
   warnings.push(...configFile.warnings);
   const database = databaseSettings(configFile.config, env, warnings);
+  // Every restore preview empties the preview database (BAK-3), so it can never be the app's own.
+  const previewName = configFile.config.database.previewName;
+  if (connectionParameters(database).database === previewName) {
+    throw new StartupError(`database.previewName (${previewName}) must not be the app's database: every restore preview empties it. Set a separate database.`);
+  }
   const setupPassword = envValue(env, 'SETUP_PASSWORD', warnings, 'AGT_SETUP_PASSWORD') ?? null;
-  return { configFile, database, setupPassword, warnings };
+  const toolPath = env.PATH || '/usr/local/bin:/usr/bin:/bin';
+  return { configFile, database, setupPassword, warnings, toolPath };
 }

@@ -22,6 +22,10 @@ ENV NODE_ENV=production \
   AGT_KNOWLEDGE_BASE_CONFIG_FILE=/app/config.yaml \
   AGT_KNOWLEDGE_BASE_SERVER_HOST=0.0.0.0
 WORKDIR /app
+# BAK-6: pg_dump and pg_restore for backups, the same major version as the
+# postgres:16 server in docker-compose.yml (never older; a newer pg_dump can
+# write statements a 16 server rejects).
+RUN apk add --no-cache postgresql16-client
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=server-build --chown=node:node /app/dist-server ./dist-server

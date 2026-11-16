@@ -34,6 +34,17 @@ describe('environment variables (CFG-2)', () => {
     assert.deepEqual(startup.database, { host: 'localhost', port: 5432, database: 'agt_knowledge_base', user: 'agt_knowledge_base', password: 'db-secret', ssl: false });
   });
 
+  it('refuses a preview database that is the app\'s own database, which every preview empties (BAK-3)', () => {
+    assert.throws(
+      () => loadStartup({ AGT_KNOWLEDGE_BASE_CONFIG_FILE: configFile('database:\n  name: kb\n  previewName: kb\n'), AGT_KNOWLEDGE_BASE_DB_PASSWORD: 'x' }),
+      (error: unknown) => error instanceof StartupError && /database\.previewName \(kb\) must not be the app's database/.test(error.message),
+    );
+    assert.throws(
+      () => loadStartup({ AGT_KNOWLEDGE_BASE_CONFIG_FILE: configFile('database:\n  previewName: kb\n'), DATABASE_URL: 'postgres://u:p@db:5432/kb' }),
+      StartupError,
+    );
+  });
+
   it('lets config.yaml win over AGT_KNOWLEDGE_BASE_DATABASE_HOST', () => {
     const settings = databaseSettings(parseConfig('database:\n  host: from-file\n  ssl: true\n'), { AGT_KNOWLEDGE_BASE_DB_PASSWORD: 'x', AGT_KNOWLEDGE_BASE_DATABASE_HOST: 'from-env' }, []);
     assert.deepEqual(settings, { host: 'from-file', port: 5432, database: 'agt_knowledge_base', user: 'agt_knowledge_base', password: 'x', ssl: true });

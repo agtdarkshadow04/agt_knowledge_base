@@ -4,6 +4,7 @@ import type { AppContext } from '../context.js';
 import { HttpError } from '../http.js';
 import { type AdminStats, type LocalUserRecord, type Role } from '../domain.js';
 import { hashPassword } from '../passwords.js';
+import { assertDataWrite } from '../dataWrite.js';
 
 interface LocalUserRow {
   id: string;
@@ -106,6 +107,7 @@ export class MemberRepository {
     role: Role;
     password: string;
   }) {
+    assertDataWrite();
     const passwordHash = await hashPassword(input.password);
     const pool = await this.context.db.pool();
     const client = await pool.connect();
@@ -134,6 +136,7 @@ export class MemberRepository {
     role: Role;
     isActive: boolean;
   }) {
+    assertDataWrite();
     const pool = await this.context.db.pool();
     const client = await pool.connect();
     try {
@@ -166,6 +169,7 @@ export class MemberRepository {
   }
 
   async setPassword(id: string, password: string) {
+    assertDataWrite();
     const passwordHash = await hashPassword(password);
     const pool = await this.context.db.pool();
     const client = await pool.connect();
@@ -189,6 +193,7 @@ export class MemberRepository {
   }
 
   async deleteUser(id: string) {
+    assertDataWrite();
     const pool = await this.context.db.pool();
     const client = await pool.connect();
     try {
@@ -233,6 +238,7 @@ export class MemberRepository {
    * (`scripts/manage-local-user.ts`), activates it and ends its sessions (AUTH-4).
    */
   async recover(input: { username: string; displayName: string; email?: string; role: Role; passwordHash: string }) {
+    assertDataWrite();
     const pool = await this.context.db.pool();
     await pool.query(
       `INSERT INTO local_users (id, username, password_hash, display_name, email, role)

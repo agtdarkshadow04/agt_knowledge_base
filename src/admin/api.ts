@@ -131,16 +131,16 @@ export function updateSettings(input: SettingsWrite) {
 export async function downloadBackup() {
   const response = await adminFetch('/backup', { headers: { Accept: 'application/zip' } });
   const disposition = response.headers.get('content-disposition') ?? '';
-  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'agt-kb-backup.zip';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'agt-knowledge-base-backup.zip';
   return { blob: await response.blob(), filename };
 }
 
+/** BAK-1: `POST /api/admin/restore` with the `backup` file and the action as multipart/form-data. */
 function uploadBackup<T>(file: Blob, action: 'preview' | 'restore') {
-  return adminRequest<T>(`/backup/restore?action=${action}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/zip' },
-    body: file,
-  });
+  const form = new FormData();
+  form.append('action', action);
+  form.append('backup', file, file instanceof File ? file.name : 'backup.zip');
+  return adminRequest<T>('/restore', { method: 'POST', body: form });
 }
 
 /** Validates a backup and reports what restoring it would do. Nothing changes. */
