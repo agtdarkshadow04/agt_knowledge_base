@@ -231,27 +231,4 @@ export class MemberRepository {
     const row = result.rows[0];
     return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, Number(value)])) as unknown as AdminStats;
   }
-
-
-  /**
-   * Creates or resets a member account from the recovery CLI
-   * (`scripts/manage-local-user.ts`), activates it and ends its sessions (AUTH-4).
-   */
-  async recover(input: { username: string; displayName: string; email?: string; role: Role; passwordHash: string }) {
-    assertDataWrite();
-    const pool = await this.context.db.pool();
-    await pool.query(
-      `INSERT INTO local_users (id, username, password_hash, display_name, email, role)
-       VALUES ($6, $1, $2, $3, $4, $5)
-       ON CONFLICT (username) DO UPDATE
-         SET password_hash = EXCLUDED.password_hash,
-             display_name = EXCLUDED.display_name,
-             email = EXCLUDED.email,
-             role = EXCLUDED.role,
-             is_active = true,
-             updated_at = now()`,
-      [input.username, input.passwordHash, input.displayName, input.email ?? null, input.role, randomUUID()],
-    );
-    await pool.query('DELETE FROM member_sessions WHERE user_id = (SELECT id FROM local_users WHERE username = $1)', [input.username]);
-  }
 }

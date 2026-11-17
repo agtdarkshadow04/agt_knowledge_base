@@ -336,7 +336,7 @@ export async function migrateAtStartup(client: Pick<Queryable, 'query'>, options
   const sleep = options.sleep ?? wait;
   const superuser = await client.query('SELECT rolsuper FROM pg_roles WHERE rolname = current_user');
   if ((superuser.rows[0] as { rolsuper?: boolean } | undefined)?.rolsuper) {
-    throw new StartupCheckError('The database role is a superuser. Connect as the agt_knowledge_base role (database.user); see deploy/upgrade-database-role.sql to create it.');
+    throw new StartupCheckError('The database role is a superuser. Connect as the agt_knowledge_base role (database.user); README, Installation, shows how to create it.');
   }
   await client.query(migrationLock);
   try {

@@ -1,10 +1,12 @@
 # TLS-terminating reverse proxy for AGT Knowledge Base (SEC-4, DEP-10).
 # Caddy obtains and renews the certificate for the host name automatically.
 #
-# The Docker Compose stack publishes its web port on 127.0.0.1:8080 (APP_PORT).
-# In config.yaml, set server.trustProxy: 2 (this proxy plus the bundled Nginx)
-# and keep session.secureCookie: auto. See README, HTTPS.
+# The app listens on 127.0.0.1:8081 (local installation) or publishes that port
+# on 127.0.0.1 (Docker Compose). In config.yaml, set server.trustProxy to the
+# address the app sees this proxy connect from: 127.0.0.1 for a local
+# installation, the Docker network's gateway for Docker Compose. Keep
+# session.secureCookie: auto. See README, TLS and reverse proxies.
 
-kb.example.org {
-	reverse_proxy 127.0.0.1:8080
+knowledge-base.example.org {
+	reverse_proxy 127.0.0.1:8081
 }

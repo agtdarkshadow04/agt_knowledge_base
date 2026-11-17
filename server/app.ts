@@ -12,18 +12,21 @@ import { join, relative, resolve, sep } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { authenticationHook, createAdminRequestHandler, type AdminRequestHandler } from './adminRoutes.js';
+import { json as apiJson, pathId } from './api-response.js';
+import { ArticleService } from './article-service.js';
 import { auditHook, writeSummary } from './audit.js';
 import { toActor, type AuthenticatedUser } from './auth.js';
 import type { AppConfig } from './config.js';
 import type { AppContext } from './context.js';
-import { createRequestHandler, type RequestHandler } from './handler.js';
 import { withDataWrite } from './dataWrite.js';
 import { noStoreHeaders, securityHeaders } from './headers.js';
 import { BodyTooLargeError, errorReply, HttpError, RateLimitedError } from './http.js';
+import { createMemberRequestHandler, type MemberRequestHandler } from './memberRoutes.js';
 import type { Admission } from './operation.js';
 import { registerOpenApi, routeSecurity } from './openapi.js';
 import { sharedRateLimitStore } from './rate-limit.js';
 import { ping } from './repository.js';
+import { PostgresArticleRepository } from './repository/articles.js';
 import {
   apiRoutes,
   defaultMaxBodyBytes,
@@ -47,7 +50,8 @@ import {
   type AuthLog,
 } from './session.js';
 import { SettingsService } from './settings-service.js';
-import { parseAdminAccountPassword, parseAdminSetup, parseCredentials } from '../src/lib/validation.js';
+import { TagService } from './tag-service.js';
+import { parseAdminAccountPassword, parseAdminSetup, parseCredentials, parseListQuery, parseTagListQuery } from '../src/lib/validation.js';
 import { legacyPageRedirect } from '../src/lib/routes.js';
 
 export { csrfHeader } from './adminRoutes.js';
@@ -56,6 +60,51 @@ export { csrfHeader } from './adminRoutes.js';
 
 /** The Content-Security-Policy of every response, exactly as SEC-1 gives it. */
 export { contentSecurityPolicy, noStoreHeaders } from './headers.js';
+
+export type RequestHandler = MemberRequestHandler;
+
+/**
+ * The public reads (REPO-1: `app.ts` serves the public routes): the public
+ * settings, and articles and tags while public browsing is open. Everything
+ * else goes to the member routes (`memberRoutes.ts`). Errors are thrown for
+ * the single error handler (SRV-5).
+ */
+export function createRequestHandler(context: Pick<AppContext, 'config' | 'db'>): RequestHandler {
+  const handleMember = createMemberRequestHandler(context);
+  const repository = new PostgresArticleRepository(context.db);
+  const articles = new ArticleService(repository);
+  const tags = new TagService(repository);
+  const settings = new SettingsService(context);
+
+  return async function handleRequest(request) {
+    switch (request.routeKey) {
+      case 'GET /api/settings/public':
+        return apiJson(200, await settings.getPublic());
+      case 'GET /api/settings':
+        return apiJson(200, await settings.getLegacyPublic());
+      case 'GET /api/articles': {
+        if (!(await settings.values())['access.allowPublicBrowsing']) {
+          throw new HttpError(403, 'public_browsing_closed', 'Public browsing is disabled.', { legacyCode: 'PUBLIC_BROWSING_DISABLED' });
+        }
+        return apiJson(200, await articles.list(parseListQuery(request.query), null));
+      }
+      case 'GET /api/articles/{id}': {
+        if (!(await settings.values())['access.allowPublicBrowsing']) {
+          throw new HttpError(403, 'public_browsing_closed', 'Public browsing is disabled.', { legacyCode: 'PUBLIC_BROWSING_DISABLED' });
+        }
+        return apiJson(200, await articles.get(pathId(request, 'id', 'article', 'INVALID_ID'), null));
+      }
+      case 'GET /api/tags': {
+        if (!(await settings.values())['access.allowPublicBrowsing']) {
+          throw new HttpError(403, 'public_browsing_closed', 'Public browsing is disabled.', { legacyCode: 'PUBLIC_BROWSING_DISABLED' });
+        }
+        const input = parseTagListQuery(request.query);
+        return apiJson(200, await tags.list(input.search));
+      }
+    }
+    return handleMember(request);
+  };
+}
 
 export interface BuildAppOptions {
   /** Fastify's logger option; off by default so tests stay quiet. */
@@ -68,7 +117,7 @@ export interface BuildAppOptions {
   rateLimitClock?: () => number;
   /** Runs a `writesData` route's work; `withDataWrite()` on the context's database by default (BAK-8). */
   dataWrite?: <T>(work: () => Promise<T>) => Promise<T>;
-  /** Replace the route dispatchers, for tests of the HTTP pipeline. */
+  /** Replace the route dispatchers (public and member, admin), for tests of the HTTP pipeline. */
   handlers?: { request?: RequestHandler; admin?: AdminRequestHandler };
   /** Replace the authentication and settings services, for tests of the HTTP pipeline. */
   services?: {

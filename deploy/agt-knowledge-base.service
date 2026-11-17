@@ -1,0 +1,34 @@
+[Unit]
+Description=AGT Knowledge Base
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=agt-knowledge-base
+Group=agt-knowledge-base
+WorkingDirectory=/opt/agt-knowledge-base
+Environment=NODE_ENV=production
+Environment=AGT_KNOWLEDGE_BASE_CONFIG_FILE=/etc/agt-knowledge-base/config.yaml
+EnvironmentFile=-/etc/agt-knowledge-base/.env
+ExecStart=/usr/bin/node dist-server/index.mjs
+Restart=on-failure
+RestartSec=5
+StateDirectory=agt-knowledge-base
+StateDirectoryMode=0750
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

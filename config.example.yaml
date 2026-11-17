@@ -20,18 +20,22 @@ server:
   # the Docker image), else 127.0.0.1.
   # host: 127.0.0.1
   # port: 8081
-  # Reverse proxies whose X-Forwarded-For and X-Forwarded-Proto to trust (client
-  # addresses for rate limits, HTTPS for the Secure cookie): false, true, a proxy
-  # IP or CIDR (string or list), or a number of proxy hops. The Compose stack's
-  # Nginx is one hop, hence 1; use 2 behind an additional TLS proxy.
-  trustProxy: 1
+  # The TLS reverse proxy whose X-Forwarded-For and X-Forwarded-Proto to trust
+  # (client addresses for rate limits, HTTPS for the Secure cookie): false (no
+  # proxy), true, or the address the proxy connects from, as an IP or CIDR
+  # (string or list): 127.0.0.1 for a local installation, the Docker network's
+  # gateway (for example 172.18.0.1) for Docker Compose. See README, TLS and
+  # reverse proxies. A number of proxy hops (1.x) still works until 3.0.0.
+  # trustProxy: false
   # Log level: fatal, error, warn, info, debug, trace or silent.
   # logLevel: info
 
 storage:
-  # Directory for persistent files, relative to the working directory (/app in Docker).
+  # Directory for persistent files (DATA-10), relative to the working directory:
+  # /app/data in Docker (the knowledge-base-data volume); set /var/lib/agt-knowledge-base
+  # for a local installation.
   # dataDir: data
-  # Pre-restore backups, relative to dataDir (a volume in docker-compose.yml).
+  # Pre-restore backups, relative to dataDir.
   # backupsDir: backups
 
 database:

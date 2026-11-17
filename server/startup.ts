@@ -3,8 +3,8 @@ import { connectionParameters, type DatabaseSettings } from './db.js';
 
 /**
  * Turns the process environment into what an entry point needs (CFG-1,
- * CFG-2). Entry points (`server/index.ts`, `scripts/*.ts`) pass `process.env`;
- * nothing else reads it (SRV-1). The 1.x variable names still work until
+ * CFG-2). The entry point (`server/index.ts`) passes `process.env`; nothing
+ * else reads it (SRV-1). The 1.x variable names still work until
  * 3.0.0, each with a warning (VER-10).
  */
 

@@ -20,6 +20,15 @@ const serverRoutes = [
   'POST /api/admin/password',
 ];
 
+// Public reads, served by app.ts's own dispatcher before the member routes (REPO-1).
+const publicRoutes = [
+  'GET /api/settings/public',
+  'GET /api/settings',
+  'GET /api/articles',
+  'GET /api/articles/{id}',
+  'GET /api/tags',
+];
+
 const articleId = '00000000-0000-4000-8000-000000000001';
 const tagId = '10000000-0000-4000-8000-000000000001';
 
@@ -183,16 +192,17 @@ describe('route table', () => {
   });
 
   it('declares exactly the routes the handlers dispatch', () => {
-    const member = handledRoutes('server/handler.ts');
+    const member = handledRoutes('server/memberRoutes.ts');
     const admin = handledRoutes('server/adminRoutes.ts');
     const isAdmin = (key: string) => apiRoutes.find((entry) => entry.routeKey === key)?.admin;
     assert.equal(new Set(routeKeys).size, routeKeys.length);
     assert.equal(member.every((key) => isAdmin(key) === false), true);
     assert.equal(admin.every((key) => isAdmin(key) === true), true);
     const canonical = apiRoutes.filter((entry) => !entry.replacedBy || entry.ownHandler).map((entry) => entry.routeKey);
-    assert.deepEqual(canonical.filter((key) => !serverRoutes.includes(key)).sort(), [...member, ...admin].sort());
+    assert.deepEqual(canonical.filter((key) => !serverRoutes.includes(key)).sort(), [...publicRoutes, ...member, ...admin].sort());
     const served = handledRoutes('server/app.ts');
-    assert.deepEqual(served.sort(), [...serverRoutes].sort());
+    assert.deepEqual(served.sort(), [...serverRoutes, ...publicRoutes].sort());
+    assert.equal(publicRoutes.every((key) => apiRoutes.find((entry) => entry.routeKey === key)?.auth === 'none'), true);
     // A deprecated path is served by the handler of its replacement, unless its response differs (ownHandler).
     for (const entry of apiRoutes.filter((candidate) => candidate.replacedBy)) {
       assert.equal(entry.handlerKey, entry.ownHandler ? entry.routeKey : entry.replacedBy, entry.routeKey);

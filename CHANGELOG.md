@@ -11,16 +11,28 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 ### Upgrade notes
 
 - **Building from source needs Node.js 26 and npm 11.20 or newer within npm 11.** `npm ci` now stops with an engine
-  error on older versions. Docker Compose installations need no action beyond rebuilding the images
-  (`docker compose up -d --build`), which now use Node.js 26
+  error on older versions. The Docker image includes Node.js 26
   ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
 - **Development:** start the API with `npm run dev:server` instead of `npm run api:dev`, and run every check with
   `npm run check` (lint is now `tsc -b`; `npm run typecheck` is gone)
   ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
-- **The API server now serves the web UI too, and Nginx only forwards.** Docker Compose installations rebuild both
-  images (`docker compose up -d --build`); the `web` image no longer contains the UI. If you run your own Nginx or
-  proxy in front of the `api` container instead of the bundled one, forward every path (not only `/api/`) to it
-  without rewriting the path: the API now expects the `/api` prefix ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
+- **Docker Compose: the stack is replaced, and the data moves to PostgreSQL 18 once.** Download a backup with 1.x
+  first. 2.0 runs one app container (`knowledge-base`, built from the `Dockerfile`) and `db` (`postgres:18`) with
+  the new volumes `knowledge-base-data` and `knowledge-base-db`; the `web` (Nginx), `api`, `migrate` and `postgres`
+  services and the `agt-postgres` and `agt-backups` volumes are no longer used. The 1.x database is copied over
+  with `pg_dump` and `pg_restore` as the app role, and 2.0 migrates it at its first start; the 1.x volumes stay
+  untouched, so going back to 1.x needs only the old `.env` and `config.yaml` (README, *Upgrading from 1.x to 2.0*,
+  gives every command) ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51), [#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59))
+- **The site moves from port 8080 to `127.0.0.1:8081`.** The app serves the web UI and the API itself, plain HTTP on
+  the host's loopback interface only (SEC-4). Point your TLS proxy at `127.0.0.1:8081`, forwarding every path without
+  rewriting it, and set `server.trustProxy` to the address the app sees it connect from (the Docker network's
+  gateway; README, *TLS and reverse proxies*) instead of the 1.x `trustProxy: 1`. Without a TLS proxy, the site is
+  reachable only from the host ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51), [#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53), [#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59))
+- **Secrets: `.env` holds the app's, `.env.db` the database superuser's.** Copy `.env.db.example` to `.env.db` and
+  set `POSTGRES_PASSWORD`; in `.env`, set a new `AGT_KNOWLEDGE_BASE_DB_PASSWORD` (the app role's), and delete
+  `POSTGRES_*`, `APP_*` and `LOCAL_AUTH_SECRET`, which Compose and the app no longer read (DEP-3, DEP-4) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- **Local installation without Docker** is now supported as a systemd service on Ubuntu or Debian
+  (`deploy/agt-knowledge-base.service`; README, *Local installation*) (DEP-6..DEP-9) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
 - **API clients: error bodies changed.** Every error now has a snake_case `error` code (for example `not_found`,
   `validation_failed`, `conflict`), English `message`, optional `params`, and `fields` for field errors
   (`{ field, code, message, params? }`). The 1.x `code` and `issues` properties are still sent but deprecated.
@@ -35,9 +47,8 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   (default 50) articles; pass `nextCursor` as `cursor` for the next page. Clients that send `page` still get the 1.x
   response with `page`, `pageSize` and `totalPages`, until 3.0.0 ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
 - **The API listens on port 8081 instead of 3001** (`server.port`, the app's registered port), and on `127.0.0.1`
-  unless `server.host` or `AGT_KNOWLEDGE_BASE_SERVER_HOST` says otherwise; the Docker image sets `0.0.0.0` and the
-  bundled Nginx forwards to `api:8081`. If your `config.yaml` sets `server.port: 3001`, remove it; if you run your own
-  proxy in front of the `api` container, point it at port 8081. The public port of the Compose stack is unchanged ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
+  unless `server.host` or `AGT_KNOWLEDGE_BASE_SERVER_HOST` says otherwise; the Docker image sets `0.0.0.0`. If your
+  `config.yaml` sets `server.port: 3001`, remove it ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
 - **Configuration keys and environment variables have their spec names.** The 1.x names still work until 3.0.0 and
   each one used logs a deprecation warning at startup, so nothing has to change now. To silence the warnings:
   - in `config.yaml`, rename `site.applicationName` → `site.title`, `site.applicationSubtitle` → `site.subtitle`,
@@ -46,19 +57,18 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
     `session.ttlHours` and `rateLimits.login`; remove `server.frontendOrigin` behind a TLS proxy that `trustProxy`
     trusts (the Admin cookie is then still `Secure`);
   - in `.env`, rename `AGT_SETUP_PASSWORD` → `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD`;
-  - with Docker Compose, set `database.user` in `config.yaml` to your `POSTGRES_USER` (`postgres` unless you set it;
-    `agt` if you copied `docker.env.example`), and `database.name` if you changed `POSTGRES_DB`;
+  - in `config.yaml`, remove `database.user` and `database.name` if you set them: the app connects as
+    `agt_knowledge_base` to `agt_knowledge_base`;
   - outside Docker, replace `DATABASE_URL` or `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DATABASE_SSL` with
     `database.*` in `config.yaml`, `DB_PASSWORD` with `AGT_KNOWLEDGE_BASE_DB_PASSWORD`, `CONFIG_FILE` with
-    `AGT_KNOWLEDGE_BASE_CONFIG_FILE`, `LOCAL_USER_PASSWORD` with `AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD`, and remove
-    `AUTH_MODE` ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
+    `AGT_KNOWLEDGE_BASE_CONFIG_FILE`, and remove `LOCAL_USER_PASSWORD` and `AUTH_MODE` ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
 - **Member sign-in is limited to 10 attempts per 15 minutes** per client address by default (`rateLimits.login`;
   1.x allowed 5 per minute), and Admin sign-in and the Admin password change now use `rateLimits.login` too, each
   with its own counter. Backup restore uploads are limited to 120 per 15 minutes (`rateLimits.adminUploads`) ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
 - **`session.ttlHours` now also sets the Admin session lifetime** unless the deprecated `adminSession.ttlHours` is set ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
 - **Dashboard settings move to a `settings` table** (migration `015_settings_table`). Settings you changed in the
-  dashboard are copied; settings still at their 1.x defaults stay at the defaults. Once 2.0.0 runs, drop the old
-  table with `docker compose run --rm -e MIGRATION_TARGET_ID=016_drop_application_settings migrate` ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
+  dashboard are copied; settings still at their 1.x defaults stay at the defaults. Migration `016` then drops the old
+  `application_settings` table ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
 - **API clients: settings.** `GET /api/settings/public` returns the public settings grouped by `config.yaml` key
   (`site`, `articles`, `access`). `GET /api/admin/settings` adds `states` (one entry per setting with `key`, `value`,
   `source`, `locked`, `default` and `description`), and `PUT /api/admin/settings` takes `{ "values": { key: value | null } }`.
@@ -70,10 +80,6 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   not accepted. Remove `LOCAL_AUTH_SECRET` from `.env`: it is no longer used, and the server logs a reminder while it
   is set. Migration `017_auth_sessions` rewrites stored password hashes into the new format; passwords stay the same
   and are rehashed with the stronger parameters at the next sign-in ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
-- **The Compose stack now publishes its web port on `127.0.0.1` only** (`APP_BIND_ADDRESS` defaults to `127.0.0.1`
-  instead of `0.0.0.0`), because the stack speaks plain HTTP (SEC-4). Behind a TLS proxy on the same host nothing
-  changes. To reach the site from other machines, put a TLS proxy in front (README, HTTPS, and
-  `deploy/Caddyfile.example`); only if that proxy runs elsewhere, set `APP_BIND_ADDRESS` in `.env` ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 - **The Admin username is now compared exactly** (after trimming surrounding spaces) instead of case-insensitively:
   sign in with the username as it was created (1.x stored it in lower case) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 - **API clients: members sign in with `POST /api/member/login`** (`x-agt-request: 1` required), which sets the
@@ -89,19 +95,18 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   CORS ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 
 - **The server connects to PostgreSQL as its own non-superuser role, `agt_knowledge_base`, and refuses to start as
-  a superuser** (DATA-11). A new Compose volume gets the role from `deploy/postgres-init/10-app-role.sh`. **An
-  existing 1.x database needs it once**: download a backup, stop the stack, add a new `AGT_KNOWLEDGE_BASE_DB_PASSWORD`
-  to `.env`, run `deploy/upgrade-database-role.sql` as the superuser, then start 2.0 (README, *Upgrading to 2.0*).
-  `POSTGRES_PASSWORD` is now only the superuser's, and the deprecated `DB_USER`/`DB_NAME` are no longer passed by Compose ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+  a superuser** (DATA-11). The `db` service creates the role and its databases on a new volume
+  (`deploy/postgres-init/10-app-role.sh`), and loading the 1.x dump as that role makes it the owner of every table;
+  a local installation creates them with `createuser` and `createdb` (README) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 - **Migrations run when the server starts; the `migrate` service is gone.** Start with
   `docker compose up -d --build --remove-orphans`. The 1.x contract migrations that waited for `MIGRATION_TARGET_ID`
   (`007`, `014`, `016`) now run automatically; `MIGRATION_TARGET_ID` and `npm run db:migrate` no longer exist. A
   database with a migration the server does not know (a newer schema) stops it with a clear message ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
 - **Backups are now `pg_dump` archives, and 2.0 cannot restore a 1.x backup.** A 1.x backup (`database.json`) is
   refused with `422 archive_rejected`: restore it with 1.x before upgrading, or keep a `pg_dump` of the 1.x database.
-  Download a new backup after upgrading. The API image now contains the PostgreSQL 16 client tools; outside Docker,
+  Download a new backup after upgrading. The image contains the PostgreSQL 18 client tools; outside Docker,
   install `pg_dump` and `pg_restore` of your server's major version. The restore preview needs the
-  `agt_knowledge_base_preview` database, which new installations and `deploy/upgrade-database-role.sql` create ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+  `agt_knowledge_base_preview` database, which both installation methods create ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 - **Restores take the app offline briefly.** While a restore runs, every API request answers
   `503 maintenance`; while a backup runs, writes wait for it. If you run your own reverse proxy, allow several minutes
   for `POST /api/admin/restore` ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
@@ -214,8 +219,17 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 - Migrations are numbered files `server/migrations/NNNN_<name>.sql`, applied at startup under a PostgreSQL advisory
   lock and recorded in `schema_migrations (version, name, applied_at)`, which the server converts from the 1.x table
   (DATA-3, DATA-4, DATA-11) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
-- `deploy/postgres-init/10-app-role.sh` and `deploy/upgrade-database-role.sql`, which create the database role and
-  the restore preview database `agt_knowledge_base_preview` (DEP-3) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+- `deploy/postgres-init/10-app-role.sh`, which creates the database role and the restore preview database
+  `agt_knowledge_base_preview` (DEP-3) ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+- One Docker image, `node:26-bookworm-slim` in two stages with the PGDG `postgresql-client-18`, running as `node`,
+  with a healthcheck on `127.0.0.1:8081/api/health` and `/app/data` as its only volume (DEP-1, BAK-6) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- The Compose stack `knowledge-base` and `db` (`postgres:18-bookworm`): the app published on `127.0.0.1:8081` only,
+  with `read_only`, a `tmpfs` at `/tmp`, `no-new-privileges` and a healthcheck; the database port is not published,
+  and only the `db` container reads the superuser password from `.env.db` (DEP-2, DEP-3, SEC-15, DATA-10) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- Local installation as a systemd service: `deploy/agt-knowledge-base.service` with the DEP-7 sandboxing, data in
+  `/var/lib/agt-knowledge-base`, configuration in `/etc/agt-knowledge-base` (DEP-6..DEP-9) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- CI starts the Compose stack from the README's steps and checks that it is healthy, answers `/api/health` and
+  `/api/setup/status`, and publishes the app on `127.0.0.1` and the database not at all (TEST-8) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
 
 ### Changed
 
@@ -245,12 +259,12 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   ([#50](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/50)).
 
 - The admin panel's **API** tab renders the generated OpenAPI document instead of hand-written files ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
-- The API server serves the member UI and the admin panel; Nginx only forwards to it ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
+- The API server serves the member UI and the admin panel (SRV-9) ([#51](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/51)).
 - `config.yaml` is validated with a TypeBox schema; an error names the key and the problem, for example
   `Invalid config.yaml: server.prot: Unexpected property` (CFG-3). A missing file now logs a warning ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
 - Only the CFG-2 environment variables are read, all with the `AGT_KNOWLEDGE_BASE_` prefix: `_SETUP_PASSWORD`,
   `_DB_PASSWORD`, `_CONFIG_FILE` (default `./config.yaml`), `_DATABASE_HOST`, `_SERVER_HOST` and `_STATIC_DIR`, plus
-  `LOCAL_AUTH_SECRET` until member sessions change and the recovery command's `_LOCAL_USER_PASSWORD`. The database
+  `LOCAL_AUTH_SECRET` until member sessions change. The database
   name, user, port and TLS setting come from `database.*` in `config.yaml` ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
 - `server.trustProxy` also accepts a proxy IP or CIDR, or a list of them ([#52](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/52)).
 - Settings precedence (config file, then dashboard, then default) is computed in one place, `settingStates()`; a
@@ -263,8 +277,7 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   wrong password and is logged as an error (AUTH-2) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 - The Admin username is stored as entered after trimming, 1–64 characters (AUTH-3) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 - Sessions: the Admin cookie is `agt_knowledge_base_session` with `Path=/`, stored in `sessions` (renamed from
-  `admin_sessions`); `session.secureCookie: auto` marks cookies `Secure` when a trusted proxy reports HTTPS (AUTH-8).
-  The bundled Nginx now passes on the `X-Forwarded-Proto` a TLS proxy in front of it sends ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
+  `admin_sessions`); `session.secureCookie: auto` marks cookies `Secure` when a trusted proxy reports HTTPS (AUTH-8) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 - One `onRequest` hook in `server/adminRoutes.ts` checks the CSRF header and the session cookies (AUTH-9, SEC-5) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 - Every response carries the spec's Content-Security-Policy, `X-Frame-Options: DENY`, `X-Content-Type-Options`,
   `Referrer-Policy` and `Cross-Origin-Opener-Policy`; API and HTML responses are never cached (SEC-1..SEC-3) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
@@ -286,6 +299,10 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   report's `preRestoreBackup` is `null` after a recovery restore. Archive problems answer `422 archive_rejected`
   (1.x `code` `INVALID_BACKUP`) instead of `400 invalid_backup` (API-6) ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
 - The server refuses to start when `database.previewName` names the app's own database ([#55](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/55)).
+- The member routes moved from `server/handler.ts` to `server/memberRoutes.ts`, beside `adminRoutes.ts`, and the
+  public reads into `app.ts` (REPO-1) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- `.env.example` documents the production `.env` (DEP-4), and `deploy/Caddyfile.example` proxies to `127.0.0.1:8081`
+  and explains `server.trustProxy` for both installation methods (DEP-10) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
 
 ### Deprecated
 
@@ -310,7 +327,7 @@ These keep working and are removed in 3.0.0; each one used logs a warning at sta
   `adminSession.secureCookie` (renamed to `site.title`, `site.subtitle`, `backup.maxZipBytes`,
   `session.secureCookie`), `adminSession.ttlHours`, `rateLimits.adminLogin`, `rateLimits.adminPassword` and
   `server.frontendOrigin`.
-- The environment variables `AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_PASSWORD`, `LOCAL_USER_PASSWORD` (renamed with
+- The environment variables `AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_PASSWORD` (renamed with
   the `AGT_KNOWLEDGE_BASE_` prefix), `DATABASE_URL`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DATABASE_SSL`
   (replaced by `database.*` in `config.yaml`) and `AUTH_MODE`.
 
@@ -327,6 +344,8 @@ These keep working and are removed in 3.0.0:
   session (use `setupPasswordStillSet`) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 - `server.frontendOrigin` now only marks session cookies `Secure` under `session.secureCookie: auto` when it is an
   `https://` origin ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
+- A number of proxy hops as `server.trustProxy` (the 1.x `trustProxy: 1` for the bundled Nginx): set the proxy's
+  address instead (CFG-5) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
 
 ### Removed
 
@@ -349,6 +368,14 @@ These keep working and are removed in 3.0.0:
   sent (the 1.x `code` values stay) ([#53](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/53)).
 
 - The `migrate` Compose service, `scripts/migrate.ts`, `npm run db:migrate` and `MIGRATION_TARGET_ID` ([#54](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/54)).
+
+- The `web` image and `nginx.conf`, the `api` and `postgres` Compose services, the `agt-postgres` and `agt-backups`
+  volumes, `docker.env.example`, and the Compose variables `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_BIND_ADDRESS`,
+  `POSTGRES_PORT`, `APP_BIND_ADDRESS` and `APP_PORT`; the database port is no longer published (DEP-2, DEP-3) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- `deploy/upgrade-database-role.sql`: the 1.x data is loaded into the new database as the app role instead ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- The member-recovery command `scripts/manage-local-user.ts`, `npm run build:scripts`, and its variables
+  `AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD` and `LOCAL_USER_PASSWORD`: the Admin creates, resets and reactivates
+  member accounts in the admin panel (REPO-1) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
 
 ### Security
 
