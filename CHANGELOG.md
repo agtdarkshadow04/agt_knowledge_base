@@ -236,7 +236,10 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   BAK-3 allowlist on real dumps with a function, trigger, view, extra schema, unknown table or ACL entry, and two
   processes on one database: writes waiting for a backup, maintenance during a restore, admission against the shared
   state, aborts when the control connection drops, owner failure in a backup and in a restore, and a process started
-  during a backup ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
+  during a backup; restore previews (a newer schema, a missing table, a bad Admin hash, an extension, a second preview
+  at the same time, a process started during a preview), the BAK-10 rollback list, the BAK-11 recovery restore from
+  another process, and the drain (a write in progress included in a backup, a write held past the lock timeout, and a
+  restore waiting for a held read, a job and a download) ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
 - Browser tests against the real server (TEST-6): Playwright starts `node dist-server/index.mjs` on a fresh database
   from first run, creates the Admin and the members through the UI, and covers the public pages, sign-in, articles,
   downloads and the PDF export, the editor and the revision history, tags, the settings dialog, and every admin tab;

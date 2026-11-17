@@ -144,8 +144,8 @@ function unzip(archive: Buffer): Promise<Map<string, Buffer>> {
 }
 
 /** An archive with `dump` in place of the original's database dump, with a matching manifest (BAK-2). */
-function rezip(files: Map<string, Buffer>, dump: Buffer): Promise<Buffer> {
-  const manifest = JSON.parse(files.get('manifest.json')!.toString()) as { files: Array<{ path: string; size: number; sha256: string }> };
+function rezip(files: Map<string, Buffer>, dump: Buffer, manifestChanges: Record<string, unknown> = {}): Promise<Buffer> {
+  const manifest = { ...JSON.parse(files.get('manifest.json')!.toString()), ...manifestChanges } as { files: Array<{ path: string; size: number; sha256: string }> };
   for (const entry of manifest.files) {
     if (entry.path !== 'database.dump') continue;
     entry.size = dump.length;
@@ -187,8 +187,10 @@ async function loadDump(database: string, dump: Buffer) {
   try {
     const dumpFile = join(directory, 'database.dump');
     writeFileSync(dumpFile, dump);
-    await query(database, 'DROP SCHEMA public CASCADE');
-    execFileSync('pg_restore', ['--no-owner', '--no-acl', '--exit-on-error', '--dbname', database, dumpFile], { env: connectionEnv(database) });
+    // Keep the database's own public schema (dropping it would change its privileges): skip the dump's schema entry.
+    const list = execFileSync('pg_restore', ['--list', dumpFile], { encoding: 'utf8' }).split('\n').filter((line) => !/ SCHEMA - public | COMMENT - SCHEMA public /.test(line));
+    writeFileSync(join(directory, 'restore.list'), list.join('\n'));
+    execFileSync('pg_restore', ['--no-owner', '--no-acl', '--exit-on-error', `--use-list=${join(directory, 'restore.list')}`, '--dbname', database, dumpFile], { env: connectionEnv(database) });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -521,8 +523,13 @@ describe('restore previews on PostgreSQL (BAK-3)', () => {
     const a = await server();
     const { admin } = await setUp(a);
     const backup = (await backupArchive(a, admin)).rawPayload;
+    // A manifest that claims a newer schema is rejected before anything is restored.
+    const files = await unzip(backup);
+    const newer = await restore(a, admin, 'preview', await rezip(files, files.get('database.dump')!, { schemaVersion: 9999 }));
+    assert.equal(newer.statusCode, 422, newer.body);
+    assert.equal(JSON.parse(newer.body).params?.reason, 'newer_schema');
     const cases: Array<[string, string, string]> = [
-      ['newer schema', "INSERT INTO schema_migrations (version, name) VALUES (9999, 'from_the_future')", 'newer_schema'],
+      ['newer schema in the dump than in the manifest', "INSERT INTO schema_migrations (version, name) VALUES (9999, 'from_the_future')", 'schema_mismatch'],
       ['missing table', 'DROP TABLE tags CASCADE', 'missing_tables'],
       ['bad Admin hash', "UPDATE admin SET password_hash = 'scrypt$1$2$3$bad$hash'", 'invalid_admin'],
     ];
@@ -739,10 +746,11 @@ describe('the drain across two processes (BAK-8, BAK-12)', () => {
     job.release();
     assert.equal((await restoring).statusCode, 200);
 
-    // A download held open: a large server log export that the client stops reading.
+    // A download held open: a large server log export that the client stops reading. The entries
+    // have millisecond timestamps, as the app writes them.
     const third = await signInAdmin(a);
     await eventually(async () => b.operations.state === 'idle');
-    await query(a.database, "INSERT INTO logs.server_log (id, at, level, source, message, details) SELECT gen_random_uuid(), now(), 'info', 'startup', repeat('x', 400), '{}'::jsonb FROM generate_series(1, 60000)");
+    await query(a.database, "INSERT INTO logs.server_log (id, at, level, source, message, details) SELECT gen_random_uuid(), date_trunc('milliseconds', now()) - n * interval '1 millisecond', 'info', 'startup', repeat('x', 400), '{}'::jsonb FROM generate_series(1, 60000) AS n");
     const address = await b.app.listen({ port: 0, host: '127.0.0.1' });
     const response = await new Promise<import('node:http').IncomingMessage>((resolve, reject) => {
       const request = http.get(`${address}/api/admin/logs/server/export?format=jsonl`, { headers: { cookie: third } }, resolve);
