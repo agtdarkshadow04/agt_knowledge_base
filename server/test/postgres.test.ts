@@ -318,11 +318,13 @@ describe('two processes on one database (BAK-12)', () => {
     const a = await server({ operations: { hooks: { afterStateUpdate: async () => { paused.reached(); await paused.opened; } } } });
     const b = await server({ database: a.database, dataDir: a.dataDir });
     const { admin } = await setUp(a);
+    // Signing in writes too, so it happens before the backup.
+    const memberOnB = await signInMember(b);
     const backup = backupArchive(a, admin);
     await paused.arrived;
     // The backup has set its state but not taken the write lock yet: a write in that gap waits.
     let written = false;
-    const write = createArticle(b, await signInMember(b), 'Written during the backup').then((reply) => { written = true; return reply; });
+    const write = createArticle(b, memberOnB, 'Written during the backup').then((reply) => { written = true; return reply; });
     await new Promise((resolve) => setTimeout(resolve, 1500));
     assert.equal(written, false, 'the write waits while the backup runs');
     // Reads keep working in the other process during a backup.
@@ -409,5 +411,64 @@ describe('two processes on one database (BAK-12)', () => {
     // B reconnects on its next poll and serves again.
     await new Promise((resolve) => setTimeout(resolve, 500));
     assert.equal((await b.app.inject({ method: 'GET', url: '/api/articles' })).statusCode, 200);
+  });
+
+  it('returns the other process to idle when a backup owner loses its control connection', async () => {
+    const paused = gate();
+    const a = await server({ operations: { hooks: { afterStateUpdate: async () => { paused.reached(); await paused.opened; } } } });
+    const b = await server({ database: a.database, dataDir: a.dataDir });
+    const { admin } = await setUp(a);
+    const memberOnB = await signInMember(b);
+    const backup = backupArchive(a, admin);
+    await paused.arrived;
+    await a.operations.dropControlConnection();
+    paused.open();
+    assert.notEqual((await backup).statusCode, 200, 'the owner stops its own work');
+    // B sees that nobody holds the operation lock and abandons the backup; writes go through again.
+    const write = await createArticle(b, memberOnB, 'Written after the owner failed');
+    assert.equal(write.statusCode, 201, write.body);
+    const { rows } = await query(a.database, 'SELECT state FROM control.operation WHERE id = 1');
+    assert.equal(rows[0].state, 'idle');
+  });
+
+  it('puts the other process in restore_failed, with the marker, when a restore owner loses its control connection', async () => {
+    const paused = gate();
+    let pausing = false;
+    const a = await server({ operations: { hooks: { afterStateUpdate: async (kind) => { if (kind === 'restore' && pausing) { paused.reached(); await paused.opened; } } } } });
+    const b = await server({ database: a.database, dataDir: a.dataDir });
+    const { admin } = await setUp(a);
+    const archive = (await backupArchive(a, admin)).rawPayload;
+    pausing = true;
+    const restoring = restore(a, admin, 'restore', archive);
+    await paused.arrived;
+    await a.operations.dropControlConnection();
+    paused.open();
+    assert.notEqual((await restoring).statusCode, 200);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const { rows } = await query(a.database, 'SELECT state FROM control.operation WHERE id = 1');
+    assert.equal(rows[0].state, 'restore_failed');
+    assert.ok(existsSync(join(a.dataDir, 'restore-failed.json')), 'the marker file is written');
+    assert.equal((await b.app.inject({ method: 'GET', url: '/api/articles' })).statusCode, 503);
+    // A restart refuses while the failed state and the marker are there (BAK-11).
+    await assert.rejects(createTestServer({ database: a.database, dataDir: a.dataDir }), /restore/);
+  });
+
+  it('serves no writes from a process started while a backup runs, until the backup ends', async () => {
+    const paused = gate();
+    const a = await server({ operations: { hooks: { afterStateUpdate: async () => { paused.reached(); await paused.opened; } } } });
+    const { admin } = await setUp(a);
+    const backup = backupArchive(a, admin);
+    await paused.arrived;
+    const c = await server({ database: a.database, dataDir: a.dataDir });
+    const health = await c.app.inject({ method: 'GET', url: '/api/health' });
+    assert.equal(health.statusCode, 200);
+    let done = false;
+    const login = c.app.inject({ method: 'POST', url: '/api/member/login', headers: csrf, payload: { username: 'scribe', password: memberPassword } })
+      .then((reply) => { done = true; return reply; });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.equal(done, false, 'the new process waits for the backup');
+    paused.open();
+    assert.equal((await backup).statusCode, 200);
+    assert.equal((await login).statusCode, 200);
   });
 });
