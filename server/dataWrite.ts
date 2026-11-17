@@ -17,6 +17,8 @@ export const backupWaitMilliseconds = 30_000;
 export interface DataWriteOptions {
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
+  /** The request's admission signal: once it aborts (the lease is gone), the write rolls back instead of committing (BAK-12). */
+  signal?: AbortSignal;
 }
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -59,6 +61,7 @@ export async function withDataWrite<T>(db: Pick<Database, 'pool'>, work: () => P
       const state = await operationState(client);
       if (state === 'idle') {
         const result = await dataWriteScope.run({ client }, work);
+        options.signal?.throwIfAborted();
         await client.query('COMMIT');
         open = false;
         return result;
@@ -66,6 +69,7 @@ export async function withDataWrite<T>(db: Pick<Database, 'pool'>, work: () => P
       await client.query('ROLLBACK');
       open = false;
       if (state !== 'backup' || now() - started >= backupWaitMilliseconds) throw new MaintenanceError();
+      options.signal?.throwIfAborted();
     } catch (error) {
       if (open) {
         await client.query('ROLLBACK').catch((rollbackError: unknown) => {

@@ -39,8 +39,12 @@ export async function operationState(sql: Sql) {
  * Takes an advisory lock, waiting at most 30 seconds when `timeout` is set
  * (SQLSTATE 55P03 on a timeout; the caller decides what it means).
  */
-export async function advisoryLock(sql: Sql, name: LockName, options: { shared?: boolean; timeout?: boolean } = {}) {
-  if (options.timeout) await sql.query("SET lock_timeout = '30s'");
+/**
+ * Takes an advisory lock; with `timeout`, gives up after 30 seconds (BAK-8, BAK-12), or after the given number of
+ * milliseconds (tests), with SQLSTATE 55P03.
+ */
+export async function advisoryLock(sql: Sql, name: LockName, options: { shared?: boolean; timeout?: boolean | number } = {}) {
+  if (options.timeout) await sql.query(`SET lock_timeout = '${typeof options.timeout === 'number' ? `${Math.max(1, Math.round(options.timeout))}ms` : '30s'}'`);
   try {
     await sql.query(`SELECT pg_advisory_lock${options.shared ? '_shared' : ''}${lockKey(name)}`);
   } finally {

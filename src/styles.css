@@ -44,9 +44,12 @@ h1, h2, h3, p { margin-top: 0; }
 .filter-form { display: grid; grid-template-columns: minmax(12rem, 2fr) minmax(10rem, 1fr) auto; align-items: end; gap: 1rem; }
 .filter-tag-error { display: flex; align-items: center; gap: 0.45rem; color: #ff918e; font-size: 0.68rem; letter-spacing: normal; text-transform: none; }
 .filter-tag-error button { padding: 0; border: 0; color: var(--agt-orange); background: transparent; text-decoration: underline; cursor: pointer; }
-.field small { color: #807a72; font-size: 0.62rem; }
+.field small { color: #aaa39a; font-size: 0.62rem; }
 input, select, textarea { width: 100%; border: 1px solid rgba(255, 180, 81, 0.25); border-radius: 0.55rem; color: #fff; background: #0c0c0c; }
 input, select { min-height: 2.7rem; padding: 0.68rem 0.78rem; }
+/* UI-12, A11Y-6: at 300 px with the 2× text size, controls and long words never widen the page. */
+input, select, textarea { max-width: 100%; }
+.hero h1, .hero p { overflow-wrap: anywhere; hyphens: auto; }
 input::placeholder, textarea::placeholder { color: #6e6963; }
 input:hover, select:hover, textarea:hover { border-color: rgba(255, 180, 81, 0.45); }
 input:focus, select:focus, textarea:focus { border-color: var(--agt-red); outline: none; box-shadow: 0 0 0 3px rgba(255, 5, 0, 0.14); }
@@ -56,7 +59,7 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .input-with-icon input { padding-left: 2.4rem; }
 .sort-row { display: flex; align-items: end; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem; }
 .sort-row label { display: grid; gap: 0.3rem; color: #918a82; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.11em; text-transform: uppercase; }
-.sort-row select { min-width: 10rem; min-height: 2.35rem; padding-block: 0.45rem; }
+.sort-row select { min-width: min(10rem, 100%); min-height: 2.35rem; padding-block: 0.45rem; }
 .results-section { margin-top: clamp(3rem, 7vw, 6rem); }
 .results-heading { margin-bottom: 1.25rem; }
 .results-heading h2 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.25rem); font-weight: 400; }
@@ -315,7 +318,8 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
   .filter-form { grid-template-columns: 1fr; }
   .sort-row { align-items: stretch; flex-direction: column; }
   .sort-row select { width: 100%; }
-  .article-grid { grid-template-columns: 1fr; }
+  .article-grid { grid-template-columns: minmax(0, 1fr); }
+  .article-card { overflow-wrap: anywhere; }
   .article-card { min-height: 15rem; }
   .article-layout { display: flex; flex-direction: column; }
   .history-header, .comparison-heading { align-items: flex-start; flex-direction: column; }
@@ -388,3 +392,19 @@ a.button:not(.button-icon) { display: inline-block; }
   .brand-copy { display: none; }
   .header-actions { gap: 0.4rem; }
 }
+/* UI-12, A11Y-6: at 300 px with the 2× text size, flex and grid items shrink to the page and long words wrap. */
+.article-layout > * { min-width: 0; max-width: 100%; }
+.article-body, .comparison-panel, .preview-panel { overflow-wrap: anywhere; }
+.comparison-heading { flex-wrap: wrap; }
+.comparison-heading > * { min-width: 0; }
+.editor-toolbar { flex-wrap: wrap; }
+.segmented-control { max-width: 100%; flex-wrap: wrap; }
+.segmented-control button { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.editor-toolbar-actions { flex-wrap: wrap; min-width: 0; }
+.article-title-row { flex-wrap: wrap; }
+.article-title-row > * { min-width: 0; overflow-wrap: anywhere; }
+.page { grid-template-columns: minmax(0, 1fr); }
+.tag-management-page { min-width: 0; overflow-wrap: anywhere; }
+.tag-management-panel { grid-template-columns: minmax(0, 1fr); }
+.tag-management-panel > *, .settings-header > * { min-width: 0; }
+.settings-header { flex-wrap: wrap; }

@@ -193,17 +193,26 @@ export type LogSink = Pick<LogStore, 'audit' | 'ipHash' | 'listServer' | 'listAu
 
 /**
  * LOG-15: retention at startup and then every hour. A run that deletes
- * anything writes one server log entry with the counts. It skips while a
- * restore runs or has failed (BAK-8: background jobs pause).
+ * anything writes one server log entry with the counts. Each run is admitted
+ * under the activity lease like a request (BAK-12): `admit` resolves to null
+ * while no job may run (a restore, a failed restore, a lost control
+ * connection), and the run is skipped until the next hour.
  */
 export function startRetention(
   store: Pick<LogStore, 'applyRetention'>,
   settings: () => Promise<RetentionSettings>,
   log: { info(details: object, message: string): void; error(details: object, message: string): void },
-  paused: () => boolean,
+  admit: () => Promise<{ release(): void } | null>,
 ) {
   const run = async () => {
-    if (paused()) return;
+    let admission: { release(): void } | null;
+    try {
+      admission = await admit();
+    } catch (error) {
+      log.error({ source: 'retention', err: error }, 'Log retention could not start.');
+      return;
+    }
+    if (!admission) return;
     try {
       const deleted = await store.applyRetention(await settings());
       if (deleted.server || deleted.audit) {
@@ -211,6 +220,8 @@ export function startRetention(
       }
     } catch (error) {
       log.error({ source: 'retention', err: error }, 'Log retention failed.');
+    } finally {
+      admission.release();
     }
   };
   const first = run();

@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { createWriteStream, existsSync, readdirSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
-import { Transform } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { authenticationHook, createAdminRequestHandler, type AdminRequestHandler } from './adminRoutes.js';
 import { json as apiJson, pathId } from './api-response.js';
@@ -116,7 +116,7 @@ export interface BuildAppOptions {
   /** The rate limiter's clock, for tests. */
   rateLimitClock?: () => number;
   /** Runs a `writesData` route's work; `withDataWrite()` on the context's database by default (BAK-8). */
-  dataWrite?: <T>(work: () => Promise<T>) => Promise<T>;
+  dataWrite?: <T>(work: () => Promise<T>, options?: { signal?: AbortSignal }) => Promise<T>;
   /** Replace the route dispatchers (public and member, admin), for tests of the HTTP pipeline. */
   handlers?: { request?: RequestHandler; admin?: AdminRequestHandler };
   /** Replace the authentication and settings services, for tests of the HTTP pipeline. */
@@ -139,8 +139,10 @@ declare module 'fastify' {
     admin: AdminIdentity | null;
     /** The session cookie the authentication hook read, for logout. */
     sessionToken: string | undefined;
-    /** The request's admission under the activity lease (BAK-12); released when the response ends. */
+    /** The request's admission under the activity lease (BAK-12); released when both the handler and the response have ended. */
     admission: Admission | null;
+    /** The handler's work while it runs, so the lease outlives a client that disconnects early (BAK-12). */
+    handling: Promise<unknown> | null;
   }
 }
 
@@ -159,6 +161,21 @@ function sendJson(reply: FastifyReply, statusCode: number, body: unknown, header
 function sendApiResponse(reply: FastifyReply, result: ApiResponse | Outcome) {
   reply.code(result.statusCode).headers(result.headers);
   return result.body === undefined ? reply.send() : reply.send(result.body);
+}
+
+/**
+ * Settles with `work`, or rejects with the abort reason (`503 maintenance`) as
+ * soon as `signal` aborts: the request stops waiting for work whose lease is
+ * gone (BAK-12). A data write checks the same signal before it commits.
+ */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
 }
 
 /** A response computed before it is sent, so a data write commits first (BAK-12). */
@@ -392,6 +409,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   // under the activity lease, before authentication, so a restore never sees
   // a request touch the database. The BAK-11 recovery session is recognised here.
   app.decorateRequest('admission', null);
+  app.decorateRequest('handling', null);
   app.decorateRequest('audit', null);
   app.decorateRequest('auditError', null);
   // LOG-11: one hook audits every write, every audited read and every denial.
@@ -405,7 +423,10 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
       ...(route.admin && token ? { adminTokenHash: hashSessionToken(token) } : {}),
     });
     request.admission = admission;
-    reply.raw.once('close', () => admission.release());
+    // The share of the lease ends once the response has closed and the handler has finished, whichever is later.
+    reply.raw.once('close', () => {
+      void (request.handling ?? Promise.resolve()).catch(() => undefined).finally(() => admission.release());
+    });
     if (admission.recovery) {
       request.admin = { username: admission.recovery.username };
       request.sessionToken = token;
@@ -450,7 +471,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
     if (options.staticDir && existsSync(join(options.staticDir, 'index.html'))) registerStatic(routes, options.staticDir);
   });
 
-  const dataWrite = options.dataWrite ?? (<T>(work: () => Promise<T>) => withDataWrite(context.db, work));
+  const dataWrite = options.dataWrite ?? (<T>(work: () => Promise<T>, writeOptions: { signal?: AbortSignal } = {}) => withDataWrite(context.db, work, writeOptions));
 
   /** `<dataDir>/<backupsDir>/tmp/<uuid>`: uploads are streamed there and the directory is always deleted (SEC-10). */
   async function uploadDirectory() {
@@ -482,7 +503,21 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   }
 
   async function serve(route: CompiledRoute, request: FastifyRequest, reply: FastifyReply) {
+    const handling = handle(route, request);
+    request.handling = handling;
+    const outcome = await handling;
+    const signal = request.admission?.signal;
+    // A streamed body (a backup download, a log export) stops when the lease is lost (BAK-12).
+    if (signal && outcome.body instanceof Readable) {
+      const body = outcome.body;
+      signal.addEventListener('abort', () => body.destroy(signal.reason instanceof Error ? signal.reason : undefined), { once: true });
+    }
+    return sendApiResponse(reply, outcome);
+  }
+
+  async function handle(route: CompiledRoute, request: FastifyRequest): Promise<Outcome> {
     let directory: string | undefined;
+    const signal = request.admission?.signal;
     try {
       let upload: ApiRequestUpload | undefined;
       if (route.multipart) {
@@ -496,8 +531,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
         upload = { action: (request.query as Record<string, string>).action ?? '', file };
       }
       const work = () => compute(route, request, upload);
-      const outcome = route.writesData ? await dataWrite(work) : await work();
-      return sendApiResponse(reply, outcome);
+      return await untilAborted(route.writesData ? dataWrite(work, { signal }) : work(), signal);
     } finally {
       if (directory) await rm(directory, { recursive: true, force: true });
     }

@@ -230,6 +230,25 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   `/var/lib/agt-knowledge-base`, configuration in `/etc/agt-knowledge-base` (DEP-6..DEP-9) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
 - CI starts the Compose stack from the README's steps and checks that it is healthy, answers `/api/health` and
   `/api/setup/status`, and publishes the app on `127.0.0.1` and the database not at all (TEST-8) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- Server tests against a real PostgreSQL (TEST-3, TEST-4): `createTestServer()` starts the app on a fresh database
+  created through `AGT_KNOWLEDGE_BASE_TEST_DATABASE_URL`, and the tests cover startup and migrations (two processes
+  at once, a newer control schema), a backup round trip (only `public` dumped, logs kept, sessions emptied), the
+  BAK-3 allowlist on real dumps with a function, trigger, view, extra schema, unknown table or ACL entry, and two
+  processes on one database: writes waiting for a backup, maintenance during a restore, admission against the shared
+  state, aborts when the control connection drops, owner failure in a backup and in a restore, and a process started
+  during a backup; restore previews (a newer schema, a missing table, a bad Admin hash, an extension, a second preview
+  at the same time, a process started during a preview), the BAK-10 rollback list, the BAK-11 recovery restore from
+  another process, and the drain (a write in progress included in a backup, a write held past the lock timeout, and a
+  restore waiting for a held read, a job and a download) ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
+- Browser tests against the real server (TEST-6): Playwright starts `node dist-server/index.mjs` on a fresh database
+  from first run, creates the Admin and the members through the UI, and covers the public pages, sign-in, articles,
+  downloads and the PDF export, the editor and the revision history, tags, the settings dialog, and every admin tab;
+  axe finds no WCAG 2.2 AA violation on any page, no page scrolls sideways at 300, 520, 640, 760 or 1180 px, at
+  300 px with the 2× text size or in German, Thai and Hindi, every dialog keeps the keyboard, and status messages are
+  announced (A11Y-1..A11Y-6, UI-12). New dev dependency `@axe-core/playwright`, which STACK-1 names for TEST-6. CI runs
+  them on every pull request ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
+- `docs/RELEASING.md`: the release PR and its acceptance checks (TEST-7 checklist, TEST-8 installation runs, TEST-9
+  upgrade and rollback) (VER-12) ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
 
 ### Changed
 
@@ -303,6 +322,15 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   public reads into `app.ts` (REPO-1) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
 - `.env.example` documents the production `.env` (DEP-4), and `deploy/Caddyfile.example` proxies to `127.0.0.1:8081`
   and explains `server.trustProxy` for both installation methods (DEP-10) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- When a process loses its control connection, the requests it is serving answer `503 maintenance` at once: a data
+  write rolls back instead of committing, and a download stops. A request's share of the activity lease lasts until
+  its handler has finished, even when the client disconnects first, and the log retention job is admitted under the
+  lease like a request (BAK-8, BAK-12) ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
+- Accessibility fixes the axe checks found: the article cards' tag lists are labelled groups, the site link's and the
+  sort button's accessible names contain their visible text (WCAG 2.5.3), and the admin settings' help text has
+  enough contrast (A11Y-1). Focus returns to the editor's Save button when its review dialog closes (A11Y-2) ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
+- Layout fixes: the admin tabs, the log tables and the article, history, editor and Tags pages fit 300 px, also with
+  the 2× text size; long words wrap instead of widening the page (UI-12, A11Y-6) ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
 
 ### Deprecated
 
@@ -376,6 +404,9 @@ These keep working and are removed in 3.0.0:
 - The member-recovery command `scripts/manage-local-user.ts`, `npm run build:scripts`, and its variables
   `AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD` and `LOCAL_USER_PASSWORD`: the Admin creates, resets and reactivates
   member accounts in the admin panel (REPO-1) ([#59](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/59)).
+- The Vitest + jsdom component tests and the dev dependencies `vitest`, `jsdom` and `@testing-library/*`, replaced by
+  the browser tests; UI logic that needs no DOM moved to `src/lib/markdown.ts` and `src/lib/tags.ts`, tested with
+  `node:test` (STACK-1, TEST-1, TEST-3) ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
 
 ### Security
 

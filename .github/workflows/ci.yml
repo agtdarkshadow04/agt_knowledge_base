@@ -17,18 +17,74 @@ jobs:
   checks:
     name: npm run check
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_PASSWORD: ci-superuser
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # TEST-3: a non-superuser role with CREATEDB, used only by tests.
+      AGT_KNOWLEDGE_BASE_TEST_DATABASE_URL: postgres://agt_test:ci-test-password@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 26
           cache: npm
+      - name: PostgreSQL 18 client tools (BAK-6) and the test role
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-18
+          echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
+          PGPASSWORD=ci-superuser psql -h 127.0.0.1 -U postgres -c "CREATE ROLE agt_test LOGIN NOSUPERUSER CREATEDB NOCREATEROLE PASSWORD 'ci-test-password'"
       - run: npm ci
       - name: Every install script has a decision (STACK-7)
         run: |
           npm install-scripts ls
           npm install-scripts ls --json | node -e 'process.exit(JSON.parse(require("fs").readFileSync(0, "utf8")).allowScripts.length ? 1 : 0)'
       - run: npm run check
+
+  e2e:
+    name: npm run test:e2e
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_PASSWORD: ci-superuser
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AGT_KNOWLEDGE_BASE_TEST_DATABASE_URL: postgres://agt_test:ci-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - name: PostgreSQL 18 client tools (BAK-6) and the test role
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-18
+          echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
+          PGPASSWORD=ci-superuser psql -h 127.0.0.1 -U postgres -c "CREATE ROLE agt_test LOGIN NOSUPERUSER CREATEDB NOCREATEROLE PASSWORD 'ci-test-password'"
+      - run: npm ci
+      # TEST-6: Chromium and its system libraries, from the locked @playwright/test.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Traces of failed tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
 
   docker:
     name: Docker Compose smoke test (TEST-8)

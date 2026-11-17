@@ -56,6 +56,7 @@ export function EditorPage({ id }: { id?: string }) {
   const { navigate } = useNavigation();
   const { t, error: describe } = useI18n();
   const keepEditing = useRef<HTMLButtonElement>(null);
+  const saveButton = useRef<HTMLButtonElement>(null);
   const { user } = useAuth();
   const { settings } = useAppSettings();
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -290,7 +291,7 @@ export function EditorPage({ id }: { id?: string }) {
           <div className="editor-toolbar-actions">
             <a className="button button-icon" href="https://www.markdownguide.org/basic-syntax/" target="_blank" rel="noreferrer" title={t.editor.guide} aria-label={t.editor.guide}><MarkdownGuideIcon /></a>
             <button className="button button-icon" type="button" onClick={cancel} title={t.editor.exit} aria-label={t.editor.exit}><CloseIcon /></button>
-            <button className="button button-icon" type="submit" disabled={saving || tagsLoading || !tagsReady || invalidTagIds.length > 0} title={t.editor.save} aria-label={t.editor.save}><SaveIcon /></button>
+            <button ref={saveButton} className="button button-icon" type="submit" disabled={saving || tagsLoading || !tagsReady || invalidTagIds.length > 0} title={t.editor.save} aria-label={t.editor.save}><SaveIcon /></button>
             <button className="button button-icon" type="button" aria-pressed={preview} onClick={() => setPreview((value) => !value)} title={preview ? t.editor.hidePreview : t.editor.showPreview} aria-label={preview ? t.editor.hidePreview : t.editor.showPreview}>
               {preview ? <EyeOffIcon /> : <EyeIcon />}
             </button>
@@ -321,6 +322,7 @@ export function EditorPage({ id }: { id?: string }) {
           description={t.editor.reviewText}
           onClose={() => { if (!saving) setSaveConfirmationOpen(false); }}
           initialFocusRef={keepEditing}
+          returnFocusRef={saveButton}
           className="save-confirm-dialog"
           footer={(
             <>
