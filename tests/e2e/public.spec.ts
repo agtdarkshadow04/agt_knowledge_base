@@ -55,7 +55,7 @@ test.describe('as a moderator', () => {
 
   test('shows the status indicators between the title and the excerpt, and labels numeric visibility', async ({ page }) => {
     await page.goto('/?search=Portal&pinned=pinned');
-    const card = page.locator('.article-card', { hasText: 'Portal Guide' });
+    const card = page.locator('.article-card', { has: page.getByRole('heading', { name: 'Portal Guide', exact: true }) });
     await expect(card.getByText('Internal')).toHaveClass(/visibility-internal/);
     await expect(card.locator('.visibility-eye-icon')).toHaveCount(1);
     await expect(card.getByText('Verified', { exact: true })).toHaveClass(/verified/);
