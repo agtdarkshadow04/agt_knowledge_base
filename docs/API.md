@@ -271,7 +271,7 @@ English `message` as technical detail.
 
 Deprecated until 3.0.0 (VER-10): `POST /api/admin/backup/restore?action=preview|restore`, whose body is the ZIP file itself (`content-type: application/zip`). It answers like `POST /api/admin/restore`. The preview and report field `migrations` (`backup` and `upgrade` migration ids) is deprecated in favour of `schemaVersion`.
 
-See the [Backups section of the README](../README.md#backups) for operational details.
+See the [Backup & restore section of the README](../README.md#backup--restore) for operational details.
 
 ## Logs
 

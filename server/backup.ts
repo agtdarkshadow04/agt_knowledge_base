@@ -574,7 +574,7 @@ export class BackupService {
       await client.connect();
     } catch (error) {
       await client.end().catch(() => undefined);
-      throw new HttpError(500, 'internal', `The preview database ${name} cannot be opened (${message(error)}). Create it, owned by the app role (README, Backups).`);
+      throw new HttpError(500, 'internal', `The preview database ${name} cannot be opened (${message(error)}). Create it, owned by the app role (README, Backup & restore).`);
     }
     return client;
   }

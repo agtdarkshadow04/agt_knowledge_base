@@ -5,7 +5,7 @@ Thanks for helping improve the AGT Knowledge Base.
 ## Getting started
 
 1. Install Node.js 26 (with npm 11.20 or newer) and Docker (for PostgreSQL).
-2. Follow **Local development** in [README.md](README.md) to install dependencies, start PostgreSQL, and run the API and frontend.
+2. Follow **Development** in [README.md](README.md#development) to install dependencies, start PostgreSQL, and run the API and frontend.
 
 ## Making a change
 
@@ -17,7 +17,7 @@ Thanks for helping improve the AGT Knowledge Base.
 
 ## Checks
 
-Run these before opening a pull request. CI runs the same checks and also builds the Docker images.
+Run these before opening a pull request. CI runs the same checks, then the browser tests (`npm run test:e2e`) and the Docker Compose smoke test. A change to the UI should run `npm run test:e2e` locally too (see **Development** in the README).
 
 ```bash
 npm run check

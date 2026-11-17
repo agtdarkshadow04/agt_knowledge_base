@@ -580,6 +580,43 @@ describe('restore previews on PostgreSQL (BAK-3)', () => {
 });
 
 describe('rollback and recovery on PostgreSQL (BAK-10, BAK-11)', () => {
+  it('rolls an upgrade back by hand as the README says: the backup replaces a newer schema (VER-13)', async () => {
+    const database = await createTestDatabase();
+    try {
+      const a = await createTestServer({ database: database.name });
+      let archive: Buffer;
+      try {
+        const { admin, member } = await setUp(a);
+        assert.equal((await createArticle(a, member, 'Before the upgrade')).statusCode, 201);
+        archive = (await backupArchive(a, admin)).rawPayload;
+        assert.equal((await createArticle(a, member, 'After the upgrade')).statusCode, 201);
+      } finally {
+        await a.close();
+      }
+      // What a newer version leaves behind: a table and a migration the older version does not know.
+      await query(database.name, "CREATE TABLE from_the_future (id uuid PRIMARY KEY); INSERT INTO schema_migrations (version, name) VALUES (9999, 'from_the_future')");
+      await assert.rejects(createTestServer({ database: database.name }), /newer/);
+
+      // README, Rolling back: drop the public schema, then restore the backup's dump into it as the app role.
+      const role = connectionParameters({ connectionString: testDatabaseUrl(), ssl: false }).user;
+      execFileSync('psql', ['-v', 'ON_ERROR_STOP=1', '-d', database.name, '-c', 'DROP SCHEMA public CASCADE'], { env: connectionEnv(database.name), stdio: 'pipe' });
+      execFileSync('pg_restore', ['-d', database.name, '--no-owner', `--role=${role}`, '--exit-on-error', '--single-transaction'], {
+        env: connectionEnv(database.name),
+        input: (await unzip(archive)).get('database.dump')!,
+      });
+
+      const b = await createTestServer({ database: database.name });
+      try {
+        assert.deepEqual(await titles(b), ['Before the upgrade']);
+        await signInAdmin(b);
+      } finally {
+        await b.close();
+      }
+    } finally {
+      await database.drop();
+    }
+  });
+
   it('rolls back to exactly the original rows with the rollback list, and deletes each list with its pre-restore backup', async () => {
     let failNextLiveRestore = false;
     const a = await server({
