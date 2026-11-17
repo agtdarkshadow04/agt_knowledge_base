@@ -2,13 +2,13 @@
 
 | | |
 | --- | --- |
-| **Spec version** | 6.0.0 |
+| **Spec version** | 6.0.1 |
 | **Status** | Normative. 6.0.0 is the first production-ready version; earlier versions were development releases, and apps that follow one should move to 6.0.0 (SPEC-3) |
 | **Audience** | AI coding agents that design, build, review or maintain AGT web applications |
 | **Source** | [`agtdarkshadow04/agt_webapp_specification`](https://github.com/agtdarkshadow04/agt_webapp_specification), released as tags `vX.Y.Z` (SPEC-1) |
 | **Reference implementation** | [`agtdarkshadow04/agt_event_calendar`](https://github.com/agtdarkshadow04/agt_event_calendar) (AGT Event Calendar); its deviations are listed in its `AGENTS.md` |
 | **Reference version** | AGT Event Calendar 2.2.0, commit [`ba223a786c7eb58e3f42f83e4b51ab5e84fb8160`](https://github.com/agtdarkshadow04/agt_event_calendar/tree/ba223a786c7eb58e3f42f83e4b51ab5e84fb8160) (not yet tagged; becomes the tag `v2.2.0` once it exists) |
-| **Assets** | [`assets/`](https://github.com/agtdarkshadow04/agt_webapp_specification/blob/v6.0.0/assets/README.md) in the source repository: the AGT logo and fonts, with SHA-256, sources and licences (UI-15) |
+| **Assets** | [`assets/`](https://github.com/agtdarkshadow04/agt_webapp_specification/blob/v6.0.1/assets/README.md) in the source repository: the AGT logo and fonts, with SHA-256, sources and licences (UI-15) |
 | **Owner** | Alliance of Galactic Travellers; maintained by [`agtdarkshadow04`](https://github.com/agtdarkshadow04) |
 | **Release date and approval** | The date of this version's section in `CHANGELOG.md`. A version is approved when the owner merges its release PR and creates the annotated tag `vX.Y.Z` (SPEC-1); the tag's GitHub Release is the record |
 | **Security contact** | Report vulnerabilities in the spec or in an AGT app privately through the repository's **Security** tab → **Report a vulnerability** (GitHub private vulnerability reporting), never in a public issue |
@@ -110,6 +110,7 @@ Add a row (next free port) when you create an app.
 | Slug | Display name | Repository | Default port | Database |
 | --- | --- | --- | --- | --- |
 | `event-calendar` | AGT Event Calendar | `agtdarkshadow04/agt_event_calendar` | 8080 | SQLite |
+| `knowledge-base` | AGT Knowledge Base | `agtdarkshadow04/agt_knowledge_base` | 8081 | PostgreSQL |
 
 ## 3. Technology stack
 
@@ -1515,7 +1516,7 @@ All AGT apps MUST look like one family.
   (decorative: `alt=""` and `aria-hidden="true"` next to visible brand text). Copy brand assets from the spec
   repository's `assets/` (UI-15); never hotlink them.
 - **UI-15** **Asset sources and licences.** The logo and fonts named in UI-3, UI-5 and UI-14, and the base stylesheet (UI-16), come from
-  [`assets/`](https://github.com/agtdarkshadow04/agt_webapp_specification/blob/v6.0.0/assets/README.md) in the spec's source repository, at the tag of the spec version the app follows.
+  [`assets/`](https://github.com/agtdarkshadow04/agt_webapp_specification/blob/v6.0.1/assets/README.md) in the spec's source repository, at the tag of the spec version the app follows.
   Copy them unmodified, under the same file names, and check each file against the SHA-256 in `assets/README.md`.
   The fonts' licences make the next two points conditions of redistribution, so they are requirements:
   - **Licence files.** Apps MUST ship, unmodified, `public/fonts/NMSFuturaProBook-OFL.txt` (OFL 1.1 requires the
