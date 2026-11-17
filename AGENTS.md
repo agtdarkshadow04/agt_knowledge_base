@@ -59,8 +59,8 @@ npx vitest run src/components/HomePage.test.tsx   # one component test; add -t "
 No check needs a database, Docker or network access beyond `npm ci`. `npm run test:e2e` serves `dist/` with the
 production headers (`tests/e2e/serve.ts`) and answers `/api/*` in each test, so it needs no database either; it needs
 Chromium (`npx playwright install chromium`, or `PLAYWRIGHT_CHROMIUM_EXECUTABLE` pointing at an installed one). CI (`.github/workflows/ci.yml`) runs `npm ci`,
-the install-script check (STACK-7) and `npm run check`, and builds both Docker images, on pull requests and pushes to
-`main`.
+the install-script check (STACK-7) and `npm run check`, and builds the image and starts the Compose stack until it is
+healthy (TEST-8), on pull requests and pushes to `main`.
 
 ## Where things live
 
@@ -179,7 +179,7 @@ the install-script check (STACK-7) and `npm run check`, and builds both Docker i
   4. Docs: the OpenAPI document is generated; `server/test/openapi.test.ts` (API-13) fails if a route is missing or
      incomplete, its security is wrong, or an error code is missing from `errorCodes` or `docs/API.md`. Update
      `docs/API.md` for new concepts.
-  5. Tests in `server/test/`: `handler.test.ts` / `adminRoutes.test.ts` (authorization), `server.test.ts` (session
+  5. Tests in `server/test/`: `memberRoutes.test.ts` / `adminRoutes.test.ts` (authorization), `server.test.ts` (session
      separation, CSRF, cookies, body and rate limits), `routes.test.ts` (routing and auth modes).
 - **Adding a database migration:** add `server/migrations/NNNN_<snake_case>.sql` (the next number; no
   `BEGIN`/`COMMIT`, the runner wraps each migration in a transaction) and import and append it to `MIGRATIONS` in
