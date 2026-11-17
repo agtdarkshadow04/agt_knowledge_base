@@ -453,22 +453,21 @@ describe('two processes on one database (BAK-12)', () => {
     await assert.rejects(createTestServer({ database: a.database, dataDir: a.dataDir }), /restore/);
   });
 
-  it('serves no writes from a process started while a backup runs, until the backup ends', async () => {
+  it('does not finish starting a process while a backup runs, so it serves nothing until the backup ends', async () => {
     const paused = gate();
     const a = await server({ operations: { hooks: { afterStateUpdate: async () => { paused.reached(); await paused.opened; } } } });
     const { admin } = await setUp(a);
     const backup = backupArchive(a, admin);
     await paused.arrived;
-    const c = await server({ database: a.database, dataDir: a.dataDir });
-    const health = await c.app.inject({ method: 'GET', url: '/api/health' });
-    assert.equal(health.statusCode, 200);
-    let done = false;
-    const login = c.app.inject({ method: 'POST', url: '/api/member/login', headers: csrf, payload: { username: 'scribe', password: memberPassword } })
-      .then((reply) => { done = true; return reply; });
+    // Its startup runs the app migrations under the shared write lock, which waits for the backup.
+    let started = false;
+    const starting = server({ database: a.database, dataDir: a.dataDir }).then((created) => { started = true; return created; });
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    assert.equal(done, false, 'the new process waits for the backup');
+    assert.equal(started, false, 'the new process waits for the backup before it serves');
     paused.open();
     assert.equal((await backup).statusCode, 200);
-    assert.equal((await login).statusCode, 200);
+    const c = await starting;
+    const login = await c.app.inject({ method: 'POST', url: '/api/member/login', headers: csrf, payload: { username: 'scribe', password: memberPassword } });
+    assert.equal(login.statusCode, 200, login.body);
   });
 });
