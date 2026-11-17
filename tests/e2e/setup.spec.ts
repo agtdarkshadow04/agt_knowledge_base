@@ -46,9 +46,9 @@ for (const [name, member] of [['moderator', moderator], ['editor', editor]] as c
 test('the moderator writes the sample content', async ({ playwright }) => {
   const request = await playwright.request.newContext({ baseURL, storageState: auth.moderator });
   const tag = await createTag(request, 'portal', '#B5C3B7');
-  // Thirteen public guides: one more than a page of the article list (API-8).
+  // Thirteen public waypoints: one more than a page of the article list (API-8), found by their own word.
   for (let index = 1; index <= 13; index += 1) {
-    await createArticle(request, { title: `Guide ${String(index).padStart(2, '0')}` });
+    await createArticle(request, { title: `Waypoint ${String(index).padStart(2, '0')}` });
   }
   const portal = await createArticle(request, {
     title: 'Portal Guide',

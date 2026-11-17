@@ -28,7 +28,8 @@ test.describe('article list', () => {
   });
 
   test('shows the total, and loads the next page with the cursor (API-8)', async ({ page }) => {
-    await page.goto('/');
+    // Other specs add articles too; the thirteen seeded waypoints are found by their word.
+    await page.goto('/?search=Waypoint');
     await expect(page.getByText('Results: 13 · shown: 12')).toBeVisible();
     const next = page.waitForRequest((candidate) => new URL(candidate.url()).searchParams.has('cursor'));
     await page.getByRole('button', { name: 'Load more' }).click();
@@ -53,7 +54,7 @@ test.describe('as a moderator', () => {
   });
 
   test('shows the status indicators between the title and the excerpt, and labels numeric visibility', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?search=Portal&pinned=pinned');
     const card = page.locator('.article-card', { hasText: 'Portal Guide' });
     await expect(card.getByText('Internal')).toHaveClass(/visibility-internal/);
     await expect(card.locator('.visibility-eye-icon')).toHaveCount(1);
@@ -67,6 +68,7 @@ test.describe('as a moderator', () => {
     expect(order[0]).toContain('article-card-heading');
     expect(order[1]).toContain('excerpt');
     expect(order[2]).toContain('tag-list');
+    await page.goto('/?search=Secret');
     await expect(page.locator('.article-card', { hasText: 'Secret Plans' }).getByText('Top Secret')).toHaveClass(/visibility-top-secret/);
   });
 
