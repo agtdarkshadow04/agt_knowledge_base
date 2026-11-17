@@ -119,6 +119,10 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   move over once ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57), [#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58))
 - **The interface can be shown in ten languages**, chosen in the settings dialog; it stays in English until a reader
   picks another. Nothing needs to change on the server ([#58](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/58)).
+- **Install and upgrade from release tags, not a branch.** Check out the latest `vX.Y.Z` tag after cloning, and
+  upgrade with `git fetch --tags && git checkout vX.Y.Z` instead of `git pull`, after reading the upgrade notes and
+  downloading a backup. To go back, check out the previous tag and restore that backup (README, *Upgrading* and
+  *Rolling back*) (VER-13) ([#PR](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/PR)).
 
 ### Added
 - `src/lib/client.ts`: every browser request goes through `apiRequest()`, same-origin with `cache: 'no-store'`, the
@@ -249,9 +253,16 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   them on every pull request ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
 - `docs/RELEASING.md`: the release PR and its acceptance checks (TEST-7 checklist, TEST-8 installation runs, TEST-9
   upgrade and rollback) (VER-12) ([#60](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/60)).
+- A real-PostgreSQL test of the README's *Rolling back* steps: the backup taken before an upgrade replaces a newer
+  schema, and the previous version starts on it (VER-13) ([#PR](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/PR)).
 
 ### Changed
 
+- The README follows the DOC-1 order: the AI disclosure and the self-hosting guarantees, then Installation (Docker
+  Compose and local, both from a release tag, TLS, Upgrading, Rolling back), First run, a Configuration reference with
+  separate tables of config-file-only and dashboard-editable keys, the Admin dashboard, the app's own sections, Backup
+  & restore (restoring `config.yaml` by hand), Logs, Content safety, Development (commands and layout tables) and
+  Troubleshooting (DOC-1, VER-13) ([#PR](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/PR)).
 - The member UI has no router: pages are query parameters on `/` and links are rewritten with
   `history.replaceState` when normalized (STACK-2, FE-4); the server serves `index.html` only at `/` (SRV-9) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).
 - Icons are inline SVG components in `src/components/Icons.tsx` (FE-7) ([#57](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/57)).

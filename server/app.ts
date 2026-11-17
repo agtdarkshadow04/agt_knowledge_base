@@ -367,7 +367,7 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
   function warnOnPlainHttp(request: FastifyRequest) {
     if (plainHttpWarned || request.protocol !== 'http' || isLoopback(request.ip)) return;
     plainHttpWarned = true;
-    app.log.warn({ source: 'security' }, `A sign-in or setup request arrived over plain HTTP from ${request.ip}: credentials were sent unencrypted. Put a TLS-terminating reverse proxy in front of the server (see README, HTTPS).`);
+    app.log.warn({ source: 'security' }, `A sign-in or setup request arrived over plain HTTP from ${request.ip}: credentials were sent unencrypted. Put a TLS-terminating reverse proxy in front of the server (see README, TLS and reverse proxies).`);
   }
 
   // SEC-1..SEC-3 on every response, errors and static files included. Hashed assets override the cache headers.
