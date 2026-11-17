@@ -258,6 +258,8 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ### Changed
 
+- The Docker image build retries the PGDG signing-key download from www.postgresql.org (at most 30 seconds per
+  attempt, five retries), so one stalled response no longer fails the build (DEP-1, BAK-6) ([#PR](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/PR)).
 - Follows the AGT Web Application Specification v6.0.1 instead of v6.0.0 (SPEC-3): the pinned copy in
   `docs/agt-webapp-spec.md` is the `v6.0.1` tag, whose app registry lists `knowledge-base` (port 8081, PostgreSQL), so
   the NAME-1 deviation is gone. The assets are unchanged ([#62](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/62)).
