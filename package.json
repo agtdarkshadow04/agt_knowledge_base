@@ -13,7 +13,6 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "tsc -b && vite build",
     "build:server": "esbuild server/index.ts --bundle --platform=node --target=node26 --format=esm --packages=external --loader:.sql=text --outfile=dist-server/index.mjs",
-    "build:scripts": "esbuild scripts/manage-local-user.ts --bundle --platform=node --target=node26 --format=esm --packages=external --loader:.sql=text --outdir=dist-server/scripts --out-extension:.js=.mjs",
     "start": "node dist-server/index.mjs",
     "lint": "tsc -b --pretty false",
     "test": "npm run test:client && npm run test:server && npm run test:components",

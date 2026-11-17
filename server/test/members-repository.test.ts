@@ -85,15 +85,6 @@ describe('MemberRepository', () => {
     assert.match(String((insert.arguments[1] as unknown[])[5]), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
-  dataWriteIt('recovers a member from the CLI: upserts, activates and ends their sessions', async () => {
-    database.query.mock.mockImplementation(async () => ({ rowCount: 1, rows: [] }));
-    await service().recover({ username: 'hermes', displayName: 'Hermes', role: 'Moderator', passwordHash: 'scrypt$hash' });
-    const upsert = database.query.mock.calls[0].arguments;
-    assert.ok(upsert[0].includes('ON CONFLICT (username) DO UPDATE'));
-    assert.ok(upsert[0].includes('is_active = true'));
-    assertCalledWith(database.query, 'DELETE FROM member_sessions WHERE user_id = (SELECT id FROM local_users WHERE username = $1)', ['hermes']);
-  });
-
   dataWriteIt('never returns or references a super-administrator flag', async () => {
     database.query.mock.mockImplementation(async (sql: string) => {
       assert.ok(!(sql).includes('is_super_admin'));

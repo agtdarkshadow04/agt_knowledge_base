@@ -122,7 +122,7 @@ const TrustProxy = Type.Union([
   Type.Boolean(),
   Type.String({ minLength: 1 }),
   Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  // A number of proxy hops; the Compose stack's Nginx is one (see AGENTS.md deviations).
+  // Deprecated: a number of proxy hops, the 1.x setting for the Compose stack's Nginx; accepted until 3.0.0 (VER-10).
   integer(0, 10),
 ]);
 
@@ -326,6 +326,9 @@ export function readConfig(text: string, options: ConfigOptions = {}): ParsedCon
   }
   for (const [key, advice] of Object.entries(deprecatedKeys)) {
     if (getPath(tree, key) !== undefined) warnings.push(`${source}: ${key} is deprecated and will be removed in 3.0.0; ${advice}.`);
+  }
+  if (typeof getPath(tree, 'server.trustProxy') === 'number') {
+    warnings.push(`${source}: server.trustProxy as a number of proxy hops is deprecated and will be removed in 3.0.0; set it to the address the proxy connects from (127.0.0.1, or the Docker network's gateway), or false without a proxy.`);
   }
 
   // Defaults fill only absent keys; every value the file sets is then checked.

@@ -5,16 +5,15 @@ A production-oriented knowledge base for the Alliance of Galactic Travellers com
 ## Architecture
 
 ```text
-                    Docker Compose
-Browser --HTTP(S)--> web: Nginx --> api: Node.js (Fastify) --> postgres: PostgreSQL 16
-                                     serves the React/Vite UI      (volume agt-postgres)
-                                     and /api/*, and applies
-                                     schema migrations at startup
+Browser --HTTPS--> TLS proxy (Caddy, ...) --HTTP--> knowledge-base: Node.js (Fastify) --> db: PostgreSQL 18
+                                                    127.0.0.1:8081                       (own volume)
+                                                    serves the React/Vite UI and /api/*,
+                                                    applies schema migrations at startup
 ```
 
-The browser never connects to PostgreSQL and contains no database credential. The Node.js server serves the member app (`index.html`), the admin panel (`admin.html`, only at `/admin`), and the API under `/api/`; Nginx only forwards requests to it. Member accounts and their scrypt password hashes are stored in `local_users`, and members sign in with cookie sessions. The installation Admin is stored separately, in the single-row `admin` table, and signs in with a cookie session that works only for the admin API. The API is the authorization boundary: it checks the session, role, visibility, and protection before reading or changing data. `created_at`, `created_by`, `updated_at`, `modified_by`, pinning, protection, and version fields are server-owned. The server connects to PostgreSQL as the non-superuser role `agt_knowledge_base`, which owns only the app's database and its restore preview database, and refuses to start as a superuser. PostgreSQL is reachable only through the private Compose network and an optional loopback-only port.
+The browser never connects to PostgreSQL and contains no database credential. One Node.js server serves the member app (`index.html`), the admin panel (`admin.html`, only at `/admin`), and the API under `/api/`. Member accounts and their scrypt password hashes are stored in `local_users`, and members sign in with cookie sessions. The installation Admin is stored separately, in the single-row `admin` table, and signs in with a cookie session that works only for the admin API. The API is the authorization boundary: it checks the session, role, visibility, and protection before reading or changing data. `created_at`, `created_by`, `updated_at`, `modified_by`, pinning, protection, and version fields are server-owned. The server connects to PostgreSQL as the non-superuser role `agt_knowledge_base`, which owns only the app's database and its restore preview database, and refuses to start as a superuser. With Docker Compose, PostgreSQL is reachable only on the stack's private network; its port is never published.
 
-The project is fully self-hosted and needs no cloud account or external service.
+The project is fully self-hosted and needs no cloud account or external service. It runs with Docker Compose or as a systemd service on Ubuntu or Debian (see [Installation](#installation)).
 
 ## Roles and editing rules
 
@@ -32,8 +31,8 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
 
 ## Prerequisites
 
-- Node.js 26 and npm 11.20 or newer within npm 11 (only to build or develop from source; the Docker images include Node.js)
-- For local data: Docker Compose or PostgreSQL 16
+- To run it: Docker Engine with the Compose plugin, **or** Ubuntu 24.04 LTS / Debian 12 or 13 with Node.js 26 and PostgreSQL 18 (see [Local installation](#local-installation-ubuntudebian)).
+- To develop: Node.js 26 and npm 11.20 or newer within npm 11, and a PostgreSQL 18 server (a container is enough).
 
 ## Local development
 
@@ -45,13 +44,15 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
    cp config.example.yaml config.yaml
    ```
 
-   Pre-restore backups go to `./data/backups` (`storage.dataDir` and `storage.backupsDir`, relative to the working directory). Backups need the PostgreSQL 16 client tools (`pg_dump`, `pg_restore`) on the `PATH`.
+   In `.env.local`, set `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` and `AGT_KNOWLEDGE_BASE_DB_PASSWORD` to any values you like. Pre-restore backups go to `./data/backups` (`storage.dataDir` and `storage.backupsDir`, relative to the working directory). Backups need the PostgreSQL 18 client tools (`pg_dump`, `pg_restore`) on the `PATH`.
 
-2. Start PostgreSQL. On first start, `deploy/postgres-init/10-app-role.sh` creates the `agt_knowledge_base` role (with `AGT_KNOWLEDGE_BASE_DB_PASSWORD` from `.env.local`) and its databases:
+2. Start a development PostgreSQL 18 on `127.0.0.1:5432`. On its first start, `deploy/postgres-init/10-app-role.sh` creates the `agt_knowledge_base` role (with `AGT_KNOWLEDGE_BASE_DB_PASSWORD` from `.env.local`) and its databases:
 
    ```bash
    set -a && source .env.local && set +a
-   POSTGRES_PASSWORD=local-development-superuser-password docker compose up -d postgres
+   docker run -d --name agt-knowledge-base-dev-db -p 127.0.0.1:5432:5432 \
+     -e POSTGRES_PASSWORD=local-development-superuser-password -e AGT_KNOWLEDGE_BASE_DB_PASSWORD \
+     -v "$PWD/deploy/postgres-init:/docker-entrypoint-initdb.d:ro" postgres:18-bookworm
    ```
 
 3. Start the API and Vite in separate terminals:
@@ -61,21 +62,24 @@ Updates, restores, and deletes carry the article version. PostgreSQL applies the
    npm run dev
    ```
 
-`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; it applies any pending migrations before it listens. Rerun it after changing server code. The API listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Vite proxies `/api` to it, so the browser sees a single origin, as it does behind Nginx. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base with the header's sign-in button (`/?view=login`). The API checks the member and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
+`npm run dev:server` builds the API bundle (`dist-server/index.mjs`) and starts it with the variables from `.env.local`; it applies any pending migrations before it listens. Rerun it after changing server code. The API listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Vite proxies `/api` to it, so the browser sees a single origin, as it does in production. Open `http://localhost:5173/admin` and complete first-run setup with the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env.local` to create the Admin, then create member accounts under **Users** and sign in to the knowledge base with the header's sign-in button (`/?view=login`). The API checks the member and Admin session cookies and does not provide an insecure authentication bypass. Public browsing works without signing in.
 
-## Docker self-hosting
+## Installation
 
-The Compose stack runs the web frontend, API, schema migrations, PostgreSQL, and local authentication.
+### Docker Compose
 
-1. Install Docker Engine with the Compose plugin and clone this repository (the `main` branch).
-2. Create the deployment configuration:
+The Compose stack has two services: `knowledge-base` (the app, one image built from this repository) and `db` (PostgreSQL 18). The app's files live in the `knowledge-base-data` volume (`/app/data`: pre-restore backups and the failed-restore marker) and the database in `knowledge-base-db`. The app container runs as the unprivileged `node` user with a read-only root filesystem, a `tmpfs` at `/tmp` and `no-new-privileges`; only its data volume is writable.
+
+1. Install Docker Engine with the Compose plugin and clone this repository.
+2. Create the configuration and the two secret files:
 
    ```bash
-   cp docker.env.example .env
    cp config.example.yaml config.yaml
+   cp .env.example .env
+   cp .env.db.example .env.db
    ```
 
-   In `.env`, replace `POSTGRES_PASSWORD` and `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` with independent random values. For example, `openssl rand -hex 32` generates a suitable value for any of them. These secrets must not be committed. `config.yaml` must exist before the stack starts: Compose mounts it into the API and migration containers.
+   In `.env`, set `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` and `AGT_KNOWLEDGE_BASE_DB_PASSWORD`; in `.env.db`, set `POSTGRES_PASSWORD` (the database superuser's, which only the `db` container receives). Use independent random values, for example from `openssl rand -hex 24`. Never commit `.env` or `.env.db`. `config.yaml` must exist before the stack starts, because Compose mounts it read-only into the app container.
 
 3. Build and start the stack:
 
@@ -84,9 +88,93 @@ The Compose stack runs the web frontend, API, schema migrations, PostgreSQL, and
    docker compose ps
    ```
 
-   On its first start the `postgres` service creates the `agt_knowledge_base` role and databases (`deploy/postgres-init/10-app-role.sh`). The API waits for PostgreSQL, applies pending migrations at startup and then listens.
+   On its first start the `db` service creates the `agt_knowledge_base` role and databases (`deploy/postgres-init/10-app-role.sh`). The app waits until the database is healthy, applies pending migrations at startup and then listens. `docker compose ps` reports it `healthy` once `GET /api/health` answers.
 
-4. Open `http://localhost:8080/admin` (or the configured host and port) to create the Admin account. A fresh installation shows a setup screen that asks for the one-time `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env`, then the Admin username and a new password (at least 12 characters, including uppercase, lowercase, a number, and a symbol, and different from the setup password). Without `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD`, setup is refused, so nobody can claim a fresh installation by reaching it first. Once setup is complete, remove `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env` and run `docker compose up -d`; until then the API logs a warning at startup and the admin panel shows a reminder.
+4. The site is at `http://127.0.0.1:8081` on this host only (SEC-4). To serve other machines, put a TLS proxy in front (see [TLS and reverse proxies](#tls-and-reverse-proxies)). Continue with [First run](#first-run).
+
+Useful operations:
+
+```bash
+docker compose logs -f knowledge-base db
+docker compose ps
+docker compose down                # stop containers without deleting data
+docker compose exec db psql -U postgres -d agt_knowledge_base   # database maintenance
+```
+
+The `knowledge-base-db` volume holds the database and `knowledge-base-data` the pre-restore backups. Do not run `docker compose down --volumes` unless you intend to delete the data permanently.
+
+### Local installation (Ubuntu/Debian)
+
+The app runs as the systemd service `agt-knowledge-base`, under its own system user, with its data in `/var/lib/agt-knowledge-base` and its configuration in `/etc/agt-knowledge-base`.
+
+```bash
+# 1. Node.js 26 from NodeSource, and build tools for native modules
+curl -fsSL https://deb.nodesource.com/setup_26.x -o /tmp/nodesource_setup.sh
+sudo -E bash /tmp/nodesource_setup.sh
+sudo apt-get install -y nodejs git build-essential python3
+
+# 2. PostgreSQL 18 from the PGDG apt repository (it includes pg_dump and pg_restore for backups)
+sudo apt-get install -y postgresql-common
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+sudo apt-get install -y postgresql-18
+
+# 3. The database role and databases (enter the role's password when asked)
+sudo -u postgres createuser --pwprompt --no-superuser --no-createdb --no-createrole agt_knowledge_base
+sudo -u postgres createdb --owner agt_knowledge_base agt_knowledge_base
+sudo -u postgres createdb --owner agt_knowledge_base agt_knowledge_base_preview
+
+# 4. System user and code
+sudo useradd --system --home-dir /var/lib/agt-knowledge-base --shell /usr/sbin/nologin agt-knowledge-base
+sudo git clone https://github.com/agtdarkshadow04/agt_knowledge_base.git /opt/agt-knowledge-base
+cd /opt/agt-knowledge-base
+sudo npm ci && sudo npm run build && sudo npm prune --omit=dev
+
+# 5. Configuration
+sudo mkdir -p /etc/agt-knowledge-base
+sudo cp config.example.yaml /etc/agt-knowledge-base/config.yaml
+sudo cp .env.example /etc/agt-knowledge-base/.env
+sudo chmod 600 /etc/agt-knowledge-base/.env
+# Edit /etc/agt-knowledge-base/config.yaml: set storage.dataDir: /var/lib/agt-knowledge-base
+# Edit /etc/agt-knowledge-base/.env: set AGT_KNOWLEDGE_BASE_SETUP_PASSWORD, and
+#   AGT_KNOWLEDGE_BASE_DB_PASSWORD to the role's password from step 3
+
+# 6. Service
+sudo cp deploy/agt-knowledge-base.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now agt-knowledge-base
+```
+
+The service listens on `127.0.0.1:8081` and starts after PostgreSQL. Check it with `systemctl status agt-knowledge-base` and read its output with `journalctl -u agt-knowledge-base`. The unit ([`deploy/agt-knowledge-base.service`](deploy/agt-knowledge-base.service)) runs with systemd's sandboxing: a read-only system, no home directories, private `/tmp` and devices, no capabilities, and only `/var/lib/agt-knowledge-base` writable. Continue with [First run](#first-run).
+
+### TLS and reverse proxies
+
+The server speaks plain HTTP only (SEC-4), so a default installation is reachable only from the host it runs on: the local service listens on `127.0.0.1:8081` (`server.host`, `server.port`), and Compose publishes the app on `127.0.0.1:8081`. To serve other machines, put a TLS-terminating reverse proxy in front of it; passwords and session cookies must not travel over plaintext HTTP. The server logs one warning per process (source `security`) the first time a sign-in or setup request arrives over plain HTTP from another machine.
+
+With [Caddy](https://caddyserver.com/docs/), which obtains and renews certificates automatically, the whole proxy configuration is [`deploy/Caddyfile.example`](deploy/Caddyfile.example):
+
+```text
+knowledge-base.example.org {
+    reverse_proxy 127.0.0.1:8081
+}
+```
+
+Then set `server.trustProxy` in `config.yaml` to the address the app sees the proxy connect from, and keep `session.secureCookie: auto`:
+
+- **Local installation:** `trustProxy: 127.0.0.1`.
+- **Docker Compose:** the Docker network's gateway, which is where connections to the published port come from. Find it with `docker network inspect "$(docker compose ps -q knowledge-base | xargs docker inspect --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')" --format '{{(index .IPAM.Config 0).Gateway}}'` (for example `172.18.0.1`), then `docker compose restart knowledge-base`.
+
+The app then takes the client address for rate limits from the `X-Forwarded-For` header the proxy sets, and the `X-Forwarded-Proto: https` it sends marks the session cookies `Secure`. Without `trustProxy` both headers are ignored, and every client shares the proxy's address for rate limits. Any other proxy (Traefik, Nginx, HAProxy) works the same way. The proxy must accept request bodies of at least `backup.maxZipBytes` (200 MiB by default) and allow several minutes for `/api/admin/restore`. Only if the proxy runs on another machine, set `server.host` (local) or the published address in `docker-compose.yml` (Docker) to an interface that proxy can reach, and restrict that port to the proxy's address with a firewall.
+
+### First run
+
+Open `/admin` (through your proxy, or `http://127.0.0.1:8081/admin` on the host) to create the Admin account. A fresh installation shows a setup screen that asks for the one-time `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` from `.env`, then the Admin username and a new password (at least 12 characters, including uppercase, lowercase, a number, and a symbol, and different from the setup password). Without `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD`, setup is refused, so nobody can claim a fresh installation by reaching it first.
+
+Once setup is complete, remove the setup password and restart; until then the server logs a warning at every start and the admin panel shows a reminder:
+
+- **Docker Compose:** delete the `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` line from `.env`, then `docker compose up -d`.
+- **Local installation:** delete it from `/etc/agt-knowledge-base/.env`, then `sudo systemctl restart agt-knowledge-base`.
+
+Then create member accounts under **Users** in the admin panel.
 
 ### The admin panel
 
@@ -100,7 +188,7 @@ The admin panel is a separate page reachable only by visiting `/admin` directly;
 - **Account** changes the Admin password. It requires the current password and signs out every other Admin session.
 - **API** renders the API reference from the server's OpenAPI document (`/api/openapi.json`). The header shows the app version.
 
-Members and the Admin sign in with cookie sessions: a random 32-byte token in an `HttpOnly`, `SameSite=Strict`, `Path=/` cookie (`agt_knowledge_base_member_session` for members, `agt_knowledge_base_session` for the Admin) that page scripts cannot read. Only its SHA-256 is stored (`member_sessions`, `sessions`), so signing out revokes it on the server, and sessions last `session.ttlHours`. Every state-changing request must also carry an `x-agt-request: 1` header. The cookies are marked `Secure` when a trusted proxy reports HTTPS (see [HTTPS](#https)); set `session.secureCookie` to `true` or `false` to override this. The member cookie is ignored on admin routes, and the Admin cookie on member routes. Changing a member's role, deactivating them, setting their password or deleting them ends all of their sessions.
+Members and the Admin sign in with cookie sessions: a random 32-byte token in an `HttpOnly`, `SameSite=Strict`, `Path=/` cookie (`agt_knowledge_base_member_session` for members, `agt_knowledge_base_session` for the Admin) that page scripts cannot read. Only its SHA-256 is stored (`member_sessions`, `sessions`), so signing out revokes it on the server, and sessions last `session.ttlHours`. Every state-changing request must also carry an `x-agt-request: 1` header. The cookies are marked `Secure` when a trusted proxy reports HTTPS (see [TLS and reverse proxies](#tls-and-reverse-proxies)); set `session.secureCookie` to `true` or `false` to override this. The member cookie is ignored on admin routes, and the Admin cookie on member routes. Changing a member's role, deactivating them, setting their password or deleting them ends all of their sessions.
 
 Moderators manage canonical tags and clean up orphaned tag references on the **Tags** page of the knowledge base (`/?view=tags`), linked in the header for Moderators only. The **Settings** dialog (the gear button in the header) keeps a few preferences in this browser only: the **language** (English, French, German, Spanish, Brazilian Portuguese, Italian, Thai, Simplified Chinese, Hindi or Japanese; English until the reader picks another), the **time zone** that dates and times are shown in (the browser's own, or a fixed UTC offset), the **text size** (1× to 2×), the search-results view, and whether the article page offers PDF and Markdown downloads. The admin dashboard has the same language, time-zone and text-size controls behind its own gear button, and both share one `localStorage` object, `agt_knowledge_base_settings`; preferences saved by 1.x under `agt-*` keys are moved there once. Dates, times, numbers and sizes follow the chosen language's conventions. The interface is translated; article content and the API's English `message` texts are not (the UI shows its own text for each error code).
 
@@ -110,42 +198,31 @@ While a restore runs, or a change waits too long for a backup, the server answer
 
 ### Account recovery
 
-**Member accounts.** The command-line tool creates or resets a member account (Editor or Moderator); it cannot create the Admin:
-
-```bash
-read -rsp "Recovery password: " AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD && echo
-export AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD
-docker compose run --rm --no-deps -e AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD api \
-  node server/scripts/manage-local-user.js \
-  --username recovery-moderator \
-  --display-name "Recovery Moderator" \
-  --role Moderator \
-  --confirm
-unset AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD
-```
-
-Use the admin panel for routine account management.
+**Member accounts.** The Admin creates members, resets their passwords and reactivates deactivated accounts under **Users** in the admin panel.
 
 **Admin lockout.** If the Admin password is lost, delete the Admin account and its sessions, then run setup again:
 
 ```bash
-docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d agt_knowledge_base -c "DELETE FROM sessions; DELETE FROM admin;"'
+# Docker Compose
+docker compose exec -T db psql -U postgres -d agt_knowledge_base -c 'DELETE FROM sessions; DELETE FROM admin;'
+# Local installation
+sudo -u postgres psql -d agt_knowledge_base -c 'DELETE FROM sessions; DELETE FROM admin;'
 ```
 
-Then set `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` in `.env`, run `docker compose up -d`, and complete setup at `/admin`. Member accounts and articles are not affected. Alternatively, restore a backup whose Admin password you know.
+Then set `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` in `.env` again, restart (see [First run](#first-run)), and complete setup at `/admin`. Member accounts and articles are not affected. Alternatively, restore a backup whose Admin password you know.
 
 ### Configuration
 
 Configuration comes from three places (CFG-1): `config.yaml` for every setting that is not secret, `.env` for secrets, and the admin panel's **Settings** tab for the keys marked below.
 
-Compose mounts `config.yaml` read-only at `/app/config.yaml` (the server reads `AGT_KNOWLEDGE_BASE_CONFIG_FILE`, default `./config.yaml`). [`config.example.yaml`](config.example.yaml) documents every key and its default. The file is validated when the server starts: an unknown key or an invalid value stops it with an error naming the key (for example `Invalid /app/config.yaml: server.prot: Unexpected property`), and a missing file means "all defaults" and logs a warning. The server never writes it. Changes take effect when the server restarts (`docker compose restart api`).
+Compose mounts `config.yaml` read-only at `/app/config.yaml`, and the local installation reads `/etc/agt-knowledge-base/config.yaml` (the server reads `AGT_KNOWLEDGE_BASE_CONFIG_FILE`, default `./config.yaml`). [`config.example.yaml`](config.example.yaml) documents every key and its default. The file is validated when the server starts: an unknown key or an invalid value stops it with an error naming the key (for example `Invalid /app/config.yaml: server.prot: Unexpected property`), and a missing file means "all defaults" and logs a warning. The server never writes it. Changes take effect when the server restarts (`docker compose restart knowledge-base`, or `sudo systemctl restart agt-knowledge-base`).
 
 | Key | Default | Purpose | Also editable in the dashboard |
 | --- | --- | --- | --- |
 | `server.host`, `server.port` | `127.0.0.1` (`0.0.0.0` in the Docker image), `8081` | API listener | No |
-| `server.trustProxy` | `false` (`config.example.yaml` sets `1`) | Proxies to trust for `X-Forwarded-For` and `X-Forwarded-Proto`: `true`, a proxy IP or CIDR (string or list), or a number of hops. Use `1` for the bundled Nginx and `2` with a TLS proxy in front of it; with `false`, every client shares Nginx's address for rate limits | No |
+| `server.trustProxy` | `false` | The TLS proxy to trust for `X-Forwarded-For` and `X-Forwarded-Proto`: `true`, or the address it connects from as an IP or CIDR (string or list); see [TLS and reverse proxies](#tls-and-reverse-proxies) | No |
 | `server.logLevel` | `info` | What the server writes to standard output: `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent`. The server log always receives `info` and above | No |
-| `storage.dataDir`, `storage.backupsDir` | `data`, `backups` | Persistent files, relative to the working directory (`/app` in Docker); pre-restore backups and upload scratch files go to `dataDir/backupsDir` (the `agt-backups` volume), the failed-restore marker to `dataDir` | No |
+| `storage.dataDir`, `storage.backupsDir` | `data`, `backups` | Persistent files (DATA-10), relative to the working directory: `/app/data` in Docker (the `knowledge-base-data` volume); set `/var/lib/agt-knowledge-base` for a local installation. Pre-restore backups and upload scratch files go to `dataDir/backupsDir`, the failed-restore marker to `dataDir` | No |
 | `database.host`, `.port`, `.name`, `.user`, `.ssl` | `localhost` (or `AGT_KNOWLEDGE_BASE_DATABASE_HOST`), `5432`, `agt_knowledge_base`, `agt_knowledge_base`, `false` | PostgreSQL connection; the password is `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | No |
 | `database.previewName` | `agt_knowledge_base_preview` | The restore preview database, owned by the app role; every preview empties it | No |
 | `session.ttlHours` | `12` | Sign-in lifetime (1–168 hours), for the Admin and for members | No |
@@ -166,7 +243,7 @@ Compose mounts `config.yaml` read-only at `/app/config.yaml` (the server reads `
 
 A dashboard-editable key resolves to the value in `config.yaml` if the file sets it, otherwise the dashboard value, otherwise the default. **The configuration file always wins**: the API rejects changes to a key the file defines with HTTP `409`, naming the key, and no settings write, migration, or backup restore can override it.
 
-**Deprecated keys** (still accepted until 3.0.0; the server logs a warning for each one it finds): `site.applicationName` and `site.applicationSubtitle` (now `site.title` and `site.subtitle`), `backup.maxBytes` (now `backup.maxZipBytes`), `adminSession.secureCookie` (now `session.secureCookie`), `adminSession.ttlHours` (the Admin lifetime, overriding `session.ttlHours`), `rateLimits.adminLogin` and `rateLimits.adminPassword` (overriding `rateLimits.login` for those routes), and `server.frontendOrigin` (allows that browser origin and, when `https://`, makes the Admin cookie `Secure` under `auto`). A deprecated key next to its new name stops the server.
+**Deprecated keys** (still accepted until 3.0.0; the server logs a warning for each one it finds): `site.applicationName` and `site.applicationSubtitle` (now `site.title` and `site.subtitle`), `backup.maxBytes` (now `backup.maxZipBytes`), `adminSession.secureCookie` (now `session.secureCookie`), `adminSession.ttlHours` (the Admin lifetime, overriding `session.ttlHours`), `rateLimits.adminLogin` and `rateLimits.adminPassword` (overriding `rateLimits.login` for those routes), `server.frontendOrigin` (when `https://`, makes the session cookies `Secure` under `auto`), and a number of proxy hops as `server.trustProxy` (the 1.x setting for the bundled Nginx). A deprecated key next to its new name stops the server.
 
 Rate limits are applied by the API, per client address, before authentication and before the request body is read; an exceeded limit returns HTTP `429` with `Retry-After`. Limits are kept in memory and reset when the API restarts.
 
@@ -176,48 +253,16 @@ Environment variables are only for secrets and for values the launcher sets (CFG
 | --- | --- |
 | `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` | One-time password for creating the Admin at `/admin`; ignored once the Admin exists. Remove it after setup |
 | `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | Password of the `agt_knowledge_base` database role (never a superuser) |
-| `AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD` | Only for the member-recovery command (see [Account recovery](#account-recovery)) |
 
-Set by the Dockerfile or Compose file, or for development: `AGT_KNOWLEDGE_BASE_CONFIG_FILE` (path of `config.yaml`), `AGT_KNOWLEDGE_BASE_SERVER_HOST` (listen address when `server.host` is not set; the image sets `0.0.0.0`), `AGT_KNOWLEDGE_BASE_DATABASE_HOST` (database host when `database.host` is not set; Compose sets `postgres`), `AGT_KNOWLEDGE_BASE_STATIC_DIR` (path of the built client), and `NODE_ENV`.
+Set by the Dockerfile or Compose file, or for development: `AGT_KNOWLEDGE_BASE_CONFIG_FILE` (path of `config.yaml`), `AGT_KNOWLEDGE_BASE_SERVER_HOST` (listen address when `server.host` is not set; the image sets `0.0.0.0`), `AGT_KNOWLEDGE_BASE_DATABASE_HOST` (database host when `database.host` is not set; Compose sets `db`), `AGT_KNOWLEDGE_BASE_STATIC_DIR` (path of the built client), and `NODE_ENV`.
 
-Compose itself also reads these variables from `.env`: `POSTGRES_PASSWORD` (required; the bootstrap superuser's password, which only the database container receives) and `POSTGRES_USER` (default `postgres`), `POSTGRES_BIND_ADDRESS` and `POSTGRES_PORT` (`127.0.0.1`, `5432`), and `APP_BIND_ADDRESS` and `APP_PORT` (`127.0.0.1`, `8080`, the web container's host address and port).
+With Docker Compose, `.env.db` holds `POSTGRES_PASSWORD`, the database superuser's password, which only the `db` container reads (DEP-3); the `db` container also receives `AGT_KNOWLEDGE_BASE_DB_PASSWORD` to create the app role on its first start.
 
-**Deprecated variables** (still read until 3.0.0, each with a startup warning): `AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_PASSWORD`, `DATABASE_URL`, `LOCAL_USER_PASSWORD` (use the `AGT_KNOWLEDGE_BASE_` names above), `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DATABASE_SSL` (use `database.*` in `config.yaml`), and `AUTH_MODE` (only `local` is accepted). `MIGRATION_TARGET_ID` is no longer used.
+**Deprecated variables** (still read until 3.0.0, each with a startup warning): `AGT_SETUP_PASSWORD`, `CONFIG_FILE`, `DB_PASSWORD`, `DATABASE_URL` (use the `AGT_KNOWLEDGE_BASE_` names above), `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DATABASE_SSL` (use `database.*` in `config.yaml`), and `AUTH_MODE` (only `local` is accepted). `MIGRATION_TARGET_ID` is no longer used.
 
-`API_HOST`, `API_PORT`, `APP_ORIGIN`, `LOCAL_FRONTEND_ORIGIN`, and `LOCAL_AUTH_SESSION_HOURS` are no longer read: use `server.*` and `session.ttlHours` in `config.yaml`.
+`API_HOST`, `API_PORT`, `APP_ORIGIN`, `LOCAL_FRONTEND_ORIGIN`, and `LOCAL_AUTH_SESSION_HOURS` are no longer read: use `server.*` and `session.ttlHours` in `config.yaml`. `LOCAL_USER_PASSWORD` and `AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD` went with the member-recovery command, and Compose no longer reads `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_BIND_ADDRESS`, `POSTGRES_PORT`, `APP_BIND_ADDRESS` or `APP_PORT`.
 
-`LOCAL_AUTH_SECRET` is no longer used (members have cookie sessions); the server logs a reminder while it is still set. Do not expose the PostgreSQL port beyond loopback.
-
-Useful operations:
-
-```bash
-docker compose logs -f web api postgres
-docker compose ps
-docker compose down                # stop containers without deleting data
-```
-
-The `agt-postgres` volume contains the database. Do not run `docker compose down --volumes` unless you intend to permanently delete the data.
-
-### HTTPS
-
-The server speaks plain HTTP only (SEC-4), so a default installation is reachable only from the host it runs on: the server listens on `127.0.0.1` (`server.host`), and Compose publishes the web container on `127.0.0.1:8080` (`APP_BIND_ADDRESS`, `APP_PORT`). To serve other machines, put a TLS-terminating reverse proxy in front of it; passwords and session cookies must not travel over plaintext HTTP. The server logs one warning per process (source `security`) the first time a sign-in or setup request arrives over plain HTTP from another machine.
-
-With [Caddy](https://caddyserver.com/docs/), which obtains and renews certificates automatically, the whole proxy configuration is [`deploy/Caddyfile.example`](deploy/Caddyfile.example):
-
-```text
-kb.example.org {
-  reverse_proxy 127.0.0.1:8080
-}
-```
-
-and in `config.yaml`:
-
-```yaml
-server:
-  trustProxy: 2
-```
-
-Any other proxy (Traefik, Nginx, HAProxy) works the same way. `server.trustProxy: 2` trusts the TLS proxy and the bundled Nginx, so rate limits see the client address the proxy forwarded (it must set `X-Forwarded-For`, as Caddy does) and the API sees the `X-Forwarded-Proto: https` the proxy sends, which marks the session cookies `Secure` (keep `session.secureCookie: auto`). Only if the proxy runs on another machine, set `APP_BIND_ADDRESS` to an interface it can reach and restrict that port to the proxy's address with a firewall. The proxy must also accept request bodies of at least `backup.maxZipBytes` (100 MB by default) for backup uploads.
+`LOCAL_AUTH_SECRET` is no longer used (members have cookie sessions); the server logs a reminder while it is still set.
 
 ### Backups
 
@@ -240,27 +285,27 @@ Sessions, `.env` and the `control` schema (the shared backup and restore state) 
 
 - **Versions.** Backups from an older version are migrated after the restore; backups from a newer version (a newer format or schema) are refused. **Backups made by 1.x** (a `database.json` file) are refused: restore them with 1.x, then upgrade to 2.0.
 - **Maintenance.** The restore checks the upload again, then puts every API process in maintenance: requests in progress finish (for at most 30 seconds, or the restore is abandoned with `409`), and every other API request answers `503` until it ends. `GET /api/health` answers `{"status":"maintenance"}` meanwhile, so Docker does not restart the container.
-- **Pre-restore backup.** The current data is then saved as `pre-restore-backup-<timestamp>.zip` (with its restore list, `pre-restore-backup-<timestamp>.list`) in `storage.dataDir/storage.backupsDir` (the `agt-backups` volume). If it cannot be written, nothing is restored. Pre-restore backups are kept unless `backup.preRestore.keep` is set; then the oldest beyond that number are deleted, each with its `.list`, after a new one is written.
+- **Pre-restore backup.** The current data is then saved as `pre-restore-backup-<timestamp>.zip` (with its restore list, `pre-restore-backup-<timestamp>.list`) in `storage.dataDir/storage.backupsDir` (in the `knowledge-base-data` volume with Docker). If it cannot be written, nothing is restored. Pre-restore backups are kept unless `backup.preRestore.keep` is set; then the oldest beyond that number are deleted, each with its `.list`, after a new one is written.
 - **Rollback.** The database is replaced with `pg_restore` in a single transaction, migrated and checked. If any of that fails, the pre-restore backup is restored, and the restore answers "The restore failed and was rolled back. Nothing was changed."
 - **`config.yaml` is never restored.** Download the backup's copy from the preview and apply any changes by hand. Dashboard settings in the backup for keys the current `config.yaml` defines are dropped and listed in the report.
 - Afterwards every member and the Admin are signed out; sign in at `/admin` with the Admin account stored in the backup.
 
-The server runs `pg_dump` and `pg_restore` itself, as the `agt_knowledge_base` role, with the password only in the child's environment. They must be at least the PostgreSQL server's major version; the API image ships the PostgreSQL 16 client tools for the Compose stack's `postgres:16`. Outside Docker, install the client tools of your server's version (`postgresql-client-16` on Debian and Ubuntu). The role must own the preview database: new installations and `deploy/upgrade-database-role.sql` create it, and the server refuses to start if `database.previewName` names the app's own database.
+The server runs `pg_dump` and `pg_restore` itself, as the `agt_knowledge_base` role, with the password only in the child's environment. They must be at least the PostgreSQL server's major version; the image ships the PostgreSQL 18 client tools for the Compose stack's `postgres:18`, and the local installation's `postgresql-18` package includes them. The role must own the preview database (both installation methods create it), and the server refuses to start if `database.previewName` names the app's own database.
 
-Nginx streams backup uploads to the API without buffering them, and the API checks the Admin session before reading the body and enforces `backup.maxZipBytes` itself. If a TLS reverse proxy sits in front of the stack, allow request bodies of at least `backup.maxZipBytes` there too, and timeouts of several minutes for `/api/admin/restore`.
+The API checks the Admin session before reading a backup upload and enforces `backup.maxZipBytes` itself while streaming it to disk. A TLS reverse proxy in front must allow request bodies of at least `backup.maxZipBytes` too, and timeouts of several minutes for `/api/admin/restore`.
 
-For host-level or scheduled backups, use `pg_dump` from the running `postgres` container:
+For host-level or scheduled backups, use `pg_dump` from the running `db` container (locally: `sudo -u postgres pg_dump ...` with the same options):
 
 ```bash
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d agt_knowledge_base --format=custom --schema=public' \
+docker compose exec -T db pg_dump -U postgres -d agt_knowledge_base --format=custom --schema=public \
   > "agt-knowledge-base-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
 Keep backups off the host and test restores periodically. To restore such a dump into the stack, replacing the current data:
 
 ```bash
-docker compose stop web api
-docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d agt_knowledge_base --clean --if-exists --no-owner --role=agt_knowledge_base' \
+docker compose stop knowledge-base
+docker compose exec -T db pg_restore -U postgres -d agt_knowledge_base --clean --if-exists --no-owner --role=agt_knowledge_base \
   < agt-knowledge-base-YYYYMMDD-HHMMSS.dump
 docker compose up -d
 ```
@@ -273,8 +318,8 @@ If a restore fails and its rollback fails too (for example because the database 
 
 Until the session expires, the Admin who started the restore can still sign in to the admin panel with that session and run another restore from **Backup & restore** (for example of the pre-restore backup). If it succeeds, the app returns to normal by itself. Otherwise, restore the pre-restore backup by hand:
 
-1. Stop the API: `docker compose stop web api`.
-2. Copy the pre-restore backup and its `.list` file out of the `agt-backups` volume, unzip the backup, and restore its dump with the list, as the app role:
+1. Stop the app: `docker compose stop knowledge-base` (local: `sudo systemctl stop agt-knowledge-base`).
+2. Copy the pre-restore backup and its `.list` file out of the data directory (`docker compose cp knowledge-base:/app/data/backups/. ./backups` with Docker), unzip the backup, and restore its dump with the list, as the app role:
 
    ```bash
    unzip pre-restore-backup-<timestamp>.zip database.dump
@@ -289,7 +334,7 @@ Until the session expires, the Admin who started the restore can still sign in t
      admin_username = NULL, admin_session_expires_at = NULL WHERE id = 1 AND state = 'restore_failed';
    ```
 
-4. Start the stack: `docker compose up -d`.
+4. Start the app: `docker compose up -d` (local: `sudo systemctl start agt-knowledge-base`).
 
 The app never clears the failed state by itself because a file is missing: if only one of the two is present (for example after the container was recreated), the start-up error names the missing one; check the data before clearing both.
 
@@ -297,7 +342,7 @@ The app never clears the failed state by itself because a file is missing: if on
 
 The server keeps two logs in the `logs` schema of its database, shown in the admin panel. **Neither log is part of a backup, and a restore never changes them**, so the audit log keeps its record of a restore and of everything before it.
 
-- **Server log:** what the server did by itself: startup (version, schema versions, address, configuration file), configuration warnings such as the setup-password reminder, every migration, backups and restores, each retention run that deleted entries, and every unexpected error with its message and stack (source `http`, with the request ID). The Admin can filter, search, export and clear it. Everything at `info` and above also goes to standard output (`docker compose logs api`), and `server.logLevel` controls only that output.
+- **Server log:** what the server did by itself: startup (version, schema versions, address, configuration file), configuration warnings such as the setup-password reminder, every migration, backups and restores, each retention run that deleted entries, and every unexpected error with its message and stack (source `http`, with the request ID). The Admin can filter, search, export and clear it. Everything at `info` and above also goes to standard output (`docker compose logs knowledge-base`, or `journalctl -u agt-knowledge-base`), and `server.logLevel` controls only that output.
 - **Audit log:** what users did: every request that changes something (articles, tags, member accounts, settings with their old and new values, backups and restores, sign-ins, sign-outs, setup and password changes, whether they succeeded or not), backup downloads and log exports, every denied request to the admin API, and every rate-limited request. Each entry records the time, whether the actor was the Admin, a member or anonymous, the Admin's or member's username, the action (the API operation), the route, the affected article, tag or member, the outcome and status code, the request ID, and a short summary of the change. Article bodies, passwords and other submitted values are never recorded, and a failed request records only which fields were invalid. Identical failures from the same address within a minute are counted in one entry. The Admin can filter, search and export it, but no one can edit or clear it through the app.
 
 **Privacy.** The audit log never stores IP addresses. It stores a pseudonymous hash of the client address: the first 16 hex characters of an HMAC-SHA256 with a random key kept in the log store (for IPv6, of the /64 prefix). The hash can tell that two requests came from the same network address without revealing the address. Together with Admin and member usernames, it is kept for `logs.auditRetentionDays` (365 days by default, at least 30). Server log entries are kept for `logs.serverRetentionDays` (30 days). A retention job deletes older entries at startup and every hour, and then the oldest entries beyond `logs.serverMaxEntries` and `logs.auditMaxEntries` (in the audit log, denied, rate-limited and failed requests go before successes).
@@ -306,49 +351,66 @@ Exports are JSON Lines or CSV files named `agt-knowledge-base-<server|audit>-log
 
 ### Upgrades
 
-1. Back up the database (see above).
-2. Pull the new version: `git pull`.
-3. Rebuild and restart: `docker compose up -d --build --remove-orphans`. The new API applies pending migrations before it listens; several processes starting together take turns under a database lock.
-4. Check `docker compose ps` and `docker compose logs api`.
+Read the upgrade notes for the new version in [`CHANGELOG.md`](CHANGELOG.md) and download a backup from the admin panel first.
 
-A database whose schema is newer than the version you start stops the server with a clear message (for example after rolling back without restoring a backup): install the newer version again, or restore a backup made by the older one.
+- **Docker Compose:** `git pull`, then `docker compose up -d --build --remove-orphans`. Check `docker compose ps` and `docker compose logs knowledge-base`.
+- **Local installation:** `cd /opt/agt-knowledge-base && sudo git pull && sudo npm ci && sudo npm run build && sudo npm prune --omit=dev && sudo systemctl restart agt-knowledge-base`. Check `journalctl -u agt-knowledge-base`.
 
-#### Upgrading to 2.0
+The new version applies pending migrations before it listens; several processes starting together take turns under a database lock. A database whose schema is newer than the version you start stops the server with a clear message: downgrading in place is not supported. To go back, install the older version and restore a backup made by it.
 
-2.0 connects to PostgreSQL as its own non-superuser role, `agt_knowledge_base`, instead of the bootstrap superuser, and refuses to start as a superuser (DATA-11). An existing 1.x database needs the role once:
+#### Upgrading from 1.x to 2.0
 
-1. Download a backup from the admin panel (**Backup & restore**) and stop the stack: `docker compose stop`. 2.0 cannot restore 1.x backups (they need 1.x), so also take a `pg_dump` of the database (see [Backups](#backups)).
-2. Check out 2.0 and add a new random `AGT_KNOWLEDGE_BASE_DB_PASSWORD` to `.env` (see `docker.env.example`). If your `config.yaml` sets `database.user` or `database.name` to the old superuser or a non-default database, remove `database.user` and keep `database.name` only if your database is not called `agt_knowledge_base`.
-3. Create the role and hand it the database, as the superuser:
+2.0 replaces the 1.x stack: one app container instead of Nginx, API and migration containers, PostgreSQL 18 instead of 16, new volume names, and the site on `127.0.0.1:8081` instead of port 8080. The 1.x data moves into the new database once, with `pg_dump`, and 2.0 migrates it at its first start. The 1.x containers' volumes are left alone, so going back to 1.x needs nothing but the old files. 2.0 cannot restore 1.x backup archives.
+
+1. **On 1.x**, with the stack running: download a backup from the admin panel (**Backup & restore**), then dump the database and stop the stack:
 
    ```bash
-   set -a && . ./.env && set +a
-   docker compose up -d postgres
-   docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" \
-     -d "${POSTGRES_DB:-agt_knowledge_base}" -v app_password="$AGT_KNOWLEDGE_BASE_DB_PASSWORD" \
-     < deploy/upgrade-database-role.sql
+   docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-acl' \
+     > agt-knowledge-base-1x.dump
+   docker compose down
+   cp .env .env.1x && cp config.yaml config.yaml.1x
    ```
 
-   It creates the role, transfers the database and every table to it, removes the unused `pgcrypto` extension, and creates the restore preview database. It is safe to run again.
-4. `docker compose up -d --build --remove-orphans` (this also removes the old `migrate` container). The server applies the remaining migrations, including the 1.x contract migrations that used to need `MIGRATION_TARGET_ID`.
+2. **Check out 2.0** and update the configuration:
+
+   ```bash
+   git fetch && git checkout <the 2.0 release>
+   cp .env.db.example .env.db
+   ```
+
+   - In `.env.db`, set `POSTGRES_PASSWORD` to a new random value.
+   - In `.env`, keep `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` only if setup is not done yet, add `AGT_KNOWLEDGE_BASE_DB_PASSWORD` with a new random value, and delete `POSTGRES_*`, `APP_*`, `LOCAL_AUTH_SECRET` and `AGT_SETUP_PASSWORD`.
+   - In `config.yaml`, delete `server.trustProxy: 1` (no Nginx any more) and set it for your TLS proxy instead (see [TLS and reverse proxies](#tls-and-reverse-proxies)); delete `database.user` and `database.name` if set; move any other 1.x key names to their new names (the server warns about each one).
+
+3. **Create the 2.0 database and load the 1.x data** into it as the app role:
+
+   ```bash
+   docker compose up -d --wait db
+   docker compose exec -T db pg_restore -U postgres -d agt_knowledge_base \
+     --no-owner --no-acl --role=agt_knowledge_base --exit-on-error < agt-knowledge-base-1x.dump
+   ```
+
+4. **Start 2.0:** `docker compose up -d --build --remove-orphans`. It applies the 2.0 migrations, including the 1.x contract migrations that used to need `MIGRATION_TARGET_ID`, and converts the password hashes. Check `docker compose logs knowledge-base`, sign in at `/admin` with the same Admin username and password, and point your TLS proxy at `127.0.0.1:8081`. Members keep their passwords but sign in again.
+
+5. Once everything works, delete the 1.x volumes (`docker volume ls`, then `docker volume rm <project>_agt-postgres <project>_agt-backups`) and `agt-knowledge-base-1x.dump`.
+
+**Going back to 1.x** before step 5: `docker compose down`, `git checkout v1.0.0`, `mv .env.1x .env`, `mv config.yaml.1x config.yaml`, then `docker compose up -d`. The 1.x volumes still hold the data as it was at step 1; changes made in 2.0 since then are not carried back.
+
+**From a 1.x installation without Docker**, the same steps apply with `pg_dump` and `pg_restore` run directly: dump the 1.x database, create the role and databases as in [Local installation](#local-installation-ubuntudebian), and load the dump with `pg_restore -d agt_knowledge_base --no-owner --no-acl --role=agt_knowledge_base`.
 
 #### Upgrading to the separate Admin account
 
-This release replaces the super administrator with a separate Admin account and renames member roles. Before upgrading, create `config.yaml` (`cp config.example.yaml config.yaml`) and move any `APP_ORIGIN` or `LOCAL_AUTH_SESSION_HOURS` values into it as `server.frontendOrigin` and `session.ttlHours`. Then upgrade as above. Migration `012_admin_account`:
+The separate Admin account came with 1.0. Migration `012_admin_account`:
 
-- moves the super administrator's username and password hash into the new `admin` table and removes that account from `local_users`; its user ID stays in `app_users`, so authorship and revision history are unchanged. Sign in at `/admin` with the same username and password;
-- turns former `Admin`-role users into **Moderators** (they keep every content power and lose only the admin panel) and former `Standard` users into **Editors**;
-- signs every member out.
-
-Members who previously had the `Admin` role could see the super administrator's username in the Users list. Usernames are not secret, and the password is unchanged, but consider changing the Admin password under **Account** if that matters to you.
-
-The contract migration that drops the unused `is_super_admin` column runs automatically from 2.0 on.
+- moved the super administrator's username and password hash into the `admin` table and removed that account from `local_users`; its user ID stays in `app_users`, so authorship and revision history are unchanged;
+- turned former `Admin`-role users into **Moderators** and former `Standard` users into **Editors**;
+- signed every member out.
 
 ### Migrating from the AWS deployment
 
 Earlier versions were deployed on AWS (Amplify Hosting, API Gateway, Lambda, RDS, and Cognito). That code is no longer part of this branch; it is preserved on the frozen `staging` branch, which an existing AWS test deployment still builds from. Do not change or delete `staging` while that deployment is in use.
 
-A documented procedure for moving data from an AWS deployment is planned. In outline: export the RDS database with `pg_dump`, restore it into the Compose PostgreSQL, and let the `migrate` service bring the schema up to date. Then create a member account for each Cognito user, reusing their Cognito user ID (`sub`) as the account ID so existing authorship and revision history stay attached. Cognito cannot export passwords, so each migrated user needs a new password set by the Admin.
+A documented procedure for moving data from an AWS deployment is planned. In outline: export the RDS database with `pg_dump`, load it into the 2.0 database as in [Upgrading from 1.x to 2.0](#upgrading-from-1x-to-20), and let the server's startup migrations bring the schema up to date. Then create a member account for each Cognito user, reusing their Cognito user ID (`sub`) as the account ID so existing authorship and revision history stay attached. Cognito cannot export passwords, so each migrated user needs a new password set by the Admin.
 
 References: [Install Docker Engine](https://docs.docker.com/engine/install/) and [install Docker Compose](https://docs.docker.com/compose/install/).
 
@@ -362,7 +424,7 @@ The API is documented in [`docs/API.md`](docs/API.md), which covers member and A
 npm run check   # lint (tsc -b), all tests, and the production build
 ```
 
-`npm test` runs the server and shared-library tests with Node's built-in test runner and the React component tests with Vitest. GitHub Actions runs `npm run check` and builds both Docker images for every pull request and every push to `main` (`.github/workflows/ci.yml`). See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+`npm test` runs the server and shared-library tests with Node's built-in test runner and the React component tests with Vitest. GitHub Actions runs `npm run check`, and builds the image and runs the Docker Compose stack until it is healthy, for every pull request and every push to `main` (`.github/workflows/ci.yml`). See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 ## Database migrations
 
@@ -392,7 +454,7 @@ src/lib/          Framework-free code: validation and API types shared with the 
 tests/e2e/        Browser tests (Playwright): npm run test:e2e
 server/migrations/ SQL migrations (app, control and logs schemas)
 docs/             API guide (API.md) and the pinned AGT web app spec
-scripts/          Member-account recovery CLI
+deploy/           systemd unit, Caddyfile example, PostgreSQL init script
 .github/          CI workflow
 ```
 

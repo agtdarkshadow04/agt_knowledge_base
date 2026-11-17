@@ -1,8 +1,8 @@
 #!/bin/sh
 # Creates the app's non-superuser role and its databases (DATA-11, DEP-3).
 # The postgres image runs this once, when its data volume is empty, as the
-# bootstrap superuser. An existing 1.x database needs
-# deploy/upgrade-database-role.sql instead.
+# bootstrap superuser. Upgrading from 1.x loads the old database into the
+# databases created here (CHANGELOG.md, 2.0.0 upgrade notes).
 set -eu
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
   -v app_password="$AGT_KNOWLEDGE_BASE_DB_PASSWORD" <<'SQL'

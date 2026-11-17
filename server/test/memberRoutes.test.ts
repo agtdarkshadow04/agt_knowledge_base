@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import type { Actor } from '../domain.js';
-import { createRequestHandler } from '../handler.js';
+import { createRequestHandler } from '../app.js';
 import type { ApiRequest } from '../routes.js';
 import { assertMatches, respond, testContext } from './helpers.js';
 

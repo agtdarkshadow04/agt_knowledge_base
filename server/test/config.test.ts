@@ -57,6 +57,14 @@ describe('configuration file (CFG-3, CFG-5)', () => {
     }
   });
 
+  it('accepts a number of proxy hops only as the deprecated 1.x form, with a warning (VER-10)', () => {
+    const hops = readConfig('server:\n  trustProxy: 1\n', { source: 'config.yaml' });
+    assert.equal(hops.config.server.trustProxy, 1);
+    assert.equal(hops.warnings.length, 1);
+    assert.match(hops.warnings[0], /^config\.yaml: server\.trustProxy as a number of proxy hops is deprecated and will be removed in 3\.0\.0/);
+    assert.deepEqual(readConfig('server:\n  trustProxy: 127.0.0.1\n').warnings, []);
+  });
+
   it('rejects unknown keys, naming them', () => {
     assert.throws(() => parseConfig('server:\n  prot: 4000\n'), ConfigError);
     assert.throws(() => parseConfig('server:\n  prot: 4000\n', { source: 'config.yaml' }), /^ConfigError: Invalid config\.yaml: server\.prot: Unexpected property$/);

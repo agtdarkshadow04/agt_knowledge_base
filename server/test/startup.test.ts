@@ -98,9 +98,9 @@ describe('environment variables (CFG-2)', () => {
 
   it('reads an app variable or its 1.x name', () => {
     const warnings: string[] = [];
-    assert.equal(envValue({ AGT_KNOWLEDGE_BASE_LOCAL_USER_PASSWORD: 'a', LOCAL_USER_PASSWORD: 'b' }, 'LOCAL_USER_PASSWORD', warnings, 'LOCAL_USER_PASSWORD'), 'a');
+    assert.equal(envValue({ AGT_KNOWLEDGE_BASE_DB_PASSWORD: 'a', DB_PASSWORD: 'b' }, 'DB_PASSWORD', warnings, 'DB_PASSWORD'), 'a');
     assert.deepEqual(warnings, []);
-    assert.equal(envValue({ LOCAL_USER_PASSWORD: 'b' }, 'LOCAL_USER_PASSWORD', warnings, 'LOCAL_USER_PASSWORD'), 'b');
+    assert.equal(envValue({ DB_PASSWORD: 'b' }, 'DB_PASSWORD', warnings, 'DB_PASSWORD'), 'b');
     assert.equal(warnings.length, 1);
   });
 });

@@ -281,6 +281,9 @@ describe('Admin session cookies', () => {
     const headers = { ...csrf, 'x-forwarded-proto': 'https' };
     const body = JSON.stringify({ username: 'atlas', password: 'x' });
     assert.doesNotMatch((await send('POST', '/api/admin/auth/login', { headers, body })).headers['set-cookie']?.[0] ?? '', /Secure/);
+    await start('server:\n  trustProxy: 127.0.0.1\n');
+    assert.match((await send('POST', '/api/admin/auth/login', { headers, body })).headers['set-cookie']?.[0] ?? '', /; Secure$/);
+    // The deprecated 1.x form, a number of proxy hops, still works until 3.0.0 (VER-10).
     await start('server:\n  trustProxy: 1\n');
     assert.match((await send('POST', '/api/admin/auth/login', { headers, body })).headers['set-cookie']?.[0] ?? '', /; Secure$/);
   });
@@ -484,7 +487,7 @@ describe('rate limits (SEC-7)', () => {
   });
 
   it('counts clients behind a trusted proxy by their forwarded address', async () => {
-    await start('server:\n  trustProxy: 1\nrateLimits:\n  login:\n    max: 1\n');
+    await start('server:\n  trustProxy: 127.0.0.1\nrateLimits:\n  login:\n    max: 1\n');
     const from = (address: string) => ({ 'x-forwarded-for': address });
     assert.equal((await login(from('203.0.113.9'))).status, 401);
     assert.equal((await login(from('203.0.113.9'))).status, 429);
@@ -557,7 +560,7 @@ describe('security headers (SEC-1..SEC-3)', () => {
 
 describe('plain-HTTP warning (SEC-4)', () => {
   it('warns once per process when credentials arrive over plain HTTP from another host', async () => {
-    await start('server:\n  trustProxy: 1\n');
+    await start('server:\n  trustProxy: 127.0.0.1\n');
     mocks.login.mock.mockImplementation(async () => { throw new HttpError(401, 'invalid_credentials', 'Invalid username or password.'); });
     await login('127.0.0.1');
     assert.equal(logLines.filter((line) => line.includes('plain HTTP')).length, 0);
@@ -568,7 +571,7 @@ describe('plain-HTTP warning (SEC-4)', () => {
     assert.equal(warnings.length, 1);
     assertMatches(warnings[0], { level: 40, source: 'security', msg: match.stringContaining('203.0.113.9') });
     // HTTPS reported by the trusted proxy is not plain HTTP.
-    await start('server:\n  trustProxy: 1\n');
+    await start('server:\n  trustProxy: 127.0.0.1\n');
     await login('203.0.113.9', 'https');
     assert.equal(logLines.filter((line) => line.includes('plain HTTP')).length, 0);
   });

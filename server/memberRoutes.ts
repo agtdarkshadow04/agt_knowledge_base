@@ -5,7 +5,6 @@ import { HttpError, invalidField } from './http.js';
 import { PostgresArticleRepository } from './repository/articles.js';
 import type { AppContext } from './context.js';
 import type { ApiRequest, ApiResponse } from './routes.js';
-import { SettingsService } from './settings-service.js';
 import { TagService } from './tag-service.js';
 import {
   parseArticleWrite,
@@ -18,7 +17,11 @@ import {
   parseVerificationWrite,
 } from '../src/lib/validation.js';
 
-/** Public and member routes. Admin routes are dispatched by `admin-handler.ts`. */
+/**
+ * Member routes: what signed-in Editors and Moderators can read and change.
+ * They exist because of the AUTH-1 deviation (AGENTS.md), and mirror
+ * `adminRoutes.ts`; the public reads are served by `app.ts` (REPO-1).
+ */
 
 const articleId = (request: ApiRequest) => pathId(request, 'id', 'article', 'INVALID_ID');
 const tagId = (request: ApiRequest) => pathId(request, 'tagId', 'tag', 'INVALID_TAG_ID');
@@ -31,43 +34,19 @@ function revisionVersion(request: ApiRequest) {
   return version;
 }
 
-export type RequestHandler = (request: ApiRequest) => Promise<ApiResponse>;
+export type MemberRequestHandler = (request: ApiRequest) => Promise<ApiResponse>;
 
 /**
- * Builds the public/member route dispatcher. Errors are thrown, never turned
- * into responses here: the app's single error handler does that (SRV-5).
+ * Builds the member route dispatcher. Errors are thrown, never turned into
+ * responses here: the app's single error handler does that (SRV-5).
  */
-export function createRequestHandler(context: Pick<AppContext, 'config' | 'db'>): RequestHandler {
+export function createMemberRequestHandler(context: Pick<AppContext, 'db'>): MemberRequestHandler {
   const repository = new PostgresArticleRepository(context.db);
   const service = new ArticleService(repository);
   const tagService = new TagService(repository);
-  const settingsService = new SettingsService(context);
 
   return async function handleRequest(request: ApiRequest): Promise<ApiResponse> {
     switch (request.routeKey) {
-      case 'GET /api/settings/public':
-        return json(200, await settingsService.getPublic());
-      case 'GET /api/settings':
-        return json(200, await settingsService.getLegacyPublic());
-      case 'GET /api/articles': {
-        if (!(await settingsService.values())['access.allowPublicBrowsing']) {
-          throw new HttpError(403, 'public_browsing_closed', 'Public browsing is disabled.', { legacyCode: 'PUBLIC_BROWSING_DISABLED' });
-        }
-        return json(200, await service.list(parseListQuery(request.query), null));
-      }
-      case 'GET /api/articles/{id}': {
-        if (!(await settingsService.values())['access.allowPublicBrowsing']) {
-          throw new HttpError(403, 'public_browsing_closed', 'Public browsing is disabled.', { legacyCode: 'PUBLIC_BROWSING_DISABLED' });
-        }
-        return json(200, await service.get(articleId(request), null));
-      }
-      case 'GET /api/tags': {
-        if (!(await settingsService.values())['access.allowPublicBrowsing']) {
-          throw new HttpError(403, 'public_browsing_closed', 'Public browsing is disabled.', { legacyCode: 'PUBLIC_BROWSING_DISABLED' });
-        }
-        const input = parseTagListQuery(request.query);
-        return json(200, await tagService.list(input.search));
-      }
       case 'GET /api/member/tags': {
         requireActor(request);
         const input = parseTagListQuery(request.query);

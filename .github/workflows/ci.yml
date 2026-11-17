@@ -31,16 +31,36 @@ jobs:
       - run: npm run check
 
   docker:
-    name: Docker images
+    name: Docker Compose smoke test (TEST-8)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build API image
-        run: docker build --target api --tag agt-knowledge-base-api:ci .
-      - name: Build web image
-        run: docker build --target web --tag agt-knowledge-base-web:ci .
-      - name: Validate Compose file
-        env:
-          POSTGRES_PASSWORD: ci-only-placeholder
-          AGT_KNOWLEDGE_BASE_DB_PASSWORD: ci-only-app-placeholder
-        run: docker compose config --quiet
+      - name: Configuration and secrets as the README says
+        run: |
+          cp config.example.yaml config.yaml
+          cp .env.example .env
+          cp .env.db.example .env.db
+          sed -i "s/^AGT_KNOWLEDGE_BASE_SETUP_PASSWORD=.*/AGT_KNOWLEDGE_BASE_SETUP_PASSWORD=$(openssl rand -hex 16)/" .env
+          sed -i "s/^AGT_KNOWLEDGE_BASE_DB_PASSWORD=.*/AGT_KNOWLEDGE_BASE_DB_PASSWORD=$(openssl rand -hex 24)/" .env
+          sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env.db
+      - run: docker compose config --quiet
+      - run: docker compose up -d --build --wait --wait-timeout 180
+      - name: The service is healthy, answers on loopback only, and is ready for first-run setup
+        run: |
+          set -x
+          docker compose ps
+          app="$(docker compose ps -q knowledge-base)"
+          db="$(docker compose ps -q db)"
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$app")" = healthy
+          curl -fsS http://127.0.0.1:8081/api/health | grep -q '"status":"ok"'
+          status="$(curl -fsS http://127.0.0.1:8081/api/setup/status)"
+          echo "$status" | grep -q '"adminExists":false'
+          echo "$status" | grep -q '"setupPasswordConfigured":true'
+          # SEC-4, DEP-2, DEP-3: the app only on loopback, the database not published at all.
+          test "$(docker port "$app")" = '8081/tcp -> 127.0.0.1:8081'
+          test -z "$(docker port "$db")"
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color
+      - run: docker compose down -v
+        if: always()
