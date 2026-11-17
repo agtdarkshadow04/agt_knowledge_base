@@ -168,11 +168,14 @@ describe('the log store (LOG-1..LOG-4, LOG-11, LOG-12)', () => {
     const info = mock.fn((_details: object, _message: string) => undefined);
     const store = { applyRetention: mock.fn(async () => ({ server: 3, audit: 0 })) };
     const settings = async () => ({ serverRetentionDays: 30, serverMaxEntries: 1000, auditRetentionDays: 365, auditMaxEntries: 10000 });
-    const running = startRetention(store, settings, { info, error: () => undefined }, () => false);
+    const release = mock.fn();
+    const running = startRetention(store, settings, { info, error: () => undefined }, async () => ({ release }));
     await running.first;
     running.stop();
     assertSource(info.mock.calls[0].arguments[0], 'retention');
-    const paused = startRetention(store, settings, { info, error: () => undefined }, () => true);
+    // BAK-12: each run is admitted under the activity lease and releases it when done.
+    assert.equal(release.mock.callCount(), 1);
+    const paused = startRetention(store, settings, { info, error: () => undefined }, async () => null);
     await paused.first;
     paused.stop();
     assert.equal(store.applyRetention.mock.callCount(), 1);

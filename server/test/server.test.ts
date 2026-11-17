@@ -663,7 +663,7 @@ describe('operation lock (BAK-8, BAK-12)', () => {
 
   it('accepts the BAK-11 recovery session from admission without consulting the sessions table', async () => {
     operations.state = 'restore_failed';
-    operations.admit = async () => ({ release: () => undefined, recovery: { username: 'atlas' } });
+    operations.admit = async () => ({ signal: new AbortController().signal, release: () => undefined, recovery: { username: 'atlas' } });
     const reply = await send('GET', '/api/admin/session', { headers: { cookie: 'agt_knowledge_base_session=recovery-token' } });
     assert.equal(reply.status, 200);
     assert.equal(JSON.parse(reply.body).username, 'atlas');

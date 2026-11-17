@@ -205,7 +205,7 @@ export function testOperations(state: OperationState = 'idle'): Operations & { s
     async admit() {
       if (operations.state === 'restore' || operations.state === 'restore_failed') throw new MaintenanceError();
       operations.admitted += 1;
-      return { release: () => { operations.released += 1; } };
+      return { signal: new AbortController().signal, release: () => { operations.released += 1; } };
     },
     async run<T>(_kind: string, _options: unknown, work: (run: never) => Promise<T>) {
       const run = {

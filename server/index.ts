@@ -4,6 +4,7 @@ import type { AppContext } from './context.js';
 import { BackupService } from './backup.js';
 import { CONTROL_MIGRATIONS, createDatabase, LOG_MIGRATIONS, MIGRATIONS } from './db.js';
 import { createLogger, LogStore, logStoreStream, startRetention } from './logs.js';
+import { MaintenanceError } from './http.js';
 import { PostgresOperations, type OperationLog } from './operation.js';
 import { AdminAuthService, setupPasswordVariable } from './session.js';
 import { SettingsService } from './settings-service.js';
@@ -104,7 +105,7 @@ async function main() {
   await new BackupService(context, undefined, { log: backupLog }).cleanPreviewDatabase();
   await checkSetupPassword(context, logger);
 
-  // LOG-15: retention now and every hour, paused while a restore runs or has failed.
+  // LOG-15: retention now and every hour, each run admitted under the activity lease (BAK-12).
   const settings = new SettingsService(context);
   const retention = startRetention(logs, async () => {
     const values = await settings.values();
@@ -114,7 +115,10 @@ async function main() {
       auditRetentionDays: values['logs.auditRetentionDays'],
       auditMaxEntries: values['logs.auditMaxEntries'],
     };
-  }, logger, () => operations.state === 'restore' || operations.state === 'restore_failed');
+  }, logger, () => operations.admit({ routeKey: 'job retention' }).catch((error: unknown) => {
+    if (error instanceof MaintenanceError) return null;
+    throw error;
+  }));
   await retention.first;
 
   let closing = false;

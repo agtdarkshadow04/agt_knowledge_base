@@ -44,6 +44,12 @@ export interface AdmissionRequest {
 export interface Admission {
   /** Ends the request's share of the activity lease; call it exactly once, when the request ends. */
   release(): void;
+  /**
+   * Aborted, with a `MaintenanceError`, when the control connection drops and
+   * the lease is gone (BAK-12): the request must stop and answer `503`, and
+   * its file streams stop too.
+   */
+  readonly signal: AbortSignal;
   /** Set when the request was admitted as the BAK-11 recovery session during `restore_failed`. */
   recovery?: { username: string };
 }
@@ -97,6 +103,11 @@ export function restoreFailedMarker(context: Pick<AppContext, 'config'>) {
 export interface PostgresOperationsOptions {
   log?: OperationLog;
   pollMilliseconds?: number;
+  /** Test hooks (TEST-4): pause an owner between steps. */
+  hooks?: {
+    /** After the owner set the state to `backup` or `restore`, before it takes the write lock. */
+    afterStateUpdate?(kind: OperationKind): Promise<void>;
+  };
 }
 
 /** The BAK-12 shared operation lock of one process. */
@@ -108,6 +119,8 @@ export class PostgresOperations implements Operations {
   private queue: Promise<unknown> = Promise.resolve();
   /** In-flight `/api/` requests of this process (except health), which share the activity lease. */
   private active = 0;
+  /** The abort controllers of the admitted requests and jobs in progress (BAK-12). */
+  private readonly inProgress = new Set<AbortController>();
   private leaseHeld = false;
   private seen: { state: OperationState; generation: string } | undefined;
   private owning: { kind: OperationKind; abort: AbortController } | undefined;
@@ -174,6 +187,22 @@ export class PostgresOperations implements Operations {
     } else if (!this.stopped) {
       this.log.warn('The control connection dropped; reconnecting.');
     }
+    // The lease is gone: every request and job in progress stops with 503 (BAK-12).
+    for (const controller of this.inProgress) controller.abort(new MaintenanceError());
+  }
+
+  /** Stops following and the poller only, keeping the control connection: a test hook for a paused process (TEST-4). */
+  pauseFollowing() {
+    if (this.poller) clearInterval(this.poller);
+    this.poller = undefined;
+  }
+
+  /** Ends the control connection as if it had dropped (TEST-4). */
+  async dropControlConnection() {
+    const client = this.client;
+    if (!client) return;
+    this.connectionLost(client);
+    await client.end().catch(() => undefined);
   }
 
   /** Calls on the control connection are serialized, in order (BAK-12). */
@@ -284,12 +313,16 @@ export class PostgresOperations implements Operations {
         throw new MaintenanceError();
       }
       this.active += 1;
+      const controller = new AbortController();
+      this.inProgress.add(controller);
       let released = false;
       return {
         recovery,
+        signal: controller.signal,
         release: () => {
           if (released) return;
           released = true;
+          this.inProgress.delete(controller);
           this.active -= 1;
           if (this.active === 0) void this.serial((control) => this.unlockLease(control)).catch(() => undefined);
         },
@@ -351,6 +384,7 @@ export class PostgresOperations implements Operations {
       this.owning = { kind, abort };
       this.current = kind;
       this.seen = { state: kind, generation: String(startedRow.generation) };
+      await this.options.hooks?.afterStateUpdate?.(kind);
 
       try {
         if (kind === 'restore') {
