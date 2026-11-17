@@ -10,7 +10,9 @@
 .admin-title .eyebrow { margin-bottom: 0.2rem; }
 .admin-header h1 { margin: 0; font-size: 1.25rem; }
 .admin-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
-.admin-main { display: grid; width: min(100%, 80rem); margin-inline: auto; padding: 2rem clamp(1rem, 4vw, 3rem) 4rem; gap: 1.25rem; align-content: start; flex: 1; }
+.admin-main { display: grid; grid-template-columns: minmax(0, 1fr); width: min(100%, 80rem); margin-inline: auto; padding: 2rem clamp(1rem, 4vw, 3rem) 4rem; gap: 1.25rem; align-content: start; flex: 1; }
+/* UI-12: nothing in the dashboard may widen the page; long words wrap, wide tables scroll in their own box. */
+.admin-main > * { min-width: 0; }
 .admin-main:focus { outline: none; }
 .admin-tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .admin-tabs .button[aria-selected='true'] { color: #fff; border-color: var(--agt-red); background: rgba(255, 5, 0, 0.16); }
@@ -39,7 +41,9 @@
 .stats-grid div { padding: 1rem; border: 1px solid rgba(255, 180, 81, 0.12); border-radius: 0.55rem; background: #0d0d0d; }
 .stats-grid dt { color: var(--muted); font-size: 0.67rem; letter-spacing: 0.08em; text-transform: capitalize; }
 .stats-grid dd { margin: 0.45rem 0 0; color: var(--text); font-size: 1.6rem; }
-.table-scroll { overflow-x: auto; }
+.table-scroll { position: relative; overflow-x: auto; max-width: 100%; }
+/* Grid and flex children of a panel shrink to the panel, so a wide table scrolls inside .table-scroll (UI-12). */
+[role='tabpanel'], [role='tabpanel'] * { min-width: 0; }
 .admin-table { width: 100%; border-collapse: collapse; color: var(--text); }
 .admin-table th, .admin-table td { padding: 0.7rem; border-bottom: 1px solid rgba(255, 180, 81, 0.12); text-align: left; }
 .admin-table th { color: var(--muted); font-size: 0.68rem; text-transform: uppercase; }

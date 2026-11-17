@@ -420,11 +420,20 @@ The API is documented in [`docs/API.md`](docs/API.md), which covers member and A
 
 ## Checks
 
+The server tests and the browser tests run against a real PostgreSQL 18, through a role that may create databases and is used only by tests (TEST-3). With the development database from [Local development](#local-development):
+
 ```bash
-npm run check   # lint (tsc -b), all tests, and the production build
+docker exec -i agt-knowledge-base-dev-db psql -U postgres -c "CREATE ROLE agt_test LOGIN NOSUPERUSER CREATEDB NOCREATEROLE PASSWORD 'agt-test-password'"
+export AGT_KNOWLEDGE_BASE_TEST_DATABASE_URL=postgres://agt_test:agt-test-password@127.0.0.1:5432/postgres
 ```
 
-`npm test` runs the server and shared-library tests with Node's built-in test runner and the React component tests with Vitest. GitHub Actions runs `npm run check`, and builds the image and runs the Docker Compose stack until it is healthy, for every pull request and every push to `main` (`.github/workflows/ci.yml`). See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+```bash
+npm run check                               # lint (tsc -b), the shared-library and server tests, and the production build
+npx playwright install --with-deps chromium # once: the browser for the browser tests
+npm run test:e2e                            # build, then the browser tests against the real server
+```
+
+`npm test` runs the shared-library tests and the server tests with Node's built-in test runner; each server test database, with its preview database, is created through that role and dropped afterwards, and the backup tests need `pg_dump` and `pg_restore` of PostgreSQL 18 on the `PATH`. `npm run test:e2e` starts the built server on a fresh database (`agt_knowledge_base_e2e`), creates the Admin, two members and sample content through the UI, and tests every page in Chromium, including axe WCAG 2.2 AA checks, layouts from 300 px and at the 2× text size, keyboard use of every dialog, and the Content-Security-Policy. GitHub Actions runs `npm run check` and `npm run test:e2e`, each with a PostgreSQL 18 service, and builds the image and runs the Docker Compose stack until it is healthy, for every pull request and every push to `main` (`.github/workflows/ci.yml`). Releases follow [`docs/RELEASING.md`](docs/RELEASING.md). See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 ## Database migrations
 
@@ -451,7 +460,7 @@ public/           AGT logo, fonts and font licences, copied unmodified from the 
 server/           Fastify API: entry point, app, route table, domain services, authorization, PostgreSQL adapter
 server/test/      Server tests (node:test)
 src/lib/          Framework-free code: validation and API types shared with the server, the API client, deep links, preferences
-tests/e2e/        Browser tests (Playwright): npm run test:e2e
+tests/e2e/        Browser tests (Playwright) against the real server: npm run test:e2e
 server/migrations/ SQL migrations (app, control and logs schemas)
 docs/             API guide (API.md) and the pinned AGT web app spec
 deploy/           systemd unit, Caddyfile example, PostgreSQL init script

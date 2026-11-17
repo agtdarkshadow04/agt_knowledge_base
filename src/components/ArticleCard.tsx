@@ -24,7 +24,7 @@ export function ArticleCard({ article }: { article: ArticleSummary }) {
         {article.isProtected && <span className="status-chip protected"><LockKeyholeIcon /> {t.status.protected}</span>}
       </div>
       <p className="excerpt">{article.excerpt || t.card.noExcerpt}</p>
-      <div className="tag-list" aria-label={t.card.tags}>
+      <div className="tag-list" role="group" aria-label={t.card.tags}>
         {article.tags.map((tag) => <TagChip key={tag.id} tag={tag} />)}
       </div>
       <footer className="article-card-meta">

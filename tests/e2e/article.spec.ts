@@ -27,7 +27,7 @@ test.describe('downloads', () => {
     await expect(page.getByRole('button', { name: 'Download Markdown source' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Download PDF' })).toHaveCount(0);
     // A preference change applies without reloading the article.
-    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('combobox', { name: 'Article downloads' }).selectOption('true');
     await page.keyboard.press('Escape');
     await expect(page.getByRole('button', { name: 'Download Markdown source' })).toBeVisible();

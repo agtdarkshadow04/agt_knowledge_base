@@ -223,7 +223,7 @@ export function HomePage() {
             className="button button-ghost compact"
             type="button"
             onClick={() => updateParam('direction', params.direction === 'asc' ? 'desc' : 'asc')}
-            aria-label={params.direction === 'asc' ? t.home.sortDescending : t.home.sortAscending}
+            title={params.direction === 'asc' ? t.home.sortDescending : t.home.sortAscending}
           >
             {params.direction === 'asc' ? <ArrowUpIcon aria-hidden="true" /> : <ArrowDownIcon aria-hidden="true" />}
             {params.direction === 'asc' ? t.home.ascending : t.home.descending}

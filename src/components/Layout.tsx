@@ -45,7 +45,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <Link to="/" className="brand" aria-label={formatTranslation(t.layout.homeLabel, { alliance: COMMON_TRANSLATIONS.alliance, product: settings.site.title })}>
             <img className="brand-logo" src="/AgtOfficialLogo.webp" alt="" aria-hidden="true" width="44" height="44" />
             <span className="brand-copy">
-              <span className="brand-name">{COMMON_TRANSLATIONS.alliance}</span>
+              <span className="brand-name">{COMMON_TRANSLATIONS.alliance}</span>{' '}
               <span className="brand-product">{settings.site.title}</span>
             </span>
           </Link>

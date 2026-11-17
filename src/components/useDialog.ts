@@ -27,6 +27,8 @@ export function useDialog(
   dialogRef: RefObject<HTMLElement | null>,
   initialFocusRef: RefObject<HTMLElement | null> | null,
   onClose: () => void,
+  /** Where focus returns when the opener lost focus before the dialog opened (it was disabled meanwhile, for example). */
+  returnFocusRef: RefObject<HTMLElement | null> | null = null,
 ) {
   const close = useRef(onClose);
   useEffect(() => { close.current = onClose; });
@@ -34,7 +36,8 @@ export function useDialog(
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return undefined;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const active = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+    const opener = active ?? returnFocusRef?.current ?? null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     (initialFocusRef?.current ?? focusableElements(dialog)[0] ?? dialog).focus();
@@ -80,5 +83,5 @@ export function useDialog(
       document.body.style.overflow = previousOverflow;
       if (opener?.isConnected) opener.focus();
     };
-  }, [dialogRef, initialFocusRef]);
+  }, [dialogRef, initialFocusRef, returnFocusRef]);
 }

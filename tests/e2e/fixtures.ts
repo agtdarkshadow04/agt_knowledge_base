@@ -52,10 +52,10 @@ export async function expectNoHorizontalScroll(page: Page, label: string) {
 }
 
 /** Opens `opener` from the keyboard, checks that Tab stays inside the dialog, Escape closes it and focus returns (A11Y-2). */
-export async function expectDialogBehaviour(page: Page, opener: ReturnType<Page['getByRole']>, name: string | RegExp) {
+export async function expectDialogBehaviour(page: Page, opener: ReturnType<Page['getByRole']>, name: string | RegExp, role: 'dialog' | 'alertdialog' = 'dialog') {
   await opener.focus();
   await page.keyboard.press('Enter');
-  const dialog = page.getByRole('dialog', { name });
+  const dialog = page.getByRole(role, { name });
   await expect(dialog).toBeVisible();
   for (let step = 0; step < 15; step += 1) {
     await page.keyboard.press('Tab');

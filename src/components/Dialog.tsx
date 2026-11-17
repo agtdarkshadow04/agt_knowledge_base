@@ -14,6 +14,7 @@ export function Dialog({
   description,
   onClose,
   initialFocusRef = null,
+  returnFocusRef = null,
   className = '',
   role = 'dialog',
   closeLabel,
@@ -25,6 +26,8 @@ export function Dialog({
   description?: ReactNode;
   onClose(): void;
   initialFocusRef?: RefObject<HTMLElement | null> | null;
+  /** Where focus returns if the opener lost focus before the dialog opened (A11Y-2). */
+  returnFocusRef?: RefObject<HTMLElement | null> | null;
   className?: string;
   role?: 'dialog' | 'alertdialog';
   /** The close button's label; "Close" in the reader's language by default. */
@@ -37,7 +40,7 @@ export function Dialog({
   const titleId = useId();
   const descriptionId = useId();
   const dialog = useRef<HTMLElement>(null);
-  useDialog(dialog, initialFocusRef, onClose);
+  useDialog(dialog, initialFocusRef, onClose, returnFocusRef);
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section
