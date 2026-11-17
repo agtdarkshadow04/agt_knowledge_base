@@ -2,7 +2,7 @@ import { MemberRepository } from './repository/members.js';
 import { json, noContent, parseBody, pathId } from './api-response.js';
 import { ArticleService } from './article-service.js';
 import { requireAdminSession } from './auth.js';
-import { BackupService } from './backup.js';
+import { BackupService, type BackupServiceOptions } from './backup.js';
 import { auditColumns, decodeLogCursor, encodeLogCursor, exportFileName, exportStream, serverColumns } from './logs.js';
 import { stat } from 'node:fs/promises';
 import { adminSessionExpiry } from './repository/sessions.js';
@@ -107,12 +107,16 @@ export type AdminRequestHandler = (request: ApiRequest) => Promise<ApiResponse>;
 /** Builds the admin route dispatcher. Errors are thrown for the app's error handler (SRV-5). */
 export function createAdminRequestHandler(
   context: Pick<AppContext, 'config' | 'configFile' | 'db' | 'version' | 'operations' | 'toolPath' | 'logs'>,
-  options: { backupLog?: { info(message: string): void; warn(message: string): void; error(message: string): void } } = {},
+  options: {
+    backupLog?: { info(message: string): void; warn(message: string): void; error(message: string): void };
+    /** `BackupService` options other than the log, for tests (a tool runner that pauses or fails). */
+    backup?: Omit<BackupServiceOptions, 'log'>;
+  } = {},
 ): AdminRequestHandler {
   const articleService = new ArticleService(new PostgresArticleRepository(context.db));
   const members = new MemberRepository(context);
   const settingsService = new SettingsService(context);
-  const backupService = new BackupService(context, settingsService, { log: options.backupLog });
+  const backupService = new BackupService(context, settingsService, { ...options.backup, log: options.backupLog });
 
   return async function handleAdminRequest(request: ApiRequest): Promise<ApiResponse> {
     requireAdminSession(request);

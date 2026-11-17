@@ -5,10 +5,12 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
+import http from 'node:http';
 import pg from 'pg';
 import yauzl from 'yauzl';
 import yazl from 'yazl';
 import { createRequestHandler } from '../app.js';
+import { BackupService } from '../backup.js';
 import { connectionParameters } from '../db.js';
 import type { ApiRequest } from '../routes.js';
 import { createTestDatabase, createTestServer, testDatabaseUrl, type TestServer } from './postgres.js';
@@ -87,12 +89,12 @@ function gate() {
   return { opened, open, arrived, reached };
 }
 
-/** A request dispatcher that holds `POST /api/articles` at `held` until the test opens it. */
-function holdingHandlers(held: ReturnType<typeof gate>) {
+/** A request dispatcher that holds `routeKey` (by default `POST /api/articles`) at `held` until the test opens it. */
+function holdingHandlers(held: ReturnType<typeof gate>, routeKey = 'POST /api/articles') {
   return (context: TestServer['context']) => {
     const handle = createRequestHandler(context);
     return async (request: ApiRequest) => {
-      if (request.routeKey === 'POST /api/articles') {
+      if (request.routeKey === routeKey) {
         held.reached();
         await held.opened;
       }
@@ -469,5 +471,289 @@ describe('two processes on one database (BAK-12)', () => {
     const c = await starting;
     const login = await c.app.inject({ method: 'POST', url: '/api/member/login', headers: csrf, payload: { username: 'scribe', password: memberPassword } });
     assert.equal(login.statusCode, 200, login.body);
+  });
+});
+
+/** The test's own state of `control.operation`. */
+async function operationState(database: string) {
+  return (await query(database, 'SELECT state FROM control.operation WHERE id = 1')).rows[0].state as string;
+}
+
+async function signInAdmin(target: TestServer) {
+  const login = await target.app.inject({ method: 'POST', url: '/api/admin/login', headers: csrf, payload: { username: 'keeper', password: adminPassword } });
+  assert.equal(login.statusCode, 200, login.body);
+  return cookieFrom(login, 'agt_knowledge_base_session');
+}
+
+/** Waits until `check` holds, polling every 50 ms, for at most `milliseconds`. */
+async function eventually(check: () => Promise<boolean>, milliseconds = 5000) {
+  const deadline = Date.now() + milliseconds;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error('The condition did not hold in time.');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+/** A request that has not settled within `milliseconds`. */
+async function stillPending(promise: Promise<unknown>, milliseconds = 1000) {
+  let settled = false;
+  void promise.then(() => { settled = true; }, () => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+  return !settled;
+}
+
+/** A crafted archive: the backup's dump loaded into a scratch database, changed by `sql`, and dumped again. */
+async function craftedArchive(backup: Buffer, sql: string, options: { wholeDatabase?: boolean } = {}) {
+  const files = await unzip(backup);
+  const scratch = await createTestDatabase();
+  try {
+    await loadDump(scratch.name, files.get('database.dump')!);
+    await query(scratch.name, sql);
+    const dump = execFileSync('pg_dump', ['--format=custom', ...(options.wholeDatabase ? [] : ['--schema=public']), scratch.name], { env: connectionEnv(scratch.name) });
+    return await rezip(files, dump);
+  } finally {
+    await scratch.drop();
+  }
+}
+
+describe('restore previews on PostgreSQL (BAK-3)', () => {
+  it('rejects, after restoring into the preview database, a newer schema, a missing table and an Admin hash that could never sign in', async () => {
+    const a = await server();
+    const { admin } = await setUp(a);
+    const backup = (await backupArchive(a, admin)).rawPayload;
+    const cases: Array<[string, string, string]> = [
+      ['newer schema', "INSERT INTO schema_migrations (version, name) VALUES (9999, 'from_the_future')", 'newer_schema'],
+      ['missing table', 'DROP TABLE tags CASCADE', 'missing_tables'],
+      ['bad Admin hash', "UPDATE admin SET password_hash = 'scrypt$1$2$3$bad$hash'", 'invalid_admin'],
+    ];
+    for (const [name, sql, reason] of cases) {
+      const reply = await restore(a, admin, 'preview', await craftedArchive(backup, sql));
+      assert.equal(reply.statusCode, 422, `${name}: ${reply.body}`);
+      assert.equal(JSON.parse(reply.body).params?.reason, reason, name);
+    }
+  });
+
+  it('rejects a dump with an extension before restoring anything (an event trigger needs a superuser; the allowlist tests cover its entry)', async () => {
+    const a = await server();
+    const { admin } = await setUp(a);
+    const backup = (await backupArchive(a, admin)).rawPayload;
+    const reply = await restore(a, admin, 'preview', await craftedArchive(backup, 'CREATE EXTENSION IF NOT EXISTS pgcrypto', { wholeDatabase: true }));
+    assert.equal(reply.statusCode, 422, reply.body);
+    assert.equal(JSON.parse(reply.body).params?.reason, 'disallowed_entry');
+  });
+
+  it('answers a second preview at the same time with 409, and a process started meanwhile leaves the preview database alone', async () => {
+    const paused = gate();
+    let pausing = false;
+    const a = await server({
+      backupTools: (real) => async (tool, args, options) => {
+        const result = await real(tool, args, options);
+        // Pause after the dump is in the preview database, before the checks and the emptying.
+        if (pausing && tool === 'pg_restore' && args.some((arg) => arg.endsWith('_preview'))) { paused.reached(); await paused.opened; }
+        return result;
+      },
+    });
+    const { admin } = await setUp(a);
+    const backup = (await backupArchive(a, admin)).rawPayload;
+    pausing = true;
+    const first = restore(a, admin, 'preview', backup);
+    await paused.arrived;
+    const second = await restore(a, admin, 'preview', backup);
+    assert.equal(second.statusCode, 409, second.body);
+    // A process starting now must not empty the preview database under the running preview.
+    const c = await server({ database: a.database, dataDir: a.dataDir });
+    await new BackupService(c.context).cleanPreviewDatabase();
+    const tables = await query(`${a.database}_preview`, "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'public'");
+    assert.ok(tables.rows[0].n > 0, 'the paused preview keeps its tables');
+    paused.open();
+    assert.equal((await first).statusCode, 200);
+    const after = await query(`${a.database}_preview`, "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'public'");
+    assert.equal(after.rows[0].n, 0, 'the preview database is empty afterwards');
+  });
+});
+
+describe('rollback and recovery on PostgreSQL (BAK-10, BAK-11)', () => {
+  it('rolls back to exactly the original rows with the rollback list, and deletes each list with its pre-restore backup', async () => {
+    let failNextLiveRestore = false;
+    const a = await server({
+      config: 'backup:\n  preRestore:\n    keep: 1',
+      backupTools: (real) => async (tool, args, options) => {
+        const result = await real(tool, args, options);
+        if (failNextLiveRestore && tool === 'pg_restore' && args.includes('--clean')) {
+          failNextLiveRestore = false;
+          throw new Error('Injected failure after the live restore.');
+        }
+        return result;
+      },
+    });
+    const { admin, member } = await setUp(a);
+    assert.equal((await createArticle(a, member, 'In the backup')).statusCode, 201);
+    const backup = (await backupArchive(a, admin)).rawPayload;
+    assert.equal((await createArticle(a, member, 'Only live')).statusCode, 201);
+    const before = (await query(a.database, 'SELECT id, title, version FROM articles ORDER BY id')).rows;
+
+    failNextLiveRestore = true;
+    const failed = await restore(a, admin, 'restore', backup);
+    assert.equal(failed.statusCode, 500, failed.body);
+    assert.match(JSON.parse(failed.body).message, /rolled back/);
+    assert.deepEqual((await query(a.database, 'SELECT id, title, version FROM articles ORDER BY id')).rows, before, 'exactly the original rows');
+    assert.equal(await operationState(a.database), 'idle');
+    const firstFiles = readdirSync(join(a.dataDir, 'backups')).filter((name) => name.startsWith('pre-restore-backup-')).sort();
+    assert.equal(firstFiles.length, 2, 'the pre-restore backup and its rollback list');
+    assert.ok(firstFiles.some((name) => name.endsWith('.list')));
+
+    // The next restore keeps only its own pre-restore backup (backup.preRestore.keep: 1), with its list.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const adminAgain = await signInAdmin(a);
+    const succeeded = await restore(a, adminAgain, 'restore', backup);
+    assert.equal(succeeded.statusCode, 200, succeeded.body);
+    const files = readdirSync(join(a.dataDir, 'backups')).filter((name) => name.startsWith('pre-restore-backup-')).sort();
+    assert.equal(files.length, 2);
+    for (const name of firstFiles) assert.ok(!files.includes(name), `${name} was deleted with its pre-restore backup`);
+  });
+
+  it('lets only the recovery session see and restore a failed restore, from another process, until a good restore returns everyone to idle', async () => {
+    const paused = gate();
+    let pausing = false;
+    let failRecovery = false;
+    const a = await server({ operations: { hooks: { afterStateUpdate: async (kind) => { if (kind === 'restore' && pausing) { paused.reached(); await paused.opened; } } } } });
+    const b = await server({
+      database: a.database,
+      dataDir: a.dataDir,
+      backupTools: (real) => async (tool, args, options) => {
+        if (failRecovery && tool === 'pg_restore' && args.includes('--clean')) throw new Error('Injected recovery failure.');
+        return real(tool, args, options);
+      },
+    });
+    const { admin, member } = await setUp(a);
+    assert.equal((await createArticle(a, member, 'Recovered')).statusCode, 201);
+    const backup = (await backupArchive(a, admin)).rawPayload;
+    const other = await signInAdmin(a);
+    pausing = true;
+    const restoring = restore(a, admin, 'restore', backup);
+    await paused.arrived;
+    await a.operations.dropControlConnection();
+    paused.open();
+    await restoring;
+    await eventually(async () => (await operationState(a.database)) === 'restore_failed');
+    await eventually(async () => b.operations.state === 'restore_failed');
+
+    // BAK-11: the recovery session (the one that started the restore) works for the session and restore routes only.
+    const session = await b.app.inject({ method: 'GET', url: '/api/admin/session', headers: { cookie: admin } });
+    assert.equal(session.statusCode, 200, session.body);
+    assert.equal(JSON.parse(session.body).username, 'keeper');
+    assert.equal((await b.app.inject({ method: 'GET', url: '/api/admin/session', headers: { cookie: other } })).statusCode, 503);
+    assert.equal((await b.app.inject({ method: 'GET', url: '/api/admin/users', headers: { cookie: admin } })).statusCode, 503);
+    assert.equal((await restore(b, other, 'restore', backup)).statusCode, 503, 'another session cannot start a recovery');
+
+    // A recovery restore that fails leaves restore_failed, the marker and the recovery session as they were.
+    failRecovery = true;
+    assert.equal((await restore(b, admin, 'restore', backup)).statusCode, 500);
+    assert.equal(await operationState(a.database), 'restore_failed');
+    assert.ok(existsSync(join(a.dataDir, 'restore-failed.json')));
+    assert.equal((await b.app.inject({ method: 'GET', url: '/api/admin/session', headers: { cookie: admin } })).statusCode, 200);
+
+    // A good recovery restore, previewed first, returns to idle and clears the marker; no advisory lock stays held.
+    failRecovery = false;
+    assert.equal((await restore(b, admin, 'preview', backup)).statusCode, 200);
+    const recovered = await restore(b, admin, 'restore', backup);
+    assert.equal(recovered.statusCode, 200, recovered.body);
+    assert.equal(await operationState(a.database), 'idle');
+    assert.equal(existsSync(join(a.dataDir, 'restore-failed.json')), false);
+    await eventually(async () => b.operations.state === 'idle');
+    const locks = await query(a.database, "SELECT count(*)::int AS n FROM pg_locks l JOIN pg_database d ON d.oid = l.database WHERE l.locktype = 'advisory' AND d.datname = current_database() AND l.objid <> 0 AND l.granted");
+    const held = locks.rows[0].n as number;
+    assert.equal(held, 0, 'no advisory lock is held after the recovery');
+    assert.deepEqual(await titles(b), ['Recovered']);
+  });
+});
+
+describe('the drain across two processes (BAK-8, BAK-12)', () => {
+  it('includes in the backup a write already in progress in a paused follower, and gives up with 409 when one outlasts the lock timeout', async () => {
+    const held = gate();
+    const a = await server({ operations: { lockTimeoutMilliseconds: 1500 } });
+    await setUp(a);
+    const b = await server({ database: a.database, dataDir: a.dataDir, app: { handlers: { request: holdingHandlers(held)(a.context) } } });
+    const memberOnB = await signInMember(b);
+    const admin = await signInAdmin(a);
+
+    // A write in progress in B, which then stops following: the backup waits for it and contains it.
+    const write = createArticle(b, memberOnB, 'Written before the snapshot');
+    await held.arrived;
+    b.operations.pauseFollowing();
+    const backup = backupArchive(a, admin);
+    assert.equal(await stillPending(backup, 500), true, 'the backup waits for the write in progress');
+    held.open();
+    assert.equal((await write).statusCode, 201);
+    const archive = await backup;
+    assert.equal(archive.statusCode, 200, archive.body);
+    const scratch = await createTestDatabase();
+    try {
+      await loadDump(scratch.name, (await unzip(archive.rawPayload)).get('database.dump')!);
+      assert.equal((await query(scratch.name, "SELECT count(*)::int AS n FROM articles WHERE title = 'Written before the snapshot'")).rows[0].n, 1);
+    } finally {
+      await scratch.drop();
+    }
+  });
+
+  it('gives up the backup with 409 and changes nothing when a write is held past the lock timeout, then frees the operation lock', async () => {
+    const held = gate();
+    const a = await server({ operations: { lockTimeoutMilliseconds: 1000 } });
+    await setUp(a);
+    const b = await server({ database: a.database, dataDir: a.dataDir, app: { handlers: { request: holdingHandlers(held)(a.context) } } });
+    const memberOnB = await signInMember(b);
+    const admin = await signInAdmin(a);
+    const write = createArticle(b, memberOnB, 'Held past the timeout');
+    await held.arrived;
+    const backup = await backupArchive(a, admin);
+    assert.equal(backup.statusCode, 409, backup.body);
+    assert.equal(await operationState(a.database), 'idle');
+    held.open();
+    assert.equal((await write).statusCode, 201);
+    // After the 409 the operation lock is free again, from the other process too.
+    assert.equal((await backupArchive(b, admin)).statusCode, 200);
+  });
+
+  it('makes a restore wait for a held read, a running job and a download held open in the other process', async () => {
+    const heldRead = gate();
+    const a = await server();
+    const { admin } = await setUp(a);
+    const archive = (await backupArchive(a, admin)).rawPayload;
+    const b = await server({ database: a.database, dataDir: a.dataDir, app: { handlers: { request: holdingHandlers(heldRead, 'GET /api/articles')(a.context) } } });
+
+    // A read held open in B.
+    const read = b.app.inject({ method: 'GET', url: '/api/articles' });
+    await heldRead.arrived;
+    let restoring = restore(a, admin, 'restore', archive);
+    assert.equal(await stillPending(restoring), true, 'the restore waits for the read');
+    heldRead.open();
+    assert.equal((await read).statusCode, 200);
+    assert.equal((await restoring).statusCode, 200);
+
+    // A job (the log retention job) admitted in B.
+    const adminAgain = await signInAdmin(a);
+    await eventually(async () => b.operations.state === 'idle');
+    const job = await b.operations.admit({ routeKey: 'job retention' });
+    restoring = restore(a, adminAgain, 'restore', archive);
+    assert.equal(await stillPending(restoring), true, 'the restore waits for the job');
+    job.release();
+    assert.equal((await restoring).statusCode, 200);
+
+    // A download held open: a large server log export that the client stops reading.
+    const third = await signInAdmin(a);
+    await eventually(async () => b.operations.state === 'idle');
+    await query(a.database, "INSERT INTO logs.server_log (id, at, level, source, message, details) SELECT gen_random_uuid(), now(), 'info', 'startup', repeat('x', 400), '{}'::jsonb FROM generate_series(1, 60000)");
+    const address = await b.app.listen({ port: 0, host: '127.0.0.1' });
+    const response = await new Promise<import('node:http').IncomingMessage>((resolve, reject) => {
+      const request = http.get(`${address}/api/admin/logs/server/export?format=jsonl`, { headers: { cookie: third } }, resolve);
+      request.on('error', reject);
+    });
+    assert.equal(response.statusCode, 200);
+    response.pause();
+    restoring = restore(a, third, 'restore', archive);
+    assert.equal(await stillPending(restoring, 1500), true, 'the restore waits for the download');
+    response.resume();
+    await new Promise((resolve) => response.on('end', resolve));
+    assert.equal((await restoring).statusCode, 200);
   });
 });

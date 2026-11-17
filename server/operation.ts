@@ -103,6 +103,8 @@ export function restoreFailedMarker(context: Pick<AppContext, 'config'>) {
 export interface PostgresOperationsOptions {
   log?: OperationLog;
   pollMilliseconds?: number;
+  /** How long an owner waits for the activity and write locks, and for its own requests to drain (30 s; shorter in tests). */
+  lockTimeoutMilliseconds?: number;
   /** Test hooks (TEST-4): pause an owner between steps. */
   hooks?: {
     /** After the owner set the state to `backup` or `restore`, before it takes the write lock. */
@@ -345,7 +347,7 @@ export class PostgresOperations implements Operations {
 
   /** Waits until this process has no other request in progress (its own locks never block it, BAK-8). */
   private async drainLocal() {
-    const deadline = Date.now() + drainMilliseconds;
+    const deadline = Date.now() + (this.options.lockTimeoutMilliseconds ?? drainMilliseconds);
     while (this.active > 1) {
       if (Date.now() >= deadline) throw operationConflict(true);
       await wait(50);
@@ -421,7 +423,7 @@ export class PostgresOperations implements Operations {
   }
 
   private async exclusive(onControl: <R>(step: (client: pg.Client) => Promise<R>) => Promise<R>, name: 'activity' | 'writes') {
-    await onControl((client) => control.advisoryLock(client, name, { timeout: true }));
+    await onControl((client) => control.advisoryLock(client, name, { timeout: this.options.lockTimeoutMilliseconds ?? true }));
   }
 
   /**

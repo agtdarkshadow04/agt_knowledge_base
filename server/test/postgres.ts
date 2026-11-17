@@ -3,7 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
+import { createAdminRequestHandler } from '../adminRoutes.js';
 import { buildApp, type BuildAppOptions } from '../app.js';
+import { postgresTools, type ToolRunner } from '../backup.js';
 import { parseConfig } from '../config.js';
 import type { AppContext } from '../context.js';
 import { connectionParameters, createDatabase } from '../db.js';
@@ -64,6 +66,8 @@ export interface TestServerOptions {
   config?: string;
   setupPassword?: string | null;
   operations?: Omit<PostgresOperationsOptions, 'log'>;
+  /** Wraps the real `pg_dump`/`pg_restore` runner, to pause or fail a backup, preview or restore (TEST-4). */
+  backupTools?: (real: ToolRunner) => ToolRunner;
   app?: Omit<BuildAppOptions, 'logger' | 'loggerInstance'>;
 }
 
@@ -122,7 +126,11 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
     await created?.drop();
     throw error;
   }
-  const app = buildApp(context, options.app);
+  const handlers = { ...options.app?.handlers };
+  if (options.backupTools && !handlers.admin) {
+    handlers.admin = createAdminRequestHandler(context, { backup: { tools: options.backupTools(postgresTools(db.connection(), context.toolPath)) } });
+  }
+  const app = buildApp(context, { ...options.app, handlers });
   await app.ready();
   let closed = false;
   return {
