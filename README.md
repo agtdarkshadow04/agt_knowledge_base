@@ -453,7 +453,7 @@ The server keeps two logs in the `logs` schema of its database, shown in the adm
 
 ## Development
 
-Development needs Node.js 26 and npm 11.20 or newer within npm 11, and a PostgreSQL 18 server (a container is enough). Read [`AGENTS.md`](AGENTS.md) for the conventions and change checklists, which apply to human contributors too, and the pinned [AGT Web Application Specification](docs/agt-webapp-spec.md) (v6.0.0) the app follows. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+Development needs Node.js 26 and npm 11.20 or newer within npm 11, and a PostgreSQL 18 server (a container is enough). Read [`AGENTS.md`](AGENTS.md) for the conventions and change checklists, which apply to human contributors too, and the pinned [AGT Web Application Specification](docs/agt-webapp-spec.md) (v6.0.1) the app follows. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 1. Install dependencies and create local configuration:
 
@@ -572,7 +572,7 @@ The app never clears the failed state by itself because a file is missing: if on
 
 ## Credits
 
-The AGT logo and the fonts come unmodified from the [AGT Web Application Specification](https://github.com/agtdarkshadow04/agt_webapp_specification/blob/v6.0.0/assets/README.md) (v6.0.0). The logo is © Alliance of Galactic Travellers, all rights reserved, and is used only in AGT apps.
+The AGT logo and the fonts come unmodified from the [AGT Web Application Specification](https://github.com/agtdarkshadow04/agt_webapp_specification/blob/v6.0.1/assets/README.md) (v6.0.1). The logo is © Alliance of Galactic Travellers, all rights reserved, and is used only in AGT apps.
 
 - **NMS Futura** (`public/NMSFuturaProBook_Kerned.ttf`), the interface font: by No Man's Sky Community Developers & Designers (NMSCD), designer Blend3rman (licence notice © 2020 Hector Javier Gonzalez Rivera), based on the typeface of Hello Games' No Man's Sky. Licensed under the [SIL Open Font License 1.1](public/fonts/NMSFuturaProBook-OFL.txt). Source: [NMSCD/No-Mans-Sky-Universal-Font](https://github.com/NMSCD/No-Mans-Sky-Universal-Font/blob/master/assets/font/NMSFuturaProBook_Kerned/Web-TT/NMSFuturaProBook_Kerned.ttf).
 - **Twemoji Country Flags** (`public/fonts/TwemojiCountryFlags.woff2`), which shows flag emoji in articles: flag artwork by Twitter, Inc. and other contributors (Twemoji), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); font packaging © 2022 TalkJS, MIT ([licence file](public/fonts/TwemojiCountryFlags-LICENSE.md)). Source: [talkjs/country-flag-emoji-polyfill](https://github.com/talkjs/country-flag-emoji-polyfill) 0.1.10.
