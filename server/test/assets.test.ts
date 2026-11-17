@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 
 /**
  * UI-15, UI-16: the AGT logo, fonts, licence files and base stylesheet are
- * copies of the spec repository's `assets/` at v6.0.0, byte for byte. The
+ * copies of the spec repository's `assets/` at v6.0.1, byte for byte. The
  * hashes are those `assets/README.md` lists at that tag.
  */
 const assets: Record<string, string> = {
