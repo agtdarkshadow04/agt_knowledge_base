@@ -260,7 +260,7 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 - Follows the AGT Web Application Specification v6.0.1 instead of v6.0.0 (SPEC-3): the pinned copy in
   `docs/agt-webapp-spec.md` is the `v6.0.1` tag, whose app registry lists `knowledge-base` (port 8081, PostgreSQL), so
-  the NAME-1 deviation is gone. The assets are unchanged ([#PR](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/PR)).
+  the NAME-1 deviation is gone. The assets are unchanged ([#62](https://github.com/agtdarkshadow04/agt_knowledge_base/pull/62)).
 - The README follows the DOC-1 order: the AI disclosure and the self-hosting guarantees, then Installation (Docker
   Compose and local, both from a release tag, TLS, Upgrading, Rolling back), First run, a Configuration reference with
   separate tables of config-file-only and dashboard-editable keys, the Admin dashboard, the app's own sections, Backup
