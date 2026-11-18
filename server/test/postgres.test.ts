@@ -13,7 +13,7 @@ import { createRequestHandler } from '../app.js';
 import { BackupService } from '../backup.js';
 import { connectionParameters } from '../db.js';
 import type { ApiRequest } from '../routes.js';
-import { createTestDatabase, createTestServer, testDatabaseUrl, type TestServer } from './postgres.js';
+import { closeTestServers, createTestDatabase, createTestServer, testDatabaseUrl, type TestServer } from './postgres.js';
 
 /**
  * Real-PostgreSQL tests (TEST-3, TEST-4): startup and migrations, a backup
@@ -29,7 +29,7 @@ const servers: TestServer[] = [];
 
 after(async () => {
   // Second processes first: the first one drops the database.
-  for (const server of servers.reverse()) await server.close();
+  await closeTestServers(servers.reverse());
 });
 
 async function server(options: Parameters<typeof createTestServer>[0] = {}) {

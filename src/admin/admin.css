@@ -32,6 +32,11 @@
 .admin-user-card summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem; cursor: pointer; }
 .admin-user-card summary span:first-child { display: grid; gap: 0.2rem; }
 .admin-user-card summary small { color: var(--muted); }
+/* An AGT member's details (#30, #70): padded like the forms around them. */
+.admin-user-details { display: grid; gap: 0.75rem; padding: 0 1rem 1rem; }
+.admin-user-details > p, .admin-user-details > div > p { margin: 0; }
+.admin-user-details .account-details div:last-child { padding-bottom: 0; border-bottom: 0; }
+.admin-user-details .account-details dd small { color: var(--muted); }
 .status-pill { padding: 0.3rem 0.5rem; border-radius: 999px; color: #09110c; background: #86efac; font-size: 0.65rem; font-weight: 900; text-transform: uppercase; }
 .status-pill.inactive { color: #fff; background: #7f1d1d; }
 .password-reset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 0.7rem; padding: 0 1rem 1rem; }

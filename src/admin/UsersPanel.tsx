@@ -157,14 +157,16 @@ function AgtUserEditor({ account, busy, onChanged, onDelete }: {
         <span><strong>{account.displayName}</strong><small>{a.users.agtBadge} · {t.roles[account.role]} · {levelLabel(account.securityLevel)}</small></span>
         <span className={`status-pill ${account.isActive ? 'active' : 'inactive'}`}>{account.isActive ? a.users.active : a.users.inactive}</span>
       </summary>
-      <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
-      {errors.form && <p className="error-note" role="alert">{errors.form}</p>}
-      <p className="field-help">{a.users.agtManaged}</p>
-      <dl className="account-details">
-        <div><dt>{a.users.travellerId}</dt><dd>{account.agtTravellerId ?? t.common.notAvailable}</dd></div>
-        <div><dt>{a.users.iamPermission}</dt><dd>{account.iamPermission ?? t.common.notAvailable}</dd></div>
-        <div><dt>{a.users.securityLevel}</dt><dd>{levelLabel(account.securityLevel)} <small>{a.users.securityLevelFromIam}</small></dd></div>
-      </dl>
+      <div className="admin-user-details">
+        <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
+        {errors.form && <p className="error-note" role="alert">{errors.form}</p>}
+        <p className="field-help">{a.users.agtManaged}</p>
+        <dl className="account-details">
+          <div><dt>{a.users.travellerId}</dt><dd>{account.agtTravellerId ?? t.common.notAvailable}</dd></div>
+          <div><dt>{a.users.iamPermission}</dt><dd>{account.iamPermission ?? t.common.notAvailable}</dd></div>
+          <div><dt>{a.users.securityLevel}</dt><dd>{levelLabel(account.securityLevel)} <small>{a.users.securityLevelFromIam}</small></dd></div>
+        </dl>
+      </div>
       <form className="admin-form-grid" noValidate onSubmit={(event) => void save(event)}>
         <label className="check-field"><input name="isActive" type="checkbox" defaultChecked={account.isActive} /> {a.users.active}</label>
         <div className="dialog-actions">
