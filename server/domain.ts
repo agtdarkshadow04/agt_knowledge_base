@@ -45,11 +45,18 @@ export function articleVisibilityFromFilter(filter: ArticleVisibilityFilter): Ar
 
 export interface LocalUserRecord {
   id: string;
+  /** The local username, or the Traveller Name of an AGT member. */
   username: string;
   displayName: string;
   email?: string;
   role: Role;
   isActive: boolean;
+  /** How the member signs in: a local password or their AGT account. */
+  authSource: 'local' | 'agt_iam';
+  /** The AGT traveller ID of an AGT member. */
+  agtTravellerId?: string;
+  /** The AGT IAM permission tier an AGT member had at their last sign-in. */
+  iamPermission?: string;
   createdAt: string;
   updatedAt: string;
 }

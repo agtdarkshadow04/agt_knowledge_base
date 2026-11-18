@@ -58,7 +58,7 @@ function limit(value: number | bigint | undefined) {
 
 /**
  * Maps validation issues to field errors. A custom rule names its field code
- * with `params: { fieldCode }` (and `params: { other }` for `mismatch`).
+ * with `params: { fieldCode }` (and `params: { other }` for `mismatch`, `params: { max }` for a length).
  */
 export function fieldErrorsFromIssues(issues: readonly ValidationIssue[]): FieldError[] {
   return issues.flatMap((issue): FieldError[] => {
@@ -92,6 +92,8 @@ export function fieldErrorsFromIssues(issues: readonly ValidationIssue[]): Field
         const code = issue.params?.fieldCode;
         const known = typeof code === 'string' && (FIELD_CODES as readonly string[]).includes(code) ? code as FieldCode : 'invalid_format';
         const other = issue.params?.other;
+        const max = issue.params?.max;
+        if (typeof max === 'number') return [fieldError(field, known, issue.message, { max })];
         return [fieldError(field, known, issue.message, typeof other === 'string' ? { other } : undefined)];
       }
       default:

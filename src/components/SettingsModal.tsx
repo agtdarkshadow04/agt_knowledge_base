@@ -101,6 +101,7 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
           <div><dt>{t.settings.username}</dt><dd>{user?.username ?? t.settings.notSignedIn}</dd></div>
           <div><dt>{t.settings.email}</dt><dd>{user?.email ?? t.common.notAvailable}</dd></div>
           <div><dt>{t.settings.accountType}</dt><dd>{user ? t.roles[user.role] : t.common.notAvailable}</dd></div>
+          {user && <div><dt>{t.settings.signInMethod}</dt><dd>{user.authSource === 'agt_iam' ? t.settings.authAgt : t.settings.authLocal}</dd></div>}
         </dl>
       </section>
     </Dialog>

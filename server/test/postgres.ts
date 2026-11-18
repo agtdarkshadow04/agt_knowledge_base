@@ -65,6 +65,8 @@ export interface TestServerOptions {
   /** Extra config.yaml text, appended after the database and storage keys. */
   config?: string;
   setupPassword?: string | null;
+  /** AGT_KNOWLEDGE_BASE_IAM_API_KEY. */
+  iamApiKey?: string;
   operations?: Omit<PostgresOperationsOptions, 'log'>;
   /** Wraps the real `pg_dump`/`pg_restore` runner, to pause or fail a backup, preview or restore (TEST-4). */
   backupTools?: (real: ToolRunner) => ToolRunner;
@@ -115,6 +117,7 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
     version: '2.0.0',
     operations,
     logs,
+    iamApiKey: options.iamApiKey ?? null,
     toolPath: process.env.PATH ?? '/usr/bin',
   };
   try {

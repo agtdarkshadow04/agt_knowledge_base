@@ -29,6 +29,8 @@ export const errorCodes = [
   'file_too_large', 'body_too_large',
   'multipart_required',
   'archive_rejected',
+  'iam_disabled', 'app_access_denied', 'managed_by_iam',
+  'iam_unavailable', 'iam_bad_gateway', 'iam_timeout',
   'rate_limited',
   'internal',
   'maintenance',
@@ -125,6 +127,7 @@ export const PublicSettings = object({
   site: object({ title: Type.String(), subtitle: Type.String(), supportUrl: Type.String() }),
   articles: object({ defaultVisibility: Visibility }),
   access: object({ allowPublicBrowsing: Type.Boolean() }),
+  iam: object({ signIn: Type.Boolean({ description: 'Members can sign in with their AGT account: `iam.enabled` is on and AGT IAM is configured.' }) }),
 });
 
 export const LegacyPublicSettings = object({
@@ -135,12 +138,17 @@ export const LegacyPublicSettings = object({
   version: Type.Integer(),
 });
 
+const AuthSource = Type.Union([Type.Literal('local'), Type.Literal('agt_iam')], {
+  description: '`local`: a username or email and a password; `agt_iam`: the member\'s AGT account.',
+});
+
 export const MemberUser = object({
   sub: Type.String(),
-  username: Type.String(),
+  username: Type.String({ description: 'The local username, or the Traveller Name of an AGT member.' }),
   displayName: Type.String(),
   email: Type.Optional(Type.String()),
   role: Role,
+  authSource: AuthSource,
 });
 
 export const SetupStatus = object({
@@ -158,11 +166,14 @@ export const AdminSession = object({
 
 export const LocalUser = object({
   id: Id,
-  username: Type.String(),
+  username: Type.String({ description: 'The local username, or the Traveller Name of an AGT member.' }),
   displayName: Type.String(),
   email: Type.Optional(Type.String()),
   role: Role,
   isActive: Type.Boolean(),
+  authSource: AuthSource,
+  agtTravellerId: Type.Optional(Type.String({ description: 'The AGT traveller ID of an AGT member.' })),
+  iamPermission: Type.Optional(Type.String({ description: 'The AGT IAM permission tier at the member\'s last sign-in.' })),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -203,6 +214,13 @@ export const SettingState = object({
 
 export const AdminSettings = object({
   states: Type.Array(SettingState, { description: 'Every dashboard setting with its effective value and source (CFG-7).' }),
+  iam: object({
+    enabled: Type.Boolean({ description: 'The effective `iam.enabled` setting.' }),
+    available: Type.Boolean({ description: 'Enabled and configured: members can sign in with their AGT account.' }),
+    missing: Type.Array(Type.Union([Type.Literal('baseUrl'), Type.Literal('appId'), Type.Literal('apiKey')]), {
+      description: 'What AGT sign-in still needs: `iam.baseUrl`, `iam.appId` in config.yaml, or AGT_KNOWLEDGE_BASE_IAM_API_KEY.',
+    }),
+  }, 'AGT IAM sign-in status.'),
   version: Type.Integer({ deprecated: true, description: 'Always 1; settings no longer carry a version. Removed in 3.0.0.' }),
   settings: Type.Object({
     applicationName: settingView(Type.String()),
@@ -377,6 +395,11 @@ export const UserIdParams = object({ userId: Id });
 // AUTH-5: passwords at most 1024 characters, usernames at most 64 (254 for a member's email address).
 const password = (description?: string) => Type.String({ maxLength: 1024, ...(description ? { description } : {}) });
 export const Credentials = object({ username: Type.String({ maxLength: 254, description: 'The Admin username, or a member\'s username or email address.' }), password: password() });
+// Issue #30: AGT IAM allows 42 characters each; the shared validator counts code points.
+export const IamCredentials = object({
+  travellerName: Type.String({ maxLength: 84, description: 'The AGT Traveller Name, 1–42 characters.' }),
+  password: Type.String({ maxLength: 84, description: 'The AGT password, 1–42 characters; sent only to AGT IAM, never stored.' }),
+});
 export const AdminSetupBody = object({
   setupPassword: password('AGT_KNOWLEDGE_BASE_SETUP_PASSWORD.'),
   username: Type.String({ maxLength: 64, description: '1–64 characters after trimming.' }),
@@ -438,7 +461,7 @@ export const UserUpdateBody = object({
   email: Type.Optional(text()),
   role: text('`Editor` or `Moderator`.'),
   isActive: Type.Boolean(),
-});
+}, 'For an AGT member only `isActive` can change: send the other fields as they are, or the request is refused with `409 managed_by_iam`.');
 export const UserPasswordBody = object({ password: text() });
 
 const legacyInput = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()], { deprecated: true, description: 'Deprecated 1.x field; use `values`. Removed in 3.0.0.' }));

@@ -19,12 +19,21 @@ export interface AdminRow {
 
 export interface MemberRow {
   id: string;
-  username: string;
-  password_hash: string;
+  /** Null for a member who signs in through AGT IAM. */
+  username: string | null;
+  /** Null for a member who signs in through AGT IAM. */
+  password_hash: string | null;
   display_name: string;
   email: string | null;
   role: Role;
+  auth_source: 'local' | 'agt_iam';
+  iam_traveller_name: string | null;
 }
+
+/** A local member, who signs in with a username or email and a password. */
+export type LocalMemberRow = MemberRow & { username: string; password_hash: string; auth_source: 'local' };
+
+const memberColumns = 'member.id, member.username, member.display_name, member.email, member.role, member.auth_source, member.iam_traveller_name';
 
 /** Adds a session row; expired rows of the table are purged first (AUTH-8). */
 export async function insertSession(sql: Sql, tokenHash: string, expiresAt: Date, memberId?: string) {
@@ -82,15 +91,67 @@ export async function deleteAdminSession(sql: Sql, tokenHash: string) {
   await sql.query('DELETE FROM sessions WHERE token_hash = $1', [tokenHash]);
 }
 
-/** An active member by username or email (already normalized). */
-export async function activeMemberByLogin(sql: Sql, identifier: string): Promise<MemberRow | undefined> {
-  return (await sql.query<MemberRow>(
-    `SELECT id, username, password_hash, display_name, email, role
-     FROM local_users
-     WHERE is_active = true AND (username = $1 OR email = $1)
+/** An active local member by username or email (already normalized); AGT IAM members never match. */
+export async function activeMemberByLogin(sql: Sql, identifier: string): Promise<LocalMemberRow | undefined> {
+  return (await sql.query<LocalMemberRow>(
+    `SELECT ${memberColumns}, member.password_hash
+     FROM local_users member
+     WHERE member.is_active = true AND member.auth_source = 'local' AND (member.username = $1 OR member.email = $1)
      LIMIT 1`,
     [identifier],
   )).rows[0];
+}
+
+/** The AGT IAM member with this traveller ID, locked for the sign-in that updates it. */
+export async function iamMemberForUpdate(sql: Sql, travellerId: string) {
+  return (await sql.query<Omit<MemberRow, 'password_hash'> & { is_active: boolean }>(
+    `SELECT ${memberColumns}, member.is_active
+     FROM local_users member
+     WHERE member.auth_source = 'agt_iam' AND member.iam_traveller_id = $1
+     FOR UPDATE`,
+    [travellerId],
+  )).rows[0];
+}
+
+export interface IamMemberWrite {
+  travellerId: string;
+  travellerName: string;
+  permission: string;
+  role: Role;
+}
+
+/** Creates the member for a traveller's first AGT sign-in, without a username or password. */
+export async function insertIamMember(sql: Sql, id: string, input: IamMemberWrite) {
+  assertDataWrite();
+  return (await sql.query<Omit<MemberRow, 'password_hash'>>(
+    `INSERT INTO local_users AS member (id, username, password_hash, display_name, email, role, auth_source,
+       iam_traveller_id, iam_traveller_name, iam_permission, iam_synced_at)
+     VALUES ($1, NULL, NULL, $2, NULL, $3, 'agt_iam', $4, $2, $5, now())
+     RETURNING ${memberColumns}`,
+    [id, input.travellerName, input.role, input.travellerId, input.permission],
+  )).rows[0];
+}
+
+/** Refreshes an AGT IAM member's name, permission and role from a sign-in. */
+export async function updateIamMember(sql: Sql, id: string, input: IamMemberWrite) {
+  assertDataWrite();
+  return (await sql.query<Omit<MemberRow, 'password_hash'>>(
+    `UPDATE local_users AS member
+     SET display_name = $2, iam_traveller_name = $2, role = $3, iam_permission = $4, iam_synced_at = now(), updated_at = now()
+     WHERE member.id = $1
+     RETURNING ${memberColumns}`,
+    [id, input.travellerName, input.role, input.permission],
+  )).rows[0];
+}
+
+/** Ends every session of one member (AUTH-4). */
+export async function deleteMemberSessions(sql: Sql, memberId: string) {
+  await sql.query('DELETE FROM member_sessions WHERE user_id = $1', [memberId]);
+}
+
+/** Ends every session of every AGT IAM member: AGT sign-in was switched off. */
+export async function deleteIamMemberSessions(sql: Sql) {
+  await sql.query(`DELETE FROM member_sessions WHERE user_id IN (SELECT id FROM local_users WHERE auth_source = 'agt_iam')`);
 }
 
 export async function updateMemberPassword(sql: Sql, memberId: string, passwordHash: string) {
@@ -101,7 +162,7 @@ export async function updateMemberPassword(sql: Sql, memberId: string, passwordH
 /** The active member an unexpired session belongs to. */
 export async function memberForSession(sql: Sql, tokenHash: string): Promise<Omit<MemberRow, 'password_hash'> | undefined> {
   return (await sql.query<Omit<MemberRow, 'password_hash'>>(
-    `SELECT member.id, member.username, member.display_name, member.email, member.role
+    `SELECT ${memberColumns}
      FROM member_sessions session
      JOIN local_users member ON member.id = session.user_id
      WHERE session.token_hash = $1 AND session.expires_at > now() AND member.is_active`,

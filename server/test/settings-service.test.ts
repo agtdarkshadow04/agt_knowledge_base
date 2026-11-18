@@ -21,9 +21,11 @@ const database = {
   query: mock.fn<Query>(async () => ({ rows })),
 };
 
-function service(configText: string) {
-  return new SettingsService({ config: parseConfig(configText), db: fakeDatabase(database) });
+function service(configText: string, iamApiKey: string | null = null) {
+  return new SettingsService({ config: parseConfig(configText), db: fakeDatabase(database), iamApiKey });
 }
+
+const iamConfig = 'iam:\n  baseUrl: https://iam.example.com\n  appId: app01\n';
 
 /** A transaction client that stores writes in `table` and reads it back. */
 function transaction(table: Map<string, unknown>) {
@@ -58,6 +60,7 @@ describe('settings precedence (CFG-7)', () => {
       'site.title', 'site.subtitle', 'site.supportUrl', 'articles.defaultVisibility',
       'access.allowPublicBrowsing', 'backup.maxZipBytes', 'backup.maxUncompressedBytes', 'backup.maxEntries',
       'logs.serverRetentionDays', 'logs.serverMaxEntries', 'logs.auditRetentionDays', 'logs.auditMaxEntries',
+      'iam.enabled',
     ]);
   });
 
@@ -82,8 +85,41 @@ describe('SettingsService', () => {
       site: { title: 'Dashboard Archive', subtitle: 'Dashboard subtitle', supportUrl: 'https://www.nms-agt.com/support' },
       articles: { defaultVisibility: 1 },
       access: { allowPublicBrowsing: true },
+      iam: { signIn: false },
     });
     assertCalledWith(database.query, 'SELECT key, value FROM settings');
+  });
+
+  dataWriteIt('offers AGT sign-in only while iam.enabled is on and AGT IAM is fully configured', async () => {
+    assertMatches(await service(`${iamConfig}  enabled: true\n`, 'key').getPublic(), { iam: { signIn: true } });
+    // Off by default (CFG-6), and unavailable with any part of the configuration missing.
+    assertMatches(await service(iamConfig, 'key').getPublic(), { iam: { signIn: false } });
+    assertMatches(await service(`${iamConfig}  enabled: true\n`).getPublic(), { iam: { signIn: false } });
+    assertMatches(await service('iam:\n  enabled: true\n  appId: app01\n', 'key').getPublic(), { iam: { signIn: false } });
+  });
+
+  dataWriteIt('reports the AGT sign-in status and what it is missing to the Admin', async () => {
+    assert.deepEqual((await service('iam:\n  enabled: true\n').getAdminView()).iam, { enabled: true, available: false, missing: ['baseUrl', 'appId', 'apiKey'] });
+    assert.deepEqual((await service(iamConfig, 'key').getAdminView()).iam, { enabled: false, available: false, missing: [] });
+    // The API key's value is never part of the view.
+    assert.ok(!JSON.stringify(await service(`${iamConfig}  enabled: true\n`, 'secret-api-key').getAdminView()).includes('secret-api-key'));
+  });
+
+  dataWriteIt('ends every AGT member session in the same write when iam.enabled is switched off (AUTH-4)', async () => {
+    const table = new Map<string, unknown>([['iam.enabled', true]]);
+    const query = transaction(table);
+    const { changes } = await service(iamConfig, 'key').updateWithChanges({ values: { 'iam.enabled': false } });
+    assert.deepEqual(changes, { 'iam.enabled': { old: true, new: false } });
+    const sql = query.mock.calls.map(({ arguments: [statement] }) => statement);
+    const purge = sql.findIndex((statement) => statement.startsWith('DELETE FROM member_sessions'));
+    assert.ok(purge > sql.findIndex((statement) => statement.startsWith('INSERT INTO settings')));
+    assert.ok(sql[purge].includes("auth_source = 'agt_iam'"));
+    assert.ok(purge < sql.indexOf('COMMIT'));
+
+    // Switching it on ends no session.
+    const on = transaction(new Map());
+    await service(iamConfig, 'key').update({ values: { 'iam.enabled': true } });
+    assert.ok(!on.mock.calls.some(({ arguments: [statement] }) => statement.startsWith('DELETE FROM member_sessions')));
   });
 
   dataWriteIt('serves the deprecated 1.x public body', async () => {

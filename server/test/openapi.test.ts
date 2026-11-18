@@ -41,7 +41,7 @@ function expectedSecurity(key: string) {
   const route = apiRoutes.find((candidate) => candidate.routeKey === key)!;
   if (route.auth === 'member') return route.method === 'GET' ? [{ memberSessionCookie: [] }] : [{ memberSessionCookie: [], csrfHeader: [] }];
   if (route.auth === 'admin') return route.method === 'GET' ? [{ sessionCookie: [] }] : [{ sessionCookie: [], csrfHeader: [] }];
-  if (['POST /api/setup', 'POST /api/admin/login', 'POST /api/admin/setup', 'POST /api/admin/auth/login', 'POST /api/member/login'].includes(key)) return [{ csrfHeader: [] }];
+  if (['POST /api/setup', 'POST /api/admin/login', 'POST /api/admin/setup', 'POST /api/admin/auth/login', 'POST /api/member/login', 'POST /api/member/iam/login'].includes(key)) return [{ csrfHeader: [] }];
   return [];
 }
 

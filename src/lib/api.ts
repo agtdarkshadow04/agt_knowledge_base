@@ -51,10 +51,13 @@ export function isUuidV4(value: unknown): value is string {
 
 export interface SessionUser {
   sub: string;
+  /** The local username, or the Traveller Name of a member who signs in with their AGT account. */
   username: string;
   displayName: string;
   email?: string;
   role: Role;
+  /** How the member signs in: a local password or their AGT account (AGT IAM). */
+  authSource: 'local' | 'agt_iam';
 }
 
 /** The settings the public UI needs, from `GET /api/settings/public`, grouped as in config.yaml. */
@@ -62,6 +65,8 @@ export interface ApplicationSettings {
   site: { title: string; subtitle: string; supportUrl: string };
   articles: { defaultVisibility: ArticleVisibility };
   access: { allowPublicBrowsing: boolean };
+  /** `signIn`: members can sign in with their AGT account. */
+  iam: { signIn: boolean };
 }
 
 export interface CanonicalTag {

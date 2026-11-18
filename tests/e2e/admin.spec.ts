@@ -85,7 +85,9 @@ test.describe('the dashboard', () => {
   test.beforeEach(async ({ page }) => signIn(page));
 
   test('shows the version and renders the generated API document in the API tab (API-14)', async ({ page }) => {
-    await expect(page.getByText('Version 2.0.0')).toBeVisible();
+    // The version the dashboard shows is package.json's (VER-2).
+    const { version } = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
+    await expect(page.getByText(`Version ${version}`)).toBeVisible();
     const documentRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/openapi.json');
     await openTab(page, 'API');
     await documentRequest;
@@ -269,7 +271,9 @@ test.describe('settings (CFG-6, CFG-7)', () => {
       state('logs.serverMaxEntries', 100000, 'default'),
       state('logs.auditRetentionDays', 365, 'default'),
       state('logs.auditMaxEntries', 1000000, 'default'),
+      state('iam.enabled', false, 'default'),
     ],
+    iam: { enabled: false, available: false, missing: ['apiKey'] },
   };
 
   test.beforeEach(async ({ page }) => {

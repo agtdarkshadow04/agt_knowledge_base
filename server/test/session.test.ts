@@ -208,6 +208,8 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
     display_name: 'Traveller',
     email: 'traveller@example.com',
     role: 'Editor',
+    auth_source: 'local',
+    iam_traveller_name: null,
   });
 
   dataWriteIt('signs an active member in by normalized username and stores only the token hash', async () => {
@@ -222,8 +224,11 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
       displayName: 'Traveller',
       email: 'traveller@example.com',
       role: 'Editor',
+      authSource: 'local',
     });
     assertCalledWith(database.query, match.stringContaining('is_active = true'), ['traveller']);
+    // AGT members have no local password and never match a local sign-in.
+    assertCalledWith(database.query, match.stringContaining("member.auth_source = 'local'"), ['traveller']);
     assertCalledWith(database.query, 'DELETE FROM member_sessions WHERE expires_at <= now()');
     assertCalledWith(database.query, 'INSERT INTO member_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)', [
       hashSessionToken(session.token), '10000000-0000-4000-8000-000000000001', session.expiresAt,
@@ -256,8 +261,8 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
   });
 
   dataWriteIt('accepts only an unexpired session of an active member, and revokes it on sign-out', async () => {
-    database.query.mock.mockImplementationOnce(async () => ({ rows: [{ id: 'u1', username: 'traveller', display_name: 'Traveller', email: null, role: 'Moderator' }] }));
-    assert.deepEqual(await members().session('token'), { sub: 'u1', username: 'traveller', displayName: 'Traveller', email: undefined, role: 'Moderator' });
+    database.query.mock.mockImplementationOnce(async () => ({ rows: [{ id: 'u1', username: 'traveller', display_name: 'Traveller', email: null, role: 'Moderator', auth_source: 'local', iam_traveller_name: null }] }));
+    assert.deepEqual(await members().session('token'), { sub: 'u1', username: 'traveller', displayName: 'Traveller', email: undefined, role: 'Moderator', authSource: 'local' });
     const [sql, params] = database.query.mock.calls[0].arguments;
     assert.ok(sql.includes('FROM member_sessions session'));
     assert.ok(sql.includes('session.expires_at > now()'));

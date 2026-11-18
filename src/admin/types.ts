@@ -20,6 +20,10 @@ export interface LocalUser {
   email?: string;
   role: Role;
   isActive: boolean;
+  /** How the member signs in: a local password or their AGT account (AGT IAM). */
+  authSource: 'local' | 'agt_iam';
+  agtTravellerId?: string;
+  iamPermission?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -59,6 +63,7 @@ export interface DashboardSettings {
   'logs.serverMaxEntries': number;
   'logs.auditRetentionDays': number;
   'logs.auditMaxEntries': number;
+  'iam.enabled': boolean;
 }
 
 export type SettingKey = keyof DashboardSettings;
@@ -76,6 +81,8 @@ export interface SettingState<Key extends SettingKey = SettingKey> {
 
 export interface AdminSettingsView {
   states: SettingState[];
+  /** AGT IAM sign-in: whether it is on and works, and what the server still needs. */
+  iam: { enabled: boolean; available: boolean; missing: Array<'baseUrl' | 'appId' | 'apiKey'> };
 }
 
 /** `PUT /api/admin/settings`: `null` resets a key to its default (CFG-8). */

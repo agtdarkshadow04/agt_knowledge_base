@@ -111,6 +111,34 @@ const credentialsSchema = z.object({
   password: z.string().max(1024),
 }).strict();
 
+/**
+ * An AGT IAM credential (issue #30): 1-42 Unicode code points, any character
+ * but control characters (so no CR or LF). Quotes, commas, plus signs and
+ * backslashes are accepted as they are; the value is sent as JSON, unchanged.
+ */
+const iamCredential = (requireVisible: boolean) => z.string()
+  .refine((value) => value.length > 0 && (!requireVisible || /\S/u.test(value)), { message: 'Required.', params: { fieldCode: 'required' } })
+  .refine((value) => [...value].length <= 42, { message: 'At most 42 characters.', params: { fieldCode: 'too_long', max: 42 } })
+  .refine((value) => !/\p{Cc}/u.test(value), { message: 'Control characters such as line breaks are not allowed.', params: { fieldCode: 'invalid_format' } });
+
+const iamCredentialsSchema = z.object({
+  travellerName: iamCredential(true),
+  password: iamCredential(false),
+}).strict();
+
+/**
+ * Replacing an AGT member in the admin panel: the same fields as for a local
+ * member, but the name is the Traveller Name; the server accepts only a change
+ * of `isActive` (`409 managed_by_iam` otherwise).
+ */
+const adminIamUserUpdateSchema = z.object({
+  username: z.string().max(42 * 2),
+  displayName: z.string().max(120),
+  email: z.string().max(254).optional(),
+  role: z.string().max(20),
+  isActive: z.boolean(),
+}).strict();
+
 const adminAccountPasswordSchema = z.object({
   currentPassword: z.string().max(1024),
   password: passwordSchema,
@@ -181,6 +209,15 @@ export function parseAdminSetup(value: unknown) {
 /** Username and password for member or Admin sign-in. */
 export function parseCredentials(value: unknown) {
   return credentialsSchema.parse(value);
+}
+
+/** Traveller Name and password for AGT sign-in. */
+export function parseIamCredentials(value: unknown) {
+  return iamCredentialsSchema.parse(value);
+}
+
+export function parseAdminIamUserUpdate(value: unknown) {
+  return adminIamUserUpdateSchema.parse(value);
 }
 
 export function parseAdminAccountPassword(value: unknown) {

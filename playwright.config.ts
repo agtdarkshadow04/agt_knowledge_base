@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { baseURL, prepare } from './tests/e2e/environment';
+import { baseURL, iamApiKey, iamPort, prepare } from './tests/e2e/environment';
 
 /**
  * Browser tests (TEST-6) against the built server and client
@@ -35,12 +35,23 @@ export default defineConfig({
     { name: 'setup', testMatch: /setup\.spec\.ts/ },
     { name: 'chromium', testIgnore: /setup\.spec\.ts/, dependencies: ['setup'] },
   ],
-  webServer: {
-    command: 'node dist-server/index.mjs',
-    url: `${baseURL}/api/health`,
-    reuseExistingServer: false,
-    env: serverEnv,
-    stdout: 'ignore',
-    stderr: 'pipe',
-  },
+  webServer: [
+    // The fake AGT IAM the app's AGT sign-in calls (iam.spec.ts).
+    {
+      command: 'node tests/e2e/fake-iam.ts',
+      url: `http://127.0.0.1:${iamPort}/health`,
+      reuseExistingServer: false,
+      env: { FAKE_IAM_PORT: String(iamPort), FAKE_IAM_API_KEY: iamApiKey, PATH: process.env.PATH ?? '' },
+      stdout: 'ignore',
+      stderr: 'pipe',
+    },
+    {
+      command: 'node dist-server/index.mjs',
+      url: `${baseURL}/api/health`,
+      reuseExistingServer: false,
+      env: serverEnv,
+      stdout: 'ignore',
+      stderr: 'pipe',
+    },
+  ],
 });

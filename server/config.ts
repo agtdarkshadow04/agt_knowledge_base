@@ -90,6 +90,11 @@ export const EDITABLE_SETTINGS = {
     1_000_000,
     'Most entries the audit log keeps; the oldest failures go first, then the oldest successes.',
   ),
+  'iam.enabled': editable(
+    Type.Boolean(),
+    false,
+    'Whether members can sign in with their AGT account (AGT IAM); needs iam.baseUrl, iam.appId and the API key.',
+  ),
 } satisfies Record<string, EditableSetting>;
 
 export type SettingKey = keyof typeof EDITABLE_SETTINGS;
@@ -192,6 +197,20 @@ export const ConfigSchema = Type.Object({
     serverMaxEntries: fileSetting('logs.serverMaxEntries'),
     auditRetentionDays: fileSetting('logs.auditRetentionDays'),
     auditMaxEntries: fileSetting('logs.auditMaxEntries'),
+  }),
+  /** AGT IAM sign-in for members; the API key is AGT_KNOWLEDGE_BASE_IAM_API_KEY in .env, never a key here (SEC-8). */
+  iam: group({
+    enabled: fileSetting('iam.enabled'),
+    /** https://, or http:// only to a loopback host (checked in readConfig). */
+    baseUrl: optional(Type.String({ maxLength: 2000, pattern: '^https?://[^\\s/?#]+(/[^\\s?#]*)?$' })),
+    appId: optional(Type.String({ minLength: 1, maxLength: 200, pattern: '^\\S+$' })),
+    timeoutSeconds: Type.Integer({ minimum: 1, maximum: 30, default: 10 }),
+    defaultRole: Type.Union([Type.Literal('Editor'), Type.Literal('Moderator')], { default: 'Editor' }),
+    roleMap: Type.Record(
+      Type.String({ minLength: 1, maxLength: 200 }),
+      Type.Union([Type.Literal('Editor'), Type.Literal('Moderator')]),
+      { default: {} },
+    ),
   }),
 }, { additionalProperties: false });
 
@@ -335,12 +354,29 @@ export function readConfig(text: string, options: ConfigOptions = {}): ParsedCon
   const withDefaults = Value.Default(ConfigSchema, structuredClone(tree));
   if (!Value.Check(ConfigSchema, withDefaults)) throw new ConfigError(`Invalid ${source}: ${describeErrors(withDefaults)}`);
   const parsed = withDefaults as ParsedConfig;
+  const iamBaseUrl = parsed.iam.baseUrl;
+  if (iamBaseUrl !== undefined && !allowedIamUrl(iamBaseUrl)) {
+    throw new ConfigError(`Invalid ${source}: iam.baseUrl: must be an https:// URL (http:// only to localhost or a loopback address)`);
+  }
   const config: AppConfig = {
     ...parsed,
     server: { ...parsed.server, host: parsed.server.host ?? options.defaultHost ?? '127.0.0.1' },
     session: { ...parsed.session, secureCookie: parsed.session.secureCookie ?? 'auto' },
   };
   return { config, warnings };
+}
+
+/** IAM credentials travel only over HTTPS, except to a loopback host (development and tests). */
+function allowedIamUrl(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.username || url.password) return false;
+  if (url.protocol === 'https:') return true;
+  return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 }
 
 /** `readConfig()` without the warnings, for tests and tools. */

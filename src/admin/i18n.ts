@@ -114,6 +114,10 @@ const en = {
     deleteTitle: 'Delete “{{name}}”?',
     deleteText: 'The account is deleted permanently and signed out everywhere. This cannot be undone.',
     deleteConfirm: 'Delete account',
+    agtBadge: 'AGT account',
+    travellerId: 'AGT traveller ID',
+    iamPermission: 'AGT permission',
+    agtManaged: 'This member signs in with their AGT account. AGT IAM sets their name and role at every sign-in; here you can only activate, deactivate or delete the account.',
   },
   data: {
     loading: 'Loading the archive data…',
@@ -176,6 +180,11 @@ const en = {
     auditMaxEntries: 'Audit log: most entries',
     save: 'Save settings',
     cancel: 'Cancel',
+    iam: 'AGT sign-in',
+    iamEnabled: 'Let members sign in with their AGT account (AGT IAM)',
+    iamHelp: 'Turning this off signs every AGT member out at once. Their accounts and articles stay.',
+    iamReady: 'AGT IAM is configured.',
+    iamMissing: 'Not configured yet: {{missing}}. AGT sign-in stays unavailable until these are set on the server.',
   },
   backup: {
     tables: {
@@ -459,6 +468,10 @@ const fr: AdminTranslations = {
     deleteTitle: 'Supprimer « {{name}} » ?',
     deleteText: 'Le compte est supprimé définitivement et déconnecté partout. Cette action est irréversible.',
     deleteConfirm: 'Supprimer le compte',
+    agtBadge: 'Compte AGT',
+    travellerId: 'Identifiant de voyageur AGT',
+    iamPermission: 'Autorisation AGT',
+    agtManaged: 'Ce membre se connecte avec son compte AGT. AGT IAM définit son nom et son rôle à chaque connexion ; ici, vous pouvez seulement activer, désactiver ou supprimer le compte.',
   },
   data: {
     loading: 'Chargement des données des archives…',
@@ -521,6 +534,11 @@ const fr: AdminTranslations = {
     auditMaxEntries: 'Journal d\'audit : nombre maximal d\'entrées',
     save: 'Enregistrer les paramètres',
     cancel: 'Annuler',
+    iam: 'Connexion AGT',
+    iamEnabled: 'Autoriser les membres à se connecter avec leur compte AGT (AGT IAM)',
+    iamHelp: 'Désactiver cette option déconnecte immédiatement tous les membres AGT. Leurs comptes et leurs articles sont conservés.',
+    iamReady: 'AGT IAM est configuré.',
+    iamMissing: 'Pas encore configuré : {{missing}}. La connexion AGT reste indisponible tant que ces éléments ne sont pas définis sur le serveur.',
   },
   backup: {
     tables: {
@@ -802,6 +820,10 @@ const de: AdminTranslations = {
     deleteTitle: '„{{name}}“ löschen?',
     deleteText: 'Das Konto wird endgültig gelöscht und überall abgemeldet. Dies kann nicht rückgängig gemacht werden.',
     deleteConfirm: 'Konto löschen',
+    agtBadge: 'AGT-Konto',
+    travellerId: 'AGT-Reisenden-ID',
+    iamPermission: 'AGT-Berechtigung',
+    agtManaged: 'Dieses Mitglied meldet sich mit seinem AGT-Konto an. AGT IAM legt Namen und Rolle bei jeder Anmeldung fest; hier können Sie das Konto nur aktivieren, deaktivieren oder löschen.',
   },
   data: {
     loading: 'Archivdaten werden geladen…',
@@ -864,6 +886,11 @@ const de: AdminTranslations = {
     auditMaxEntries: 'Prüfprotokoll: Höchstzahl an Einträgen',
     save: 'Einstellungen speichern',
     cancel: 'Abbrechen',
+    iam: 'AGT-Anmeldung',
+    iamEnabled: 'Mitgliedern die Anmeldung mit ihrem AGT-Konto erlauben (AGT IAM)',
+    iamHelp: 'Ausschalten meldet alle AGT-Mitglieder sofort ab. Ihre Konten und Artikel bleiben erhalten.',
+    iamReady: 'AGT IAM ist eingerichtet.',
+    iamMissing: 'Noch nicht eingerichtet: {{missing}}. Die AGT-Anmeldung bleibt nicht verfügbar, bis dies auf dem Server gesetzt ist.',
   },
   backup: {
     tables: {
@@ -1145,6 +1172,10 @@ const es: AdminTranslations = {
     deleteTitle: '¿Eliminar a «{{name}}»?',
     deleteText: 'La cuenta se elimina de forma permanente y se cierran todas sus sesiones. No se puede deshacer.',
     deleteConfirm: 'Eliminar cuenta',
+    agtBadge: 'Cuenta AGT',
+    travellerId: 'ID de viajero AGT',
+    iamPermission: 'Permiso AGT',
+    agtManaged: 'Este miembro inicia sesión con su cuenta AGT. AGT IAM define su nombre y su rol en cada inicio de sesión; aquí solo puedes activar, desactivar o eliminar la cuenta.',
   },
   data: {
     loading: 'Cargando los datos del archivo…',
@@ -1207,6 +1238,11 @@ const es: AdminTranslations = {
     auditMaxEntries: 'Registro de auditoría: máximo de entradas',
     save: 'Guardar los ajustes',
     cancel: 'Cancelar',
+    iam: 'Inicio de sesión AGT',
+    iamEnabled: 'Permitir que los miembros inicien sesión con su cuenta AGT (AGT IAM)',
+    iamHelp: 'Al desactivarlo se cierra al instante la sesión de todos los miembros AGT. Sus cuentas y artículos se conservan.',
+    iamReady: 'AGT IAM está configurado.',
+    iamMissing: 'Aún sin configurar: {{missing}}. El inicio de sesión AGT no estará disponible hasta que se definan en el servidor.',
   },
   backup: {
     tables: {
@@ -1488,6 +1524,10 @@ const pt: AdminTranslations = {
     deleteTitle: 'Excluir “{{name}}”?',
     deleteText: 'A conta é excluída permanentemente e desconectada de todos os lugares. Isso não pode ser desfeito.',
     deleteConfirm: 'Excluir conta',
+    agtBadge: 'Conta AGT',
+    travellerId: 'ID de viajante AGT',
+    iamPermission: 'Permissão AGT',
+    agtManaged: 'Este membro entra com a conta AGT. O AGT IAM define o nome e a função a cada login; aqui você só pode ativar, desativar ou excluir a conta.',
   },
   data: {
     loading: 'Carregando os dados do arquivo…',
@@ -1550,6 +1590,11 @@ const pt: AdminTranslations = {
     auditMaxEntries: 'Log de auditoria: máximo de entradas',
     save: 'Salvar configurações',
     cancel: 'Cancelar',
+    iam: 'Login AGT',
+    iamEnabled: 'Permitir que os membros entrem com a conta AGT (AGT IAM)',
+    iamHelp: 'Desativar esta opção encerra na hora a sessão de todos os membros AGT. As contas e os artigos deles são mantidos.',
+    iamReady: 'O AGT IAM está configurado.',
+    iamMissing: 'Ainda não configurado: {{missing}}. O login AGT fica indisponível até que isso seja definido no servidor.',
   },
   backup: {
     tables: {
@@ -1831,6 +1876,10 @@ const it: AdminTranslations = {
     deleteTitle: 'Eliminare «{{name}}»?',
     deleteText: 'L\'account viene eliminato definitivamente e disconnesso ovunque. L\'operazione non può essere annullata.',
     deleteConfirm: 'Elimina account',
+    agtBadge: 'Account AGT',
+    travellerId: 'ID viaggiatore AGT',
+    iamPermission: 'Autorizzazione AGT',
+    agtManaged: 'Questo membro accede con il proprio account AGT. AGT IAM ne stabilisce nome e ruolo a ogni accesso; qui puoi solo attivare, disattivare o eliminare l\'account.',
   },
   data: {
     loading: 'Caricamento dei dati dell\'archivio…',
@@ -1893,6 +1942,11 @@ const it: AdminTranslations = {
     auditMaxEntries: 'Log di audit: numero massimo di voci',
     save: 'Salva impostazioni',
     cancel: 'Annulla',
+    iam: 'Accesso AGT',
+    iamEnabled: 'Consenti ai membri di accedere con il proprio account AGT (AGT IAM)',
+    iamHelp: 'Disattivandolo, tutti i membri AGT vengono disconnessi subito. I loro account e articoli restano.',
+    iamReady: 'AGT IAM è configurato.',
+    iamMissing: 'Non ancora configurato: {{missing}}. L\'accesso AGT resta non disponibile finché questi valori non sono impostati sul server.',
   },
   backup: {
     tables: {
@@ -2174,6 +2228,10 @@ const th: AdminTranslations = {
     deleteTitle: 'ลบ “{{name}}” หรือไม่',
     deleteText: 'บัญชีจะถูกลบอย่างถาวรและออกจากระบบทุกที่ การดำเนินการนี้ไม่สามารถย้อนกลับได้',
     deleteConfirm: 'ลบบัญชี',
+    agtBadge: 'บัญชี AGT',
+    travellerId: 'รหัสนักเดินทาง AGT',
+    iamPermission: 'สิทธิ์ AGT',
+    agtManaged: 'สมาชิกนี้เข้าสู่ระบบด้วยบัญชี AGT โดย AGT IAM จะกำหนดชื่อและบทบาททุกครั้งที่เข้าสู่ระบบ ที่นี่คุณทำได้เพียงเปิดใช้งาน ปิดใช้งาน หรือลบบัญชี',
   },
   data: {
     loading: 'กำลังโหลดข้อมูลคลัง…',
@@ -2236,6 +2294,11 @@ const th: AdminTranslations = {
     auditMaxEntries: 'บันทึกการตรวจสอบ: จำนวนรายการสูงสุด',
     save: 'บันทึกการตั้งค่า',
     cancel: 'ยกเลิก',
+    iam: 'การเข้าสู่ระบบ AGT',
+    iamEnabled: 'อนุญาตให้สมาชิกเข้าสู่ระบบด้วยบัญชี AGT (AGT IAM)',
+    iamHelp: 'การปิดตัวเลือกนี้จะออกจากระบบสมาชิก AGT ทุกคนทันที บัญชีและบทความของพวกเขายังคงอยู่',
+    iamReady: 'ตั้งค่า AGT IAM เรียบร้อยแล้ว',
+    iamMissing: 'ยังไม่ได้ตั้งค่า: {{missing}} การเข้าสู่ระบบ AGT จะยังใช้ไม่ได้จนกว่าจะตั้งค่าเหล่านี้บนเซิร์ฟเวอร์',
   },
   backup: {
     tables: {
@@ -2517,6 +2580,10 @@ const zh: AdminTranslations = {
     deleteTitle: '删除“{{name}}”？',
     deleteText: '该账户将被永久删除并在所有地方退出登录。此操作无法撤销。',
     deleteConfirm: '删除账户',
+    agtBadge: 'AGT 账户',
+    travellerId: 'AGT 旅行者 ID',
+    iamPermission: 'AGT 权限',
+    agtManaged: '该成员使用 AGT 账户登录。每次登录时由 AGT IAM 设置其名称和角色；在这里只能启用、停用或删除该账户。',
   },
   data: {
     loading: '正在加载档案数据…',
@@ -2579,6 +2646,11 @@ const zh: AdminTranslations = {
     auditMaxEntries: '审计日志：最大条目数',
     save: '保存设置',
     cancel: '取消',
+    iam: 'AGT 登录',
+    iamEnabled: '允许成员使用 AGT 账户登录（AGT IAM）',
+    iamHelp: '关闭后，所有 AGT 成员会立即退出登录。他们的账户和文章会保留。',
+    iamReady: 'AGT IAM 已配置。',
+    iamMissing: '尚未配置：{{missing}}。在服务器上设置这些项之前，AGT 登录不可用。',
   },
   backup: {
     tables: {
@@ -2860,6 +2932,10 @@ const hi: AdminTranslations = {
     deleteTitle: '“{{name}}” को हटाएँ?',
     deleteText: 'खाता स्थायी रूप से हटा दिया जाता है और हर जगह से साइन आउट हो जाता है। इसे पूर्ववत नहीं किया जा सकता।',
     deleteConfirm: 'खाता हटाएँ',
+    agtBadge: 'AGT खाता',
+    travellerId: 'AGT यात्री आईडी',
+    iamPermission: 'AGT अनुमति',
+    agtManaged: 'यह सदस्य अपने AGT खाते से साइन इन करता है। हर साइन इन पर AGT IAM इसका नाम और भूमिका तय करता है; यहाँ आप केवल खाते को सक्रिय, निष्क्रिय या हटा सकते हैं।',
   },
   data: {
     loading: 'संग्रह डेटा लोड हो रहा है…',
@@ -2922,6 +2998,11 @@ const hi: AdminTranslations = {
     auditMaxEntries: 'ऑडिट लॉग: अधिकतम प्रविष्टियाँ',
     save: 'सेटिंग्स सहेजें',
     cancel: 'रद्द करें',
+    iam: 'AGT साइन इन',
+    iamEnabled: 'सदस्यों को अपने AGT खाते से साइन इन करने दें (AGT IAM)',
+    iamHelp: 'इसे बंद करने पर सभी AGT सदस्य तुरंत साइन आउट हो जाते हैं। उनके खाते और लेख बने रहते हैं।',
+    iamReady: 'AGT IAM कॉन्फ़िगर है।',
+    iamMissing: 'अभी कॉन्फ़िगर नहीं: {{missing}}। सर्वर पर ये सेट होने तक AGT साइन इन उपलब्ध नहीं रहेगा।',
   },
   backup: {
     tables: {
@@ -3203,6 +3284,10 @@ const ja: AdminTranslations = {
     deleteTitle: '「{{name}}」を削除しますか？',
     deleteText: 'アカウントは完全に削除され、すべての場所からサインアウトされます。この操作は元に戻せません。',
     deleteConfirm: 'アカウントを削除',
+    agtBadge: 'AGT アカウント',
+    travellerId: 'AGT トラベラー ID',
+    iamPermission: 'AGT 権限',
+    agtManaged: 'このメンバーは AGT アカウントでサインインします。名前とロールはサインインのたびに AGT IAM が設定します。ここではアカウントの有効化、無効化、削除のみ行えます。',
   },
   data: {
     loading: 'アーカイブのデータを読み込んでいます…',
@@ -3265,6 +3350,11 @@ const ja: AdminTranslations = {
     auditMaxEntries: '監査ログ: 最大エントリ数',
     save: '設定を保存',
     cancel: 'キャンセル',
+    iam: 'AGT サインイン',
+    iamEnabled: 'メンバーが AGT アカウントでサインインできるようにする（AGT IAM）',
+    iamHelp: '無効にすると、すべての AGT メンバーが直ちにサインアウトされます。アカウントと記事は残ります。',
+    iamReady: 'AGT IAM は設定済みです。',
+    iamMissing: '未設定: {{missing}}。サーバーでこれらを設定するまで AGT サインインは利用できません。',
   },
   backup: {
     tables: {

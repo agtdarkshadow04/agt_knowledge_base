@@ -26,6 +26,11 @@ function draftFrom(view: AdminSettingsView): Draft {
   return draft;
 }
 
+/** Where the operator sets what AGT sign-in is missing: config.yaml keys, or the API key in .env. */
+function iamSettingName(missing: AdminSettingsView['iam']['missing'][number]) {
+  return missing === 'apiKey' ? 'AGT_KNOWLEDGE_BASE_IAM_API_KEY' : `iam.${missing}`;
+}
+
 /** Where a value comes from; a key config.yaml sets is read-only (CFG-9). */
 function SourceNote({ state }: { state: SettingState }) {
   const { a } = useAdminI18n();
@@ -133,6 +138,16 @@ export function SettingsPanel() {
           {a.settings.publicBrowsing}
         </label>
         <SourceNote state={states['access.allowPublicBrowsing']} />
+        <h3>{a.settings.iam}</h3>
+        <label className="check-field">
+          <input type="checkbox" checked={Boolean(draft['iam.enabled'])} disabled={states['iam.enabled'].locked} onChange={(event) => update('iam.enabled', event.target.checked)} />
+          {a.settings.iamEnabled}
+        </label>
+        <SourceNote state={states['iam.enabled']} />
+        <p className="field-help">{a.settings.iamHelp}</p>
+        <p className={view.iam.missing.length ? 'admin-notice' : 'field-help'}>
+          {view.iam.missing.length ? formatTranslation(a.settings.iamMissing, { missing: view.iam.missing.map(iamSettingName).join(', ') }) : a.settings.iamReady}
+        </p>
         <h3>{a.settings.backupLimits}</h3>
         {limitField('backup.maxZipBytes', a.settings.maxZipBytes)}
         {limitField('backup.maxEntries', a.settings.maxEntries)}

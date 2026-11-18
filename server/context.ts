@@ -29,6 +29,8 @@ export interface AppContext {
   readonly operations: Operations;
   /** The log store: the server log and the audit log (§13). */
   readonly logs: LogSink;
+  /** `AGT_KNOWLEDGE_BASE_IAM_API_KEY`, the AGT IAM API access key; null or absent when unset (SEC-8). */
+  readonly iamApiKey?: string | null;
   /** Where `pg_dump` and `pg_restore` are looked up (the PATH the server started with, BAK-6). */
   readonly toolPath: string;
 }

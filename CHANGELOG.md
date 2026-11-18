@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html), as described in §21 of the
 [AGT Web Application Specification](docs/agt-webapp-spec.md).
 
+## [2.1.0] - Unreleased
+
+### Upgrade notes
+
+- **Nothing changes until the Admin turns AGT sign-in on.** The new `iam.enabled` setting is off by default, so the
+  server still makes no outbound request. To offer it, set `iam.baseUrl` and `iam.appId` in `config.yaml` and
+  `AGT_KNOWLEDGE_BASE_IAM_API_KEY` in `.env`, restart, and tick **Settings → AGT sign-in** in the admin panel
+  (README, *AGT sign-in*) ([#30](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/30)).
+- Migration `0020` runs at startup: it adds the `iam.enabled` setting and the AGT columns to `local_users`. Backups
+  from 2.0.0 restore and are migrated as before.
+
+### Added
+
+- **AGT sign-in**: members can sign in with their AGT account (Traveller Name and password), checked by AGT IAM
+  (`POST <iam.baseUrl>/api/v1/auth/verify`), as a second option next to local accounts. The Admin switches it on or
+  off with the boolean dashboard setting `iam.enabled` (default `false`; `config.yaml` wins, CFG-7). The first
+  sign-in creates the member, linked to the AGT traveller ID and without a local password; every sign-in sets the
+  role from the AGT permission tier through `iam.roleMap` and `iam.defaultRole`. Travellers AGT IAM does not
+  authorize for the app (`NOACCESS`, `NONE`) are refused with `403 app_access_denied`. The password is never stored,
+  and sessions end no later than AGT IAM's own token
+  ([#30](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/30)).
+- `POST /api/member/iam/login`, rate-limited with `rateLimits.login` on its own counter (SEC-7), and the error codes
+  `iam_disabled`, `app_access_denied`, `managed_by_iam`, `iam_unavailable` (503), `iam_bad_gateway` (502) and
+  `iam_timeout` (504) (`docs/API.md`, *AGT sign-in*).
+- `config.yaml` keys `iam.enabled`, `iam.baseUrl` (`https://`, or `http://` to a loopback host only), `iam.appId`,
+  `iam.timeoutSeconds`, `iam.defaultRole` and `iam.roleMap`, and the secret `AGT_KNOWLEDGE_BASE_IAM_API_KEY`
+  (CFG-2, SEC-8). The server warns at startup when `iam.enabled` is on but something is missing.
+- The sign-in page offers **Local account** and **AGT account** while AGT sign-in is available; the Settings dialog
+  shows how a member signs in. In the admin panel, the Settings tab has an **AGT sign-in** section that says what the
+  server still needs, and the Users tab marks AGT members, with their traveller ID and permission tier.
+- API fields: `authSource` (`local` or `agt_iam`) on the member session and on member accounts, `agtTravellerId` and
+  `iamPermission` on AGT member accounts, `iam.signIn` in `GET /api/settings/public`, and `iam` (`enabled`,
+  `available`, `missing`) in `/api/admin/settings`.
+
+### Changed
+
+- The server makes outbound requests to AGT IAM, and only there, while AGT sign-in is on: a permanent deviation from
+  the spec's SEC-14, recorded in `AGENTS.md`.
+- AGT IAM owns an AGT member's name, role and password: the Admin can only deactivate or delete them, and other
+  changes answer `409 managed_by_iam`. Switching `iam.enabled` off ends every AGT member's sessions; local members
+  are not affected.
+
 ## [2.0.0] - 2026-11-17
 
 ### Upgrade notes
