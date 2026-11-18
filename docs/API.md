@@ -8,6 +8,7 @@ For contributors: the route table, with each route's TypeBox schemas, is `server
 
 - [Base URL and formats](#base-url-and-formats)
 - [Member authentication](#member-authentication)
+- [AGT sign-in](#agt-sign-in)
 - [Admin authentication](#admin-authentication)
 - [Deprecated paths](#deprecated-paths)
 - [Roles and visibility](#roles-and-visibility)
@@ -30,7 +31,7 @@ Every route has one of three authentication modes, declared once in `server/rout
 
 | Mode | Credential | Routes |
 | --- | --- | --- |
-| Public (`none`) | None | `GET /api/health`, `GET /api/settings/public`, `GET /api/articles`, `GET /api/articles/{id}`, `GET /api/tags`, `GET /api/setup/status`, and sign-in: `POST /api/member/login`, `POST /api/setup`, `POST /api/admin/login` |
+| Public (`none`) | None | `GET /api/health`, `GET /api/settings/public`, `GET /api/articles`, `GET /api/articles/{id}`, `GET /api/tags`, `GET /api/setup/status`, and sign-in: `POST /api/member/login`, `POST /api/member/iam/login`, `POST /api/setup`, `POST /api/admin/login` |
 | Member (`member`) | The `agt_knowledge_base_member_session` cookie | Article and tag writes, revisions, `/api/tags/orphans`, `/api/member/*` |
 | Admin (`admin`) | The `agt_knowledge_base_session` cookie | Every other `/api/admin/*` route |
 
@@ -52,13 +53,31 @@ curl -sS -b member.cookies "$SITE/api/member/articles?search=portal"
 curl -sS -b member.cookies -X POST "$SITE/api/articles" -H 'x-agt-request: 1' -H 'content-type: application/json' -d @article.json
 ```
 
-- `POST /api/member/login` answers `{ sub, username, displayName, email, role }` and sets the member cookie. Wrong credentials and inactive accounts both answer `401 invalid_credentials`. It is rate-limited per client address (`rateLimits.login`, see [Limits and caching](#limits-and-caching)).
+- `POST /api/member/login` answers `{ sub, username, displayName, email, role, authSource }` and sets the member cookie. Wrong credentials and inactive accounts both answer `401 invalid_credentials`. It is rate-limited per client address (`rateLimits.login`, see [Limits and caching](#limits-and-caching)).
 - `GET /api/member/session` returns the signed-in member.
 - `POST /api/member/logout` ends the session on the server and clears the cookie.
 
 A member's sessions all end when the Admin changes the member's role, deactivates the account, sets a new password, or deletes it (AUTH-4).
 
+Only members with a local account (`authSource: "local"`) sign in here; members with an AGT account use [AGT sign-in](#agt-sign-in).
+
 The 1.x bearer-token routes `POST /api/auth/login` and `GET /api/auth/session` were removed in 2.0.0 without a deprecation period: keeping tokens in `localStorage` was the security problem the cookie sessions fix (VER-10's security exception).
+
+## AGT sign-in
+
+While the Admin has switched on `iam.enabled` and the server is configured for AGT IAM (`iam.baseUrl` and `iam.appId` in `config.yaml`, `AGT_KNOWLEDGE_BASE_IAM_API_KEY` in `.env`), members can also sign in with their AGT account. `GET /api/settings/public` then answers `iam.signIn: true`.
+
+```bash
+curl -sS -c member.cookies -X POST "$SITE/api/member/iam/login" \
+  -H 'content-type: application/json' -H 'x-agt-request: 1' \
+  -d '{"travellerName":"Atlas Walker","password":"their AGT password"}'
+```
+
+- `POST /api/member/iam/login` takes `{ travellerName, password }`, each 1–42 characters; any character but control characters (such as line breaks) is accepted, quotes, commas, `+` and `\` included. The server sends them to AGT IAM (`POST <iam.baseUrl>/api/v1/auth/verify`) and never stores the password. It answers like `POST /api/member/login`, with `authSource: "agt_iam"` and the Traveller Name as `username`, and sets the same member cookie.
+- The first sign-in creates the member; later sign-ins find it by its AGT traveller ID. Every sign-in sets the role from the AGT IAM permission tier (`iam.roleMap`, otherwise `iam.defaultRole`); a changed role ends the member's other sessions. The session ends after `session.ttlHours` or when AGT IAM's token expires, whichever is first.
+- Errors: wrong credentials, and a member the Admin deactivated, answer `401 invalid_credentials`; an AGT account without access to this app (tier `NOACCESS` or `NONE`) `403 app_access_denied`; `403 iam_disabled` while `iam.enabled` is off; `503 iam_unavailable` while it is on but not configured, or when AGT IAM refuses the app itself; `429 rate_limited` when AGT IAM rate-limits (with its `Retry-After`) or the route's own limit is reached; `502 iam_bad_gateway` and `504 iam_timeout` when AGT IAM fails or does not answer within `iam.timeoutSeconds`.
+- Switching `iam.enabled` off ends every AGT member's session at once; their accounts and articles stay. While AGT sign-in is unavailable, their session cookies are not accepted.
+- In the admin API, an AGT member's `username` is their Traveller Name, and `agtTravellerId` and `iamPermission` are set. AGT IAM owns their name, role and password: `PUT /api/admin/users/{userId}` accepts only a change of `isActive` (send the other fields unchanged), and changing anything else, or setting a password, answers `409 managed_by_iam`. Deactivating or deleting an AGT member works as for any member.
 
 ## Admin authentication
 
@@ -196,8 +215,11 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 | 403 | `forbidden` | `FORBIDDEN` | The member's role does not allow the action. |
 | 403 | `public_browsing_closed` | `PUBLIC_BROWSING_DISABLED` | Anonymous reads are turned off. |
 | 403 | `csrf` | `CSRF_HEADER_REQUIRED` | The request lacks `x-agt-request: 1`. |
+| 403 | `iam_disabled` | `IAM_DISABLED` | AGT sign-in is switched off (`iam.enabled`). |
+| 403 | `app_access_denied` | `APP_ACCESS_DENIED` | AGT IAM signed the traveller in, but their AGT account is not authorized for this app. |
 | 404 | `not_found` | `NOT_FOUND`, `INVALID_ID`, `INVALID_TAG_ID`, `INVALID_USER_ID`, `TAG_NOT_FOUND`, `USER_NOT_FOUND` | The route, article, revision, tag or member account does not exist, the ID is malformed, or the caller may not see the article. |
 | 409 | `conflict` | `VERSION_CONFLICT`, `TAG_NAME_CONFLICT`, `USER_CONFLICT`, `CONFLICT` | The article changed since it was read, a name, username or email is taken, or a backup or restore is already running or could not start ("The server is busy. Try again."). |
+| 409 | `managed_by_iam` | `MANAGED_BY_IAM` | The member signs in with their AGT account: only AGT IAM changes their name, role or password. |
 | 409 | `defined_in_config` | `SETTING_DEFINED_IN_FILE` | The setting (`params.key`) is defined in `config.yaml` and cannot be changed through the API. |
 | 410 | `setup_complete` | `SETUP_ALREADY_COMPLETED` | An Admin already exists, so setup is closed (even while the setup password is still set). |
 | 413 | `file_too_large` | `BODY_TOO_LARGE` | A backup upload exceeds `backup.maxZipBytes` (`params.maxBytes`). |
@@ -206,6 +228,9 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 | 422 | `archive_rejected` | `INVALID_BACKUP` | The backup archive failed a check (layout, manifest, checksums, limits, the dump's contents, a newer format or schema, or a 1.x backup); the message says why, `params.reason` gives the check as a code clients translate, and nothing changed. |
 | 429 | `rate_limited` | `RATE_LIMITED` | Too many attempts; wait `params.retryAfterSeconds` (also sent as `Retry-After`). |
 | 503 | `setup_password_missing` | `SETUP_DISABLED` | `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` is not set on the server, so setup is unavailable. |
+| 502 | `iam_bad_gateway` | `IAM_BAD_GATEWAY` | AGT IAM could not be reached or answered with an error or something the app does not understand. |
+| 503 | `iam_unavailable` | `IAM_UNAVAILABLE` | AGT sign-in is on but not configured, or AGT IAM refused this app (API key, App ID or capability); the server log says which. |
+| 504 | `iam_timeout` | `IAM_TIMEOUT` | AGT IAM did not answer within `iam.timeoutSeconds`. |
 | 500 | `internal` | `INTERNAL_ERROR` | An unexpected failure, or a restore that failed (the message says whether it was rolled back). |
 | 503 | `maintenance` | `MAINTENANCE` | A restore is running or has failed, or a write waited 30 seconds for a backup; retry after `params.retryAfterSeconds` (also sent as `Retry-After`). |
 
@@ -218,6 +243,7 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 | Route | `config.yaml` key | Default |
 | --- | --- | --- |
 | `POST /api/member/login` | `rateLimits.login` | 10 per 15 minutes |
+| `POST /api/member/iam/login` | `rateLimits.login` | 10 per 15 minutes |
 | `POST /api/admin/login` | `rateLimits.login` (deprecated `rateLimits.adminLogin` overrides it) | 10 per 15 minutes |
 | `POST /api/admin/password` | `rateLimits.login` (deprecated `rateLimits.adminPassword` overrides it) | 10 per 15 minutes |
 | `POST /api/setup` | `rateLimits.setup` | 10 per 15 minutes |
@@ -231,10 +257,10 @@ Client addresses come from `X-Forwarded-For` only when `server.trustProxy` allow
 
 ## Settings
 
-The dashboard settings (CFG-6) are `site.title`, `site.subtitle`, `site.supportUrl`, `articles.defaultVisibility`, `access.allowPublicBrowsing`, `backup.maxZipBytes`, `backup.maxUncompressedBytes`, `backup.maxEntries` and the `logs.*` retention settings; `config.example.yaml` lists their defaults and allowed values. Each resolves to the value in `config.yaml` if the file sets it, otherwise the dashboard value, otherwise the default (CFG-7).
+The dashboard settings (CFG-6) are `site.title`, `site.subtitle`, `site.supportUrl`, `articles.defaultVisibility`, `access.allowPublicBrowsing`, `backup.maxZipBytes`, `backup.maxUncompressedBytes`, `backup.maxEntries`, the `logs.*` retention settings and `iam.enabled` (AGT sign-in, off by default); `config.example.yaml` lists their defaults and allowed values. Each resolves to the value in `config.yaml` if the file sets it, otherwise the dashboard value, otherwise the default (CFG-7).
 
-- `GET /api/settings/public` returns what the public UI needs, grouped as in `config.yaml`: `{ "site": { "title", "subtitle", "supportUrl" }, "articles": { "defaultVisibility" }, "access": { "allowPublicBrowsing" } }`.
-- `GET /api/admin/settings` returns `states`: one `{ key, value, source, locked, default, description }` per setting, where `source` is `config`, `dashboard` or `default` and `locked` means `config.yaml` sets the key.
+- `GET /api/settings/public` returns what the public UI needs, grouped as in `config.yaml`: `{ "site": { "title", "subtitle", "supportUrl" }, "articles": { "defaultVisibility" }, "access": { "allowPublicBrowsing" }, "iam": { "signIn" } }`, where `iam.signIn` is true while AGT sign-in is on and configured.
+- `GET /api/admin/settings` returns `states`: one `{ key, value, source, locked, default, description }` per setting, where `source` is `config`, `dashboard` or `default` and `locked` means `config.yaml` sets the key, and `iam`: `{ enabled, available, missing }`, the AGT sign-in status, where `missing` lists what the server still needs (`baseUrl`, `appId`, `apiKey`).
 - `PUT /api/admin/settings` takes `{ "values": { "<key>": <value> | null } }`. `null` resets a key to its default. The whole request is refused, and nothing changes, if any key is not a dashboard setting (`400 unknown_setting`), is set in `config.yaml` (`409 defined_in_config`, message "`<key>` is defined in the configuration file and cannot be changed from the dashboard.") or has a value its schema does not allow (`400 invalid_setting`). It answers like `GET`.
 
 ```bash

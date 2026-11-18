@@ -269,7 +269,9 @@ test.describe('settings (CFG-6, CFG-7)', () => {
       state('logs.serverMaxEntries', 100000, 'default'),
       state('logs.auditRetentionDays', 365, 'default'),
       state('logs.auditMaxEntries', 1000000, 'default'),
+      state('iam.enabled', false, 'default'),
     ],
+    iam: { enabled: false, available: false, missing: ['apiKey'] },
   };
 
   test.beforeEach(async ({ page }) => {

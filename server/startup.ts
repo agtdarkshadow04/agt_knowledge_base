@@ -89,6 +89,8 @@ export interface Startup {
   setupPassword: string | null;
   /** Deprecated keys and variables in use; the entry point logs each one. */
   warnings: string[];
+  /** AGT_KNOWLEDGE_BASE_IAM_API_KEY, the AGT IAM API access key, or null when unset or empty (SEC-8). */
+  iamApiKey: string | null;
   /** `PATH`, where the backup child processes find `pg_dump` and `pg_restore` (BAK-6). */
   toolPath: string;
 }
@@ -110,6 +112,7 @@ export function loadStartup(env: Env): Startup {
     throw new StartupError(`database.previewName (${previewName}) must not be the app's database: every restore preview empties it. Set a separate database.`);
   }
   const setupPassword = envValue(env, 'SETUP_PASSWORD', warnings, 'AGT_SETUP_PASSWORD') ?? null;
+  const iamApiKey = env[`${envPrefix}IAM_API_KEY`] || null;
   const toolPath = env.PATH || '/usr/local/bin:/usr/bin:/bin';
-  return { configFile, database, setupPassword, warnings, toolPath };
+  return { configFile, database, setupPassword, iamApiKey, warnings, toolPath };
 }

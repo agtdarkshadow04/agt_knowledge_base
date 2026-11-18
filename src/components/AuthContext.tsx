@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { createLocalSession, deleteLocalSession, getLocalSession } from '../lib/memberApi';
+import { createAgtSession, createLocalSession, deleteLocalSession, getLocalSession } from '../lib/memberApi';
 import type { SessionUser } from '../lib/api';
 
 /**
@@ -11,6 +11,8 @@ interface AuthContextValue {
   user: SessionUser | null;
   loading: boolean;
   signIn(username: string, password: string): Promise<void>;
+  /** Signs in with an AGT account through AGT IAM. */
+  signInWithAgt(travellerName: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   refresh(): Promise<void>;
 }
@@ -39,6 +41,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(await createLocalSession(username, password));
   }, []);
 
+  const signInWithAgt = useCallback(async (travellerName: string, password: string) => {
+    setUser(await createAgtSession(travellerName, password));
+  }, []);
+
   const signOut = useCallback(async () => {
     try {
       await deleteLocalSession();
@@ -48,8 +54,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, signIn, signOut, refresh }),
-    [loading, refresh, signIn, signOut, user],
+    () => ({ user, loading, signIn, signInWithAgt, signOut, refresh }),
+    [loading, refresh, signIn, signInWithAgt, signOut, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

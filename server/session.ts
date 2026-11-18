@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { AppContext } from './context.js';
 import { withTransaction } from './db.js';
 import * as repo from './repository/sessions.js';
@@ -7,6 +7,8 @@ import { fieldError } from '../src/lib/errors.js';
 import { HttpError } from './http.js';
 import { dummyPasswordHash, hashPassword, secretsEqual, verifyPassword } from './passwords.js';
 import type { AdminIdentity } from './routes.js';
+import { iamStatus, iamUnavailable, invalidIamCredentials, type IamTraveller, type IamVerifier } from './iam.js';
+import { SettingsService } from './settings-service.js';
 
 /**
  * Sign-in, setup and cookie sessions (AUTH-3..AUTH-8). The installation Admin
@@ -41,10 +43,13 @@ export type AdminSessionResult = SessionResult<AdminIdentity>;
 /** A signed-in member, as the session lookup returns it. */
 export interface MemberUser {
   sub: string;
+  /** The local username, or the Traveller Name of a member who signs in through AGT IAM. */
   username: string;
   displayName: string;
   email?: string;
   role: Role;
+  /** How the member signs in: a local password or their AGT account. */
+  authSource: 'local' | 'agt_iam';
 }
 
 export function hashSessionToken(token: string) {
@@ -52,9 +57,10 @@ export function hashSessionToken(token: string) {
 }
 
 /** A new session: 32 random bytes, base64url, stored only as its SHA-256 (AUTH-8). */
-async function createSession(sql: repo.Sql, ttlHours: number, memberId?: string) {
+async function createSession(sql: repo.Sql, ttlHours: number, memberId?: string, maxSeconds?: number) {
   const token = randomBytes(32).toString('base64url');
-  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+  const ttlMilliseconds = Math.min(ttlHours * 60 * 60 * 1000, maxSeconds === undefined ? Infinity : maxSeconds * 1000);
+  const expiresAt = new Date(Date.now() + ttlMilliseconds);
   await repo.insertSession(sql, hashSessionToken(token), expiresAt, memberId);
   return { token, expiresAt };
 }
@@ -200,20 +206,31 @@ export class AdminAuthService {
 function toMember(row: Omit<repo.MemberRow, 'password_hash'>): MemberUser {
   return {
     sub: row.id,
-    username: row.username,
+    username: row.username ?? row.iam_traveller_name ?? '',
     displayName: row.display_name,
     email: row.email ?? undefined,
     role: roles.includes(row.role) ? row.role : 'Editor',
+    authSource: row.auth_source,
   };
 }
 
 /** Member sign-in and cookie sessions (AUTH-1 deviation: the AUTH-2/3/8 rules applied to members). */
 export class MemberAuthService {
+  private readonly settings: SettingsService;
+
   constructor(
-    private readonly context: Pick<AppContext, 'config' | 'db'>,
+    private readonly context: Pick<AppContext, 'config' | 'db' | 'iamApiKey'>,
     private readonly passwords: PasswordHasher = scryptHasher,
     private readonly log: AuthLog = silentLog,
-  ) {}
+    /** AGT IAM; `IamClient` in the app, a fake in tests. Without it AGT sign-in is unavailable. */
+    private readonly iam?: IamVerifier,
+  ) {
+    this.settings = new SettingsService(context);
+  }
+
+  private async iamAvailability() {
+    return iamStatus(this.context, await this.settings.values());
+  }
 
   /** Signs a member in by username or email; inactive members cannot (`401 invalid_credentials`). */
   async login(identifier: string, password: string): Promise<SessionResult<MemberUser>> {
@@ -236,11 +253,50 @@ export class MemberAuthService {
     return { ...session, identity: toMember(user) };
   }
 
-  /** The active member for a session token, or null. */
+  /**
+   * Step 1 of an AGT sign-in, outside any data write so a slow IAM never holds
+   * the write lock (BAK-8): checks that AGT sign-in is on and configured, then
+   * asks IAM. The password goes only to IAM and is never stored.
+   */
+  async verifyIam(travellerName: string, password: string): Promise<IamTraveller> {
+    const status = await this.iamAvailability();
+    if (!status.enabled) throw new HttpError(403, 'iam_disabled', 'AGT sign-in is turned off.');
+    if (!status.available || !this.iam) throw iamUnavailable();
+    const traveller = await this.iam.verify(travellerName, password);
+    return { ...traveller, travellerName: traveller.travellerName || travellerName };
+  }
+
+  /**
+   * Step 2, inside the data write: creates the member on a traveller's first
+   * AGT sign-in, or refreshes its name, permission and role (a role change ends
+   * its other sessions, AUTH-4), then starts a session that ends no later than
+   * IAM's own token. A member the Admin deactivated cannot sign in.
+   */
+  async completeIamLogin(traveller: IamTraveller): Promise<SessionResult<MemberUser>> {
+    if (!(await this.iamAvailability()).available) throw new HttpError(403, 'iam_disabled', 'AGT sign-in is turned off.');
+    return withTransaction(await this.context.db.pool(), async (client) => {
+      const input = { travellerId: traveller.travellerId, travellerName: traveller.travellerName, permission: traveller.permission, role: traveller.role };
+      const existing = await repo.iamMemberForUpdate(client, traveller.travellerId);
+      if (existing && !existing.is_active) invalidIamCredentials();
+      let member: Omit<repo.MemberRow, 'password_hash'>;
+      if (existing) {
+        member = await repo.updateIamMember(client, existing.id, input);
+        if (existing.role !== member.role) await repo.deleteMemberSessions(client, existing.id);
+      } else {
+        member = await repo.insertIamMember(client, randomUUID(), input);
+      }
+      const session = await createSession(client, this.context.config.session.ttlHours, member.id, traveller.expiresInSeconds);
+      return { ...session, identity: toMember(member) };
+    });
+  }
+
+  /** The active member for a session token, or null; an AGT member's session counts only while AGT sign-in is available. */
   async session(token: string | undefined): Promise<MemberUser | null> {
     if (!plausibleToken(token)) return null;
     const member = await repo.memberForSession(await this.context.db.pool(), hashSessionToken(token));
-    return member ? toMember(member) : null;
+    if (!member) return null;
+    if (member.auth_source === 'agt_iam' && !(await this.iamAvailability()).available) return null;
+    return toMember(member);
   }
 
   async logout(token: string | undefined) {

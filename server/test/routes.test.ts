@@ -10,6 +10,7 @@ import { assertMatches, fakeDatabase, testContext } from './helpers.js';
 const serverRoutes = [
   'GET /api/health',
   'POST /api/member/login',
+  'POST /api/member/iam/login',
   'POST /api/member/logout',
   'GET /api/member/session',
   'GET /api/setup/status',
@@ -142,9 +143,11 @@ describe('route table', () => {
     }
   });
 
-  it('rate-limits member sign-in, Admin sign-in, setup, Admin password changes and backup uploads', () => {
+  it('rate-limits member sign-in, AGT sign-in, Admin sign-in, setup, Admin password changes and backup uploads', () => {
     const rateLimit = (key: string) => apiRoutes.find((entry) => entry.routeKey === key)?.rateLimit;
     assert.equal(rateLimit('POST /api/member/login'), 'login');
+    // AGT sign-in has its own counter (SEC-7), with the rateLimits.login limits.
+    assert.equal(rateLimit('POST /api/member/iam/login'), 'iamLogin');
     assert.equal(rateLimit('POST /api/admin/login'), 'adminLogin');
     assert.equal(rateLimit('POST /api/setup'), 'setup');
     assert.equal(rateLimit('POST /api/admin/password'), 'adminPassword');
@@ -161,6 +164,7 @@ describe('route table', () => {
       'POST /api/admin/password',
       'POST /api/admin/restore',
       'POST /api/admin/setup',
+      'POST /api/member/iam/login',
       'POST /api/member/login',
       'POST /api/setup',
       'PUT /api/admin/auth/password',

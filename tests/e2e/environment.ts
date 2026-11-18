@@ -15,6 +15,9 @@ export const port = 4181;
 export const baseURL = `http://127.0.0.1:${port}`;
 export const setupPassword = 'E2e-setup-password-1!';
 export const database = 'agt_knowledge_base_e2e';
+/** The fake AGT IAM (`fake-iam.ts`) and the API key the app sends it. */
+export const iamPort = 4182;
+export const iamApiKey = 'e2e-iam-api-key';
 
 export function prepare(env: NodeJS.ProcessEnv) {
   const url = env.AGT_KNOWLEDGE_BASE_TEST_DATABASE_URL;
@@ -56,6 +59,12 @@ export function prepare(env: NodeJS.ProcessEnv) {
     '    max: 1000',
     '  setup:',
     '    max: 1000',
+    // AGT sign-in against the fake IAM; iam.enabled stays a dashboard setting, off until iam.spec.ts turns it on.
+    'iam:',
+    `  baseUrl: http://127.0.0.1:${iamPort}`,
+    '  appId: e2e-app',
+    '  roleMap:',
+    '    Moderator: Moderator',
     '',
   ].join('\n'));
   return {
@@ -63,6 +72,7 @@ export function prepare(env: NodeJS.ProcessEnv) {
     AGT_KNOWLEDGE_BASE_CONFIG_FILE: configFile,
     AGT_KNOWLEDGE_BASE_DB_PASSWORD: decodeURIComponent(parsed.password),
     AGT_KNOWLEDGE_BASE_SETUP_PASSWORD: setupPassword,
+    AGT_KNOWLEDGE_BASE_IAM_API_KEY: iamApiKey,
     AGT_KNOWLEDGE_BASE_STATIC_DIR: 'dist',
     PATH: env.PATH ?? '',
   };

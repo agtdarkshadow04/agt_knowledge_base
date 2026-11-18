@@ -2,7 +2,7 @@
 
 > **AI Disclosure:** This software was created using generative AI.
 
-AGT Knowledge Base is the knowledge base of the Alliance of Galactic Travellers community: members write, review and organize articles, and visitors browse the public ones. Readers get search, tags, filters, safe Markdown with linked tables of contents, and downloads; Editors write articles and compare revisions; Moderators also protect, pin, verify, restore and delete articles and manage tags; and a single installation Admin manages member accounts, settings, backups and logs from a separate panel at `/admin`. It is fully self-hosted: it uses no cloud service and no CDN, the server makes no outbound requests, and the browser loads everything from your server except images that authors link in articles. All data lives on your machine, in its PostgreSQL 18 database (articles, revisions, tags, accounts, settings and the logs) and in the app's data directory (pre-restore backups), with the settings in `config.yaml` and the secrets in `.env`.
+AGT Knowledge Base is the knowledge base of the Alliance of Galactic Travellers community: members write, review and organize articles, and visitors browse the public ones. Readers get search, tags, filters, safe Markdown with linked tables of contents, and downloads; Editors write articles and compare revisions; Moderators also protect, pin, verify, restore and delete articles and manage tags; and a single installation Admin manages member accounts, settings, backups and logs from a separate panel at `/admin`. It is fully self-hosted: it uses no cloud service and no CDN, the server makes no outbound requests unless the Admin turns on [AGT sign-in](#agt-sign-in) (then only to the configured AGT IAM service), and the browser loads everything from your server except images that authors link in articles. All data lives on your machine, in its PostgreSQL 18 database (articles, revisions, tags, accounts, settings and the logs) and in the app's data directory (pre-restore backups), with the settings in `config.yaml` and the secrets in `.env`.
 
 ## Contents
 
@@ -17,6 +17,7 @@ AGT Knowledge Base is the knowledge base of the Alliance of Galactic Travellers 
 - [Admin dashboard](#admin-dashboard)
 - [Architecture](#architecture)
 - [Roles and editing rules](#roles-and-editing-rules)
+- [AGT sign-in](#agt-sign-in)
 - [Using the knowledge base](#using-the-knowledge-base)
 - [API](#api)
 - [Backup & restore](#backup--restore)
@@ -279,10 +280,14 @@ Compose mounts `config.yaml` read-only at `/app/config.yaml`, and the local inst
 | `database.previewName` | `agt_knowledge_base_preview` | The restore preview database, owned by the app role; every preview empties it |
 | `session.ttlHours` | `12` | Sign-in lifetime (1–168 hours), for the Admin and for members |
 | `session.secureCookie` | `auto` | `Secure` attribute of the session cookies: `auto` (when a trusted proxy reports HTTPS), `true` or `false` |
-| `rateLimits.login` | 10 per 15 minutes | Member sign-in, Admin sign-in and Admin password changes, each counted separately |
+| `rateLimits.login` | 10 per 15 minutes | Member sign-in, AGT sign-in, Admin sign-in and Admin password changes, each counted separately |
 | `rateLimits.setup` | 10 per 15 minutes | First-run setup |
 | `rateLimits.adminUploads` | 120 per 15 minutes | Backup restore uploads |
 | `backup.preRestore.keep` | unset (keep all) | How many pre-restore backups to keep |
+| `iam.baseUrl` | unset | The AGT IAM address for [AGT sign-in](#agt-sign-in): `https://`, or `http://` only to `localhost` or a loopback address |
+| `iam.appId` | unset | This app's registered App ID in AGT IAM |
+| `iam.timeoutSeconds` | `10` | Seconds to wait for AGT IAM before an AGT sign-in fails (1–30) |
+| `iam.defaultRole`, `iam.roleMap` | `Editor`, `{}` | The role an AGT member gets from their AGT permission tier: `roleMap` maps a tier to `Editor` or `Moderator`, and `defaultRole` covers the tiers it does not list |
 
 ### Dashboard-editable keys
 
@@ -297,6 +302,7 @@ Compose mounts `config.yaml` read-only at `/app/config.yaml`, and the local inst
 | `backup.maxEntries` | `10000` (1 to 100000) | Most entries in an uploaded archive |
 | `logs.serverRetentionDays`, `logs.serverMaxEntries` | `30`, `100000` | How long and how many server log entries are kept (1–3650 days, 1000–10000000 entries) |
 | `logs.auditRetentionDays`, `logs.auditMaxEntries` | `365`, `1000000` | How long and how many audit log entries are kept (30–3650 days, 10000–10000000 entries) |
+| `iam.enabled` | `false` | Whether members can sign in with their AGT account ([AGT sign-in](#agt-sign-in)). Switching it off signs every AGT member out |
 
 **Deprecated keys** (still accepted until 3.0.0; the server logs a warning for each one it finds): `site.applicationName` and `site.applicationSubtitle` (now `site.title` and `site.subtitle`), `backup.maxBytes` (now `backup.maxZipBytes`), `adminSession.secureCookie` (now `session.secureCookie`), `adminSession.ttlHours` (the Admin lifetime, overriding `session.ttlHours`), `rateLimits.adminLogin` and `rateLimits.adminPassword` (overriding `rateLimits.login` for those routes), `server.frontendOrigin` (when `https://`, makes the session cookies `Secure` under `auto`), and a number of proxy hops as `server.trustProxy` (the 1.x setting for the bundled Nginx). A deprecated key next to its new name stops the server.
 
@@ -308,6 +314,7 @@ Environment variables are only for secrets and for values the launcher sets (CFG
 | --- | --- |
 | `AGT_KNOWLEDGE_BASE_SETUP_PASSWORD` | One-time password for creating the Admin at `/admin`; ignored once the Admin exists. Remove it after setup |
 | `AGT_KNOWLEDGE_BASE_DB_PASSWORD` | Password of the `agt_knowledge_base` database role (never a superuser) |
+| `AGT_KNOWLEDGE_BASE_IAM_API_KEY` | Optional: this app's AGT IAM API access key, for [AGT sign-in](#agt-sign-in). Sent only to `iam.baseUrl`, never logged or shown |
 
 Set by the Dockerfile or Compose file, or for development: `AGT_KNOWLEDGE_BASE_CONFIG_FILE` (path of `config.yaml`), `AGT_KNOWLEDGE_BASE_SERVER_HOST` (listen address when `server.host` is not set; the image sets `0.0.0.0`), `AGT_KNOWLEDGE_BASE_DATABASE_HOST` (database host when `database.host` is not set; Compose sets `db`), `AGT_KNOWLEDGE_BASE_STATIC_DIR` (path of the built client), and `NODE_ENV`.
 
@@ -321,9 +328,9 @@ With Docker Compose, `.env.db` holds `POSTGRES_PASSWORD`, the database superuser
 
 The admin panel is a separate page reachable only by visiting `/admin` directly; nothing in the knowledge base links to it, and its code is not part of the member app. It has its own sign-in and session, independent of member sign-in: signing in or out of one never affects the other. Its gear button sets the language, time zone and text size, as in the knowledge base. Its tabs:
 
-- **Users** creates, updates, deactivates, resets passwords for, and deletes member accounts (Editor or Moderator).
+- **Users** creates, updates, deactivates, resets passwords for, and deletes member accounts (Editor or Moderator). Members who sign in with their AGT account are marked **AGT account**, with their AGT traveller ID and permission tier; AGT IAM sets their name and role, so they can only be deactivated or deleted here.
 - **Data** shows archive statistics and the inventory of every article at every visibility level.
-- **Settings** edits the [dashboard-editable keys](#dashboard-editable-keys). Settings defined in `config.yaml` are shown read-only, marked "Set in the configuration file".
+- **Settings** edits the [dashboard-editable keys](#dashboard-editable-keys). Settings defined in `config.yaml` are shown read-only, marked "Set in the configuration file". The **AGT sign-in** section switches [AGT sign-in](#agt-sign-in) on or off and says what the server still needs for it.
 - **Backup & restore** downloads and restores backups (see [Backup & restore](#backup--restore)).
 - **Server log** shows, filters, searches, exports and clears the server log (see [Logs](#logs)). It shows a badge while there are unseen warnings or errors.
 - **Audit log** shows, filters, searches and exports the audit log.
@@ -360,6 +367,28 @@ Editors and Moderators are member accounts that sign in from the sign-in button 
 AGT-standard visibility is stored as numeric levels: `0` Public (`#2aff00`), `1` Private (`#00f4ff`), `2` Restricted (`#f198e2`), `3` Top Secret (`#fd0303`), `4` SLT Restricted (`#ff9300`), and `5` SCC Restricted (`#3287f0`). Public visitors and Editors can read level 0, Editors can also read level 1, and levels 2–5 are Moderator-only. The legacy text values Public, Internal, and Admin remain supported with their existing access rules and colors; legacy `Admin` articles are shown as "Admin (legacy)" and are visible to Moderators.
 
 Updates, restores, and deletes carry the article version. PostgreSQL applies the mutation only when that version still matches, returning HTTP `409` instead of silently overwriting a concurrent edit. Restoration creates a new latest revision rather than rewriting history.
+
+## AGT sign-in
+
+Besides their local account, members can sign in with their AGT account (Traveller Name and password), checked by the AGT Identity & Authorization Hub (AGT IAM). It is off by default; the Admin switches it on with the `iam.enabled` setting, a true/false value in the **Settings** tab (or in `config.yaml`, which then wins).
+
+To set it up:
+
+1. Register the Knowledge Base as an app in AGT IAM, with the `auth:verify` capability, and note its App ID and API access key.
+2. In `config.yaml`, set `iam.baseUrl` (for example `https://iam.nms-agt.com`) and `iam.appId`, and map the AGT permission tiers to roles with `iam.roleMap` (for example `{ Moderator: Moderator }`; other authorized tiers get `iam.defaultRole`, `Editor` by default).
+3. In `.env`, set `AGT_KNOWLEDGE_BASE_IAM_API_KEY` to the API access key, then restart.
+4. In the admin panel, **Settings** → **AGT sign-in**: tick "Let members sign in with their AGT account" and save. The section says "AGT IAM is configured" once nothing is missing.
+
+The sign-in page then offers **Local account** and **AGT account**. What happens at an AGT sign-in:
+
+- The server sends the Traveller Name, the password and the App ID to `POST <iam.baseUrl>/api/v1/auth/verify` with the API key, and nowhere else. It never stores, caches or logs the password, and never retries. This is the only outbound request the server makes (a deviation from the AGT spec's SEC-14, recorded in `AGENTS.md`).
+- A traveller AGT IAM does not authorize for this app (tier `NOACCESS` or `NONE`) is refused with a message saying so; nothing is created.
+- The first sign-in creates a member account linked to the AGT traveller ID, without a local password; the Traveller Name becomes its name. Every sign-in sets its role from the permission tier again; a changed role signs its other sessions out.
+- The session lasts `session.ttlHours`, or until AGT IAM's own token expires if that is sooner. Then the member signs in again.
+- The Admin can deactivate or delete an AGT member like any member, but not rename it, change its role or set a password: AGT IAM owns those.
+- Switching `iam.enabled` off signs every AGT member out at once. Their accounts and articles stay, and they can sign in again once it is back on. Local accounts are never affected.
+
+Traveller Names and passwords may be up to 42 characters and may contain any character except control characters such as line breaks; quotes, commas, `+` and `\` are sent exactly as typed. If AGT IAM refuses the app itself (wrong API key or App ID, an inactive app, a missing capability), members see "AGT sign-in is unavailable" and the server log says why, without the key.
 
 ## Using the knowledge base
 
@@ -444,7 +473,7 @@ The server keeps two logs in the `logs` schema of its database, shown in the adm
 
 - Articles are Markdown, written in the rich editor or as plain Markdown. The API rejects raw HTML, JSX tags, and MDX `import` / `export` statements. MDXEditor is used as a Markdown authoring surface only; content is never executed as MDX.
 - Article writes are validated with Zod and capped at 250,000 characters and 12 tags.
-- Markdown is rendered by one component, `src/components/Markdown.tsx` (`react-markdown` with GFM): raw HTML is shown as text, only `http:`/`https:` and same-site links and images are kept, external links open in a new tab with `rel="noopener noreferrer"`, and external images load lazily without a referrer. Images that authors link in Markdown are loaded by visitors' browsers directly from their hosts; the server itself never makes outbound requests.
+- Markdown is rendered by one component, `src/components/Markdown.tsx` (`react-markdown` with GFM): raw HTML is shown as text, only `http:`/`https:` and same-site links and images are kept, external links open in a new tab with `rel="noopener noreferrer"`, and external images load lazily without a referrer. Images that authors link in Markdown are loaded by visitors' browsers directly from their hosts; the server itself makes no outbound requests, except to AGT IAM for [AGT sign-in](#agt-sign-in) while the Admin has it switched on.
 - Every response carries a strict Content-Security-Policy (no inline scripts or styles, no external hosts except images in Markdown), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` and `Cross-Origin-Opener-Policy`, and API and HTML responses are never cached. The API sends no CORS headers.
 - SQL values are parameterized; requested sort fields are mapped through a fixed allowlist. PostgreSQL timestamps are `timestamptz` values generated by the server and serialized as UTC ISO 8601.
 - Passwords are hashed with scrypt (`N = 2^15, r = 8, p = 1`, stored as `scrypt$N$r$p$salt$hash`); a stored hash in any other format can never verify. Member and Admin sessions use random tokens stored only as SHA-256 hashes, in `HttpOnly`, `SameSite=Strict` cookies, with a CSRF header required on every write. Sign-in, setup, Admin password changes and backup uploads are rate-limited by the API.

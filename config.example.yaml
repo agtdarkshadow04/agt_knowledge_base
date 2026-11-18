@@ -7,11 +7,13 @@
 # defaults". The server never writes this file.
 #
 # Every key is shown commented out with its default. Secrets never go here:
-# AGT_KNOWLEDGE_BASE_DB_PASSWORD, AGT_KNOWLEDGE_BASE_SETUP_PASSWORD and
-# LOCAL_AUTH_SECRET belong in .env, which is never included in backups.
+# AGT_KNOWLEDGE_BASE_DB_PASSWORD, AGT_KNOWLEDGE_BASE_SETUP_PASSWORD,
+# AGT_KNOWLEDGE_BASE_IAM_API_KEY and LOCAL_AUTH_SECRET belong in .env, which is
+# never included in backups.
 #
-# The keys under site, articles, access and backup (except backup.preRestore)
-# can also be changed in the admin dashboard's Settings tab. When this file
+# The keys under site, articles, access and backup (except backup.preRestore),
+# the logs retention keys and iam.enabled can also be changed in the admin
+# dashboard's Settings tab. When this file
 # sets one, the file wins: the dashboard shows it read-only.
 
 # Config-file-only keys
@@ -58,8 +60,8 @@ session:
   # secureCookie: auto
 
 rateLimits:
-  # Attempts per client address per window. Member sign-in, Admin sign-in and
-  # the Admin password change each count separately against login.
+  # Attempts per client address per window. Member sign-in, AGT sign-in, Admin
+  # sign-in and the Admin password change each count separately against login.
   # login:
   #   max: 10
   #   windowMinutes: 15
@@ -110,3 +112,25 @@ logs:
   # auditRetentionDays: 365
   # Most entries the audit log keeps (10000 to 10000000); failures go first.
   # auditMaxEntries: 1000000
+
+iam:
+  # AGT sign-in: members may also sign in with their AGT account, checked by
+  # AGT IAM (POST <baseUrl>/api/v1/auth/verify). While it is on, the server
+  # sends the Traveller Name and password there, and nowhere else; it never
+  # stores the password. The API key is AGT_KNOWLEDGE_BASE_IAM_API_KEY in .env.
+  # Whether members can sign in with their AGT account (dashboard setting).
+  # Switching it off signs every AGT member out.
+  # enabled: false
+  # Config file only, like the keys below: the AGT IAM address. https:// only
+  # (http:// only to localhost, for development). Unset by default.
+  # baseUrl: https://iam.nms-agt.com
+  # This app's registered App ID in AGT IAM. Unset by default.
+  # appId: app01
+  # Seconds to wait for AGT IAM before a sign-in fails (1 to 30).
+  # timeoutSeconds: 10
+  # The role of a member whose AGT permission tier roleMap does not list:
+  # Editor or Moderator. Tiers NOACCESS and NONE can never sign in.
+  # defaultRole: Editor
+  # AGT permission tier (applicationAuthorization.permissionAssigned) to role,
+  # applied at every sign-in, for example { Moderator: Moderator }.
+  # roleMap: {}

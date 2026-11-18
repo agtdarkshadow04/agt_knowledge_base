@@ -10,12 +10,16 @@ import type { ArticleVisibility } from './domain.js';
 import { withTransaction } from './db.js';
 import { HttpError } from './http.js';
 import { readStoredSettings, writeSettings } from './repository/settings.js';
+import { deleteIamMemberSessions } from './repository/sessions.js';
+import { iamStatus, type IamStatus } from './iam.js';
 
 /** The settings the public UI needs, from `GET /api/settings/public` (CFG-10). */
 export interface PublicSettings {
   site: { title: string; subtitle: string; supportUrl: string };
   articles: { defaultVisibility: ArticleVisibility };
   access: { allowPublicBrowsing: boolean };
+  /** `signIn`: members can sign in with their AGT account (on and configured). */
+  iam: { signIn: boolean };
 }
 
 /** The 1.x names of the dashboard settings, used by the deprecated request and response fields until 3.0.0. */
@@ -35,6 +39,8 @@ const legacyNames = Object.keys(legacySettingNames) as LegacySettingName[];
 /** `GET`/`PUT /api/admin/settings`: `states` (CFG-7), plus the deprecated 1.x `version` and `settings`. */
 export interface AdminSettingsView {
   states: SettingState[];
+  /** Whether AGT IAM sign-in is on, and what it is missing. */
+  iam: IamStatus;
   /** Deprecated: always 1; settings no longer carry a version. */
   version: number;
   /** Deprecated: the states by 1.x name, with `source: 'file'` for `config`. */
@@ -53,13 +59,13 @@ export interface LegacyPublicSettings {
   version: number;
 }
 
-function toView(states: SettingState[]): AdminSettingsView {
+function toView(states: SettingState[], iam: IamStatus): AdminSettingsView {
   const byKey = new Map(states.map((state) => [state.key, state]));
   const settings = Object.fromEntries(legacyNames.map((name) => {
     const state = byKey.get(legacySettingNames[name])!;
     return [name, { key: state.key, value: state.value, source: state.source === 'config' ? 'file' : state.source }];
   })) as AdminSettingsView['settings'];
-  return { states, version: 1, settings };
+  return { states, iam, version: 1, settings };
 }
 
 /** Turns a deprecated 1.x settings write into `values`. */
@@ -78,7 +84,7 @@ function legacyValues(input: SettingsWrite): Record<string, unknown> {
 }
 
 export class SettingsService {
-  constructor(private readonly context: Pick<AppContext, 'config' | 'db'>) {}
+  constructor(private readonly context: Pick<AppContext, 'config' | 'db' | 'iamApiKey'>) {}
 
   async states(): Promise<SettingState[]> {
     return settingStates(this.context.config, await readStoredSettings(await this.context.db.pool()));
@@ -90,7 +96,12 @@ export class SettingsService {
   }
 
   async getAdminView(): Promise<AdminSettingsView> {
-    return toView(await this.states());
+    const states = await this.states();
+    return toView(states, this.iam(states));
+  }
+
+  private iam(states: SettingState[]) {
+    return iamStatus(this.context, { 'iam.enabled': states.find((state) => state.key === 'iam.enabled')!.value as boolean });
   }
 
   async getPublic(): Promise<PublicSettings> {
@@ -99,6 +110,7 @@ export class SettingsService {
       site: { title: values['site.title'], subtitle: values['site.subtitle'], supportUrl: values['site.supportUrl'] },
       articles: { defaultVisibility: values['articles.defaultVisibility'] },
       access: { allowPublicBrowsing: values['access.allowPublicBrowsing'] },
+      iam: { signIn: iamStatus(this.context, values).available },
     };
   }
 
@@ -152,13 +164,17 @@ export class SettingsService {
     const { before, stored } = await withTransaction(await this.context.db.pool(), async (client) => {
       const previous = await readStoredSettings(client);
       await writeSettings(client, values);
-      return { before: previous, stored: await readStoredSettings(client) };
+      const current = await readStoredSettings(client);
+      // Switching AGT sign-in off ends every AGT member's session at once (AUTH-4).
+      if (!settingValues(this.context.config, current)['iam.enabled']) await deleteIamMemberSessions(client);
+      return { before: previous, stored: current };
     });
     const oldValues = settingValues(this.context.config, before);
     const newValues = settingValues(this.context.config, stored);
     const changes = Object.fromEntries((Object.keys(newValues) as SettingKey[])
       .filter((key) => JSON.stringify(oldValues[key]) !== JSON.stringify(newValues[key]))
       .map((key) => [key, { old: oldValues[key], new: newValues[key] }]));
-    return { view: toView(settingStates(this.context.config, stored)), changes };
+    const states = settingStates(this.context.config, stored);
+    return { view: toView(states, this.iam(states)), changes };
   }
 }

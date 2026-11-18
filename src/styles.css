@@ -205,7 +205,10 @@ input[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: #ff6c6
 .auth-page { display: grid; min-height: calc(100vh - 5rem); grid-template-columns: minmax(0, 1fr); place-items: center; }
 .auth-card { width: min(100%, 30rem); min-width: 0; overflow-wrap: break-word; hyphens: auto; padding: clamp(1.5rem, 5vw, 3rem); border: 1px solid var(--line); border-radius: 1rem; background: #121212; box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.45); }
 .auth-card h1 { font-size: 2.6rem; }
-.auth-card > p:not(.eyebrow) { color: #aaa39a; line-height: 1.6; }
+.auth-card > p:not(.eyebrow), .auth-method-panel > p { color: #aaa39a; line-height: 1.6; }
+/* The sign-in methods (local account, AGT account) while AGT sign-in is on. */
+.auth-methods { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+.auth-methods .button[aria-selected='true'] { color: #fff; border-color: var(--agt-red); background: rgba(255, 5, 0, 0.16); }
 .auth-icon { width: 2rem; color: var(--agt-orange); }
 .stack-form { display: grid; gap: 1rem; margin-top: 1.5rem; }
 .editor-header { margin-bottom: 1.5rem; padding-bottom: 1.4rem; border-bottom: 1px solid var(--line); }

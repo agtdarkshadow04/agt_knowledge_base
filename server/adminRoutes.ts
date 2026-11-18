@@ -16,6 +16,7 @@ import { adminSessionCookie, clearedCookie, hashSessionToken, memberSessionCooki
 import {
   parseAdminPasswordWrite,
   parseAdminUserCreate,
+  parseAdminIamUserUpdate,
   parseAdminUserUpdate,
   parseListQuery,
   parseAuditLogQuery,
@@ -125,8 +126,12 @@ export function createAdminRequestHandler(
         return json(200, await members.listUsers(parseUserListQuery(request.query)));
       case 'POST /api/admin/users':
         return json(201, await members.createUser(parseAdminUserCreate(parseBody(request))));
-      case 'PUT /api/admin/users/{userId}':
-        return json(200, await members.updateUser(userId(request), parseAdminUserUpdate(parseBody(request))));
+      case 'PUT /api/admin/users/{userId}': {
+        const id = userId(request);
+        // AGT IAM owns an AGT member's name and role; only isActive can change.
+        if (await members.authSource(id) === 'agt_iam') return json(200, await members.updateIamUser(id, parseAdminIamUserUpdate(parseBody(request))));
+        return json(200, await members.updateUser(id, parseAdminUserUpdate(parseBody(request))));
+      }
       case 'PUT /api/admin/users/{userId}/password':
         await members.setPassword(userId(request), parseAdminPasswordWrite(parseBody(request)).password);
         return noContent();

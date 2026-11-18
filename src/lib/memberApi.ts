@@ -36,6 +36,14 @@ export function createLocalSession(username: string, password: string) {
   });
 }
 
+/** Signs a member in with their AGT account; the server asks AGT IAM and sets the member session cookie. */
+export function createAgtSession(travellerName: string, password: string) {
+  return request<SessionUser>('/member/iam/login', {
+    method: 'POST',
+    body: { travellerName, password },
+  });
+}
+
 export function deleteLocalSession() {
   return request<void>('/member/logout', { method: 'POST' });
 }

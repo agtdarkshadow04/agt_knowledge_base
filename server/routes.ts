@@ -50,7 +50,7 @@ export interface ApiResponse {
  */
 export type RouteAuth = 'none' | 'member' | 'admin';
 /** Rate-limit buckets, each counted separately; `rateLimitRule()` in app.ts maps them to `rateLimits.*`. */
-export type RateLimitName = 'login' | 'adminLogin' | 'setup' | 'adminPassword' | 'adminUploads';
+export type RateLimitName = 'login' | 'iamLogin' | 'adminLogin' | 'setup' | 'adminPassword' | 'adminUploads';
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface RouteDefinition {
@@ -99,6 +99,7 @@ const routes: RouteDefinition[] = [
   { method: 'GET', path: '/api/health', writesData: false, auth: 'none', operationId: 'getHealth', tag: 'public', summary: 'Check that the API and its database answer.', response: { 200: S.Health } },
 
   { method: 'POST', path: '/api/member/login', writesData: true, auth: 'none', rateLimit: 'login', operationId: 'createMemberSession', tag: 'auth', summary: 'Sign in a member by username or email and set the member session cookie.', body: S.Credentials, response: { 200: S.MemberUser } },
+  { method: 'POST', path: '/api/member/iam/login', writesData: true, auth: 'none', rateLimit: 'iamLogin', operationId: 'createMemberIamSession', tag: 'auth', summary: 'Sign in a member with their AGT account through AGT IAM and set the member session cookie.', description: 'Available while `iam.enabled` is on and AGT IAM is configured. The first sign-in creates the member; each sign-in sets the role from the AGT IAM permission tier.', body: S.IamCredentials, response: { 200: S.MemberUser } },
   { method: 'POST', path: '/api/member/logout', writesData: false, auth: 'member', operationId: 'deleteMemberSession', tag: 'auth', summary: 'Sign the member out and clear the member session cookie.', response: { 204: S.NoContent } },
   { method: 'GET', path: '/api/member/session', writesData: false, auth: 'member', operationId: 'getMemberSession', tag: 'auth', summary: 'Return the signed-in member.', response: { 200: S.MemberUser } },
   { method: 'GET', path: '/api/settings/public', writesData: false, auth: 'none', operationId: 'getPublicSettings', tag: 'public', summary: 'Return the settings the public UI needs.', response: { 200: S.PublicSettings } },

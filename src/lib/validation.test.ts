@@ -8,6 +8,7 @@ import {
   parseAdminUserUpdate,
   parseArticleWrite,
   parseCredentials,
+  parseIamCredentials,
   parseListQuery,
   parseTagWrite,
   parseVerificationWrite,
@@ -43,6 +44,29 @@ describe('request validation', () => {
     assert.deepEqual(parseCredentials({ username: 'atlas', password: 'x' }), { username: 'atlas', password: 'x' });
     assert.throws(() => parseCredentials({ username: 'atlas' }));
     assert.throws(() => parseAdminAccountPassword({ currentPassword: 'old', password: 'Permanent123!', passwordConfirmation: 'Different123!' }));
+  });
+
+  it('accepts AGT credentials of 1-42 characters, any but control characters (issue #30)', () => {
+    // Quotes, commas, plus signs and backslashes are kept exactly; nothing is trimmed.
+    const tricky = { travellerName: ' O\'Brien, "Ace" + \\ ', password: '\'",+\\ pass ' };
+    assert.deepEqual(parseIamCredentials(tricky), tricky);
+    // 42 code points, even where each is two UTF-16 units.
+    assert.deepEqual(parseIamCredentials({ travellerName: '🚀'.repeat(42), password: 'x'.repeat(42) }), { travellerName: '🚀'.repeat(42), password: 'x'.repeat(42) });
+    for (const [field, value, code] of [
+      ['travellerName', '', 'required'],
+      ['travellerName', '   ', 'required'],
+      ['password', '', 'required'],
+      ['travellerName', '🚀'.repeat(43), 'too_long'],
+      ['password', 'x'.repeat(43), 'too_long'],
+      ['travellerName', 'Atlas\nWalker', 'invalid_format'],
+      ['password', 'pass\r', 'invalid_format'],
+      ['password', 'tab\there', 'invalid_format'],
+    ] as const) {
+      const checked = validate(parseIamCredentials, { travellerName: 'Atlas', password: 'x', [field]: value });
+      assert.equal(checked.ok, false, `${field}: ${JSON.stringify(value)}`);
+      if (!checked.ok) assert.deepEqual(checked.fields.map((error) => [error.field, error.code]), [[field, code]], `${field}: ${JSON.stringify(value)}`);
+    }
+    assert.throws(() => parseIamCredentials({ travellerName: 'Atlas', password: 'x', appId: 'other' }));
   });
 
   it('rejects executable MDX and raw HTML while accepting Markdown', () => {

@@ -99,6 +99,59 @@ function UserEditor({ account, busy, onChanged, onDelete }: {
   );
 }
 
+/**
+ * A member who signs in with their AGT account (AGT IAM): their name and role
+ * come from IAM at every sign-in, so only activation and deletion are offered.
+ */
+function AgtUserEditor({ account, busy, onChanged, onDelete }: {
+  account: LocalUser;
+  busy: boolean;
+  onChanged(): Promise<void>;
+  onDelete(): void;
+}) {
+  const { t, a } = useAdminI18n();
+  const [errors, setErrors] = useState(noFormErrors);
+  const [notice, setNotice] = useState('');
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setNotice('');
+    const isActive = new FormData(event.currentTarget).get('isActive') === 'on';
+    try {
+      // Everything but isActive is sent unchanged; the server refuses any other change.
+      await updateUser(account.id, { username: account.username, displayName: account.displayName, email: account.email, role: account.role, isActive });
+      setErrors(noFormErrors);
+      setNotice(a.users.saved);
+      await onChanged();
+    } catch (cause) {
+      setErrors(formErrors(cause, t));
+    }
+  }
+
+  return (
+    <details className="admin-user-card">
+      <summary>
+        <span><strong>{account.displayName}</strong><small>{a.users.agtBadge} · {t.roles[account.role]}</small></span>
+        <span className={`status-pill ${account.isActive ? 'active' : 'inactive'}`}>{account.isActive ? a.users.active : a.users.inactive}</span>
+      </summary>
+      <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
+      {errors.form && <p className="error-note" role="alert">{errors.form}</p>}
+      <p className="field-help">{a.users.agtManaged}</p>
+      <dl className="account-details">
+        <div><dt>{a.users.travellerId}</dt><dd>{account.agtTravellerId ?? t.common.notAvailable}</dd></div>
+        <div><dt>{a.users.iamPermission}</dt><dd>{account.iamPermission ?? t.common.notAvailable}</dd></div>
+      </dl>
+      <form className="admin-form-grid" noValidate onSubmit={(event) => void save(event)}>
+        <label className="check-field"><input name="isActive" type="checkbox" defaultChecked={account.isActive} /> {a.users.active}</label>
+        <div className="dialog-actions">
+          <button className="button button-primary" disabled={busy} type="submit">{a.users.save}</button>
+          <button className="button button-danger" disabled={busy} type="button" aria-haspopup="dialog" onClick={onDelete}>{a.users.delete}</button>
+        </div>
+      </form>
+    </details>
+  );
+}
+
 /** Member accounts: Editors and Moderators. The Admin account is not listed here. */
 export function UsersPanel() {
   const { t, a, number, error: describe } = useAdminI18n();
@@ -200,15 +253,18 @@ export function UsersPanel() {
           </div>
           {!users && !error && <LoadingState message={a.users.loading} />}
           {users && <p className="field-help">{formatTranslation(a.users.count, { count: number(users.total) })}</p>}
-          {users?.items.map((account) => (
-            <UserEditor
-              key={`${account.id}-${account.updatedAt}`}
-              account={account}
-              busy={busy}
-              onChanged={async () => { setBusy(true); try { await load(); } finally { setBusy(false); } }}
-              onDelete={() => setPendingDelete(account)}
-            />
-          ))}
+          {users?.items.map((account) => {
+            const Editor = account.authSource === 'agt_iam' ? AgtUserEditor : UserEditor;
+            return (
+              <Editor
+                key={`${account.id}-${account.updatedAt}`}
+                account={account}
+                busy={busy}
+                onChanged={async () => { setBusy(true); try { await load(); } finally { setBusy(false); } }}
+                onDelete={() => setPendingDelete(account)}
+              />
+            );
+          })}
           {users && users.totalPages > 1 && <nav className="pagination" aria-label={a.users.pages}><button className="button button-secondary" disabled={users.page <= 1} onClick={() => setPage((current) => current - 1)}>{a.users.previous}</button><span>{formatTranslation(a.users.page, { page: number(users.page), pages: number(users.totalPages) })}</span><button className="button button-secondary" disabled={users.page >= users.totalPages} onClick={() => setPage((current) => current + 1)}>{a.users.next}</button></nav>}
         </section>
       </div>

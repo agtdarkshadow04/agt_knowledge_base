@@ -20,6 +20,7 @@ import m0016 from './migrations/0016_drop_application_settings.sql';
 import m0017 from './migrations/0017_auth_sessions.sql';
 import m0018 from './migrations/0018_spec_storage.sql';
 import m0019 from './migrations/0019_log_settings.sql';
+import m0020 from './migrations/0020_agt_iam_members.sql';
 
 import c0001 from './migrations/control/0001_operation.sql';
 import l0001 from './migrations/logs/0001_initial.sql';
@@ -190,6 +191,7 @@ export const MIGRATIONS: readonly Migration[] = [
   [m0017, 'auth_sessions'],
   [m0018, 'spec_storage'],
   [m0019, 'log_settings'],
+  [m0020, 'agt_iam_members'],
 ].map(([sql, name], index) => ({ version: index + 1, name, sql }));
 
 /** The 1.x name of a migration (`001_initial`), still reported in the deprecated `migrations` field of a restore preview. */

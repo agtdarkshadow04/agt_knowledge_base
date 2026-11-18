@@ -13,6 +13,7 @@ const defaults: ApplicationSettings = {
   },
   articles: { defaultVisibility: 'Internal' },
   access: { allowPublicBrowsing: true },
+  iam: { signIn: false },
 };
 
 interface AppSettingsContextValue {

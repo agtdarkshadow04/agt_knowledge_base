@@ -21,6 +21,7 @@ import type { AppContext } from './context.js';
 import { withDataWrite } from './dataWrite.js';
 import { noStoreHeaders, securityHeaders } from './headers.js';
 import { BodyTooLargeError, errorReply, HttpError, RateLimitedError } from './http.js';
+import { IamClient, iamUnavailable, type IamTraveller, type IamVerifier } from './iam.js';
 import { createMemberRequestHandler, type MemberRequestHandler } from './memberRoutes.js';
 import type { Admission } from './operation.js';
 import { registerOpenApi, routeSecurity } from './openapi.js';
@@ -51,7 +52,7 @@ import {
 } from './session.js';
 import { SettingsService } from './settings-service.js';
 import { TagService } from './tag-service.js';
-import { parseAdminAccountPassword, parseAdminSetup, parseCredentials, parseListQuery, parseTagListQuery } from '../src/lib/validation.js';
+import { parseAdminAccountPassword, parseAdminSetup, parseCredentials, parseIamCredentials, parseListQuery, parseTagListQuery } from '../src/lib/validation.js';
 import { legacyPageRedirect } from '../src/lib/routes.js';
 
 export { csrfHeader } from './adminRoutes.js';
@@ -121,7 +122,9 @@ export interface BuildAppOptions {
   handlers?: { request?: RequestHandler; admin?: AdminRequestHandler };
   /** Replace the authentication and settings services, for tests of the HTTP pipeline. */
   services?: {
-    memberAuth?: Pick<MemberAuthService, 'login' | 'session' | 'logout'>;
+    memberAuth?: Pick<MemberAuthService, 'login' | 'session' | 'logout'> & Partial<Pick<MemberAuthService, 'verifyIam' | 'completeIamLogin'>>;
+    /** AGT IAM, in place of the `IamClient` that calls `iam.baseUrl`. */
+    iam?: IamVerifier;
     adminAuth?: Pick<AdminAuthService, 'setupStatus' | 'setup' | 'login' | 'session' | 'logout' | 'changePassword'>;
     settings?: Pick<SettingsService, 'values'>;
   };
@@ -204,6 +207,7 @@ function rateLimitRule(config: AppConfig, name: RateLimitName) {
   const limits = config.rateLimits;
   switch (name) {
     case 'login': return limits.login;
+    case 'iamLogin': return limits.login;
     case 'adminLogin': return limits.adminLogin ?? limits.login;
     case 'adminPassword': return limits.adminPassword ?? limits.login;
     case 'setup': return limits.setup;
@@ -320,7 +324,11 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
     error: (message) => app.log.error({ source: 'auth' }, message),
     info: (message) => app.log.info({ source: 'auth' }, message),
   };
-  const memberAuth = options.services?.memberAuth ?? new MemberAuthService(context, undefined, authLog);
+  const iam = options.services?.iam ?? new IamClient(context, {
+    error: (message) => app.log.error({ source: 'auth' }, message),
+    warn: (message) => app.log.warn({ source: 'auth' }, message),
+  });
+  const memberAuth = options.services?.memberAuth ?? new MemberAuthService(context, undefined, authLog, iam);
   const adminAuth = options.services?.adminAuth ?? new AdminAuthService(context, undefined, authLog);
   const settingsService = options.services?.settings ?? new SettingsService(context);
   const handleRequest = options.handlers?.request ?? createRequestHandler(context);
@@ -530,14 +538,24 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
         await writeFile(file, Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0), { mode: 0o600 });
         upload = { action: (request.query as Record<string, string>).action ?? '', file };
       }
-      const work = () => compute(route, request, upload);
+      // AGT sign-in asks IAM before the data write, so a slow IAM never holds the write lock (BAK-8).
+      const traveller = route.handlerKey === 'POST /api/member/iam/login' ? await verifyIamLogin(request) : undefined;
+      const work = () => compute(route, request, upload, traveller);
       return await untilAborted(route.writesData ? dataWrite(work, { signal }) : work(), signal);
     } finally {
       if (directory) await rm(directory, { recursive: true, force: true });
     }
   }
 
-  async function compute(route: CompiledRoute, request: FastifyRequest, upload?: ApiRequestUpload): Promise<Outcome> {
+  /** Step 1 of an AGT sign-in: the credentials go to AGT IAM, and only there (SEC-14 deviation). */
+  async function verifyIamLogin(request: FastifyRequest) {
+    warnOnPlainHttp(request);
+    const input = parseIamCredentials(request.body);
+    if (!memberAuth.verifyIam) throw iamUnavailable();
+    return memberAuth.verifyIam(input.travellerName, input.password);
+  }
+
+  async function compute(route: CompiledRoute, request: FastifyRequest, upload?: ApiRequestUpload, traveller?: IamTraveller): Promise<Outcome> {
     const body = route.rawBody || route.multipart ? undefined : request.body;
 
     switch (route.handlerKey) {
@@ -553,6 +571,14 @@ export function buildApp(context: AppContext, options: BuildAppOptions = {}) {
         const input = parseCredentials(body);
         const session = await memberAuth.login(input.username, input.password);
         request.audit = { actorType: 'member', actor: session.identity.username };
+        return json(200, session.identity, {
+          'set-cookie': sessionCookie(memberSessionCookie, session.token, session.expiresAt, secureCookie(request)),
+        });
+      }
+      case 'POST /api/member/iam/login': {
+        if (!traveller || !memberAuth.completeIamLogin) throw iamUnavailable();
+        const session = await memberAuth.completeIamLogin(traveller);
+        request.audit = { actorType: 'member', actor: session.identity.username, details: { authSource: 'agt_iam' } };
         return json(200, session.identity, {
           'set-cookie': sessionCookie(memberSessionCookie, session.token, session.expiresAt, secureCookie(request)),
         });

@@ -8,7 +8,8 @@ services:
     # server.trustProxy. Publish on another interface only if that proxy runs on another machine.
     ports:
       - "127.0.0.1:8081:8081"
-    # AGT_KNOWLEDGE_BASE_SETUP_PASSWORD and AGT_KNOWLEDGE_BASE_DB_PASSWORD (DEP-4).
+    # AGT_KNOWLEDGE_BASE_SETUP_PASSWORD, AGT_KNOWLEDGE_BASE_DB_PASSWORD and, for AGT sign-in,
+    # AGT_KNOWLEDGE_BASE_IAM_API_KEY (DEP-4).
     env_file:
       - path: .env
         required: false

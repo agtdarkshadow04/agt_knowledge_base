@@ -3,6 +3,7 @@ import { buildApp } from './app.js';
 import type { AppContext } from './context.js';
 import { BackupService } from './backup.js';
 import { CONTROL_MIGRATIONS, createDatabase, LOG_MIGRATIONS, MIGRATIONS } from './db.js';
+import { iamMissingName, iamStatus } from './iam.js';
 import { createLogger, LogStore, logStoreStream, startRetention } from './logs.js';
 import { MaintenanceError } from './http.js';
 import { PostgresOperations, type OperationLog } from './operation.js';
@@ -77,6 +78,7 @@ async function main() {
     version: packageJson.version,
     operations,
     logs,
+    iamApiKey: startup.iamApiKey,
     toolPath: startup.toolPath,
   };
 
@@ -105,8 +107,14 @@ async function main() {
   await new BackupService(context, undefined, { log: backupLog }).cleanPreviewDatabase();
   await checkSetupPassword(context, logger);
 
-  // LOG-15: retention now and every hour, each run admitted under the activity lease (BAK-12).
   const settings = new SettingsService(context);
+  // AGT IAM sign-in is switched on but cannot work: say what is missing.
+  const iam = iamStatus(context, await settings.values());
+  if (iam.enabled && !iam.available) {
+    logger.warn({ source: 'config' }, `AGT sign-in (iam.enabled) is on, but ${iam.missing.map(iamMissingName).join(', ')} ${iam.missing.length === 1 ? 'is' : 'are'} not set; members cannot sign in with their AGT account.`);
+  }
+
+  // LOG-15: retention now and every hour, each run admitted under the activity lease (BAK-12).
   const retention = startRetention(logs, async () => {
     const values = await settings.values();
     return {

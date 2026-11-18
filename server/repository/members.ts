@@ -5,10 +5,15 @@ import { HttpError } from '../http.js';
 import { type AdminStats, type LocalUserRecord, type Role } from '../domain.js';
 import { hashPassword } from '../passwords.js';
 import { assertDataWrite } from '../dataWrite.js';
+import { withTransaction } from '../db.js';
 
 interface LocalUserRow {
   id: string;
-  username: string;
+  username: string | null;
+  auth_source: 'local' | 'agt_iam';
+  iam_traveller_id: string | null;
+  iam_traveller_name: string | null;
+  iam_permission: string | null;
   display_name: string;
   email: string | null;
   role: Role;
@@ -20,7 +25,8 @@ interface LocalUserRow {
 
 const userColumns = `
   id, username, display_name, email, role, is_active,
-  session_version, created_at, updated_at
+  session_version, created_at, updated_at,
+  auth_source, iam_traveller_id, iam_traveller_name, iam_permission
 `;
 
 function iso(value: Date | string) {
@@ -30,14 +36,22 @@ function iso(value: Date | string) {
 function toUser(row: LocalUserRow): LocalUserRecord {
   return {
     id: row.id,
-    username: row.username,
+    username: row.username ?? row.iam_traveller_name ?? '',
     displayName: row.display_name,
     email: row.email ?? undefined,
     role: row.role,
     isActive: row.is_active,
+    authSource: row.auth_source,
+    ...(row.iam_traveller_id === null ? {} : { agtTravellerId: row.iam_traveller_id }),
+    ...(row.iam_permission === null ? {} : { iamPermission: row.iam_permission }),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   };
+}
+
+/** AGT IAM owns an AGT member's name, role and password (issue #30). */
+function managedByIam(): never {
+  throw new HttpError(409, 'managed_by_iam', 'This member signs in with their AGT account; only AGT IAM can change their name, role or password.');
 }
 
 function isUniqueViolation(error: unknown) {
@@ -73,7 +87,7 @@ export class MemberRepository {
   }) {
     const pool = await this.context.db.pool();
     const conditions = [
-      `($1 = '' OR username ILIKE '%' || $1 || '%' OR display_name ILIKE '%' || $1 || '%' OR email ILIKE '%' || $1 || '%')`,
+      `($1 = '' OR username ILIKE '%' || $1 || '%' OR iam_traveller_name ILIKE '%' || $1 || '%' OR display_name ILIKE '%' || $1 || '%' OR email ILIKE '%' || $1 || '%')`,
       `($2 = 'all' OR role = $2)`,
       `($3 = 'all' OR ($3 = 'active' AND is_active) OR ($3 = 'inactive' AND NOT is_active))`,
     ];
@@ -85,7 +99,7 @@ export class MemberRepository {
         `SELECT ${userColumns}
          FROM local_users
          WHERE ${conditions.join(' AND ')}
-         ORDER BY lower(username), id
+         ORDER BY lower(coalesce(username, iam_traveller_name)), id
          LIMIT $4 OFFSET $5`,
         [...params, query.pageSize, offset],
       ),
@@ -129,6 +143,46 @@ export class MemberRepository {
     }
   }
 
+  /** How a member signs in, or `404` when there is no such member. */
+  async authSource(id: string): Promise<'local' | 'agt_iam'> {
+    const pool = await this.context.db.pool();
+    const row = (await pool.query<{ auth_source: 'local' | 'agt_iam' }>('SELECT auth_source FROM local_users WHERE id = $1', [id])).rows[0];
+    if (!row) throw new HttpError(404, 'not_found', 'User not found.', { legacyCode: 'USER_NOT_FOUND' });
+    return row.auth_source;
+  }
+
+  /**
+   * Replaces an AGT IAM member: only `isActive` can change. The other fields
+   * must repeat the current values, or the request is refused with
+   * `409 managed_by_iam`. Deactivation ends the member's sessions (AUTH-4).
+   */
+  async updateIamUser(id: string, input: {
+    username: string;
+    displayName: string;
+    email?: string;
+    role: string;
+    isActive: boolean;
+  }) {
+    assertDataWrite();
+    return withTransaction(await this.context.db.pool(), async (client) => {
+      const current = await lockedUser(client, id);
+      if (current.auth_source !== 'agt_iam') throw new HttpError(409, 'conflict', 'The member changed. Reload and try again.');
+      if (input.username !== current.iam_traveller_name || input.displayName !== current.display_name
+        || input.role !== current.role || (input.email ?? null) !== current.email) managedByIam();
+      const result = await client.query<LocalUserRow>(
+        `UPDATE local_users
+         SET is_active = $2,
+             session_version = session_version + CASE WHEN is_active <> $2 THEN 1 ELSE 0 END,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING ${userColumns}`,
+        [id, input.isActive],
+      );
+      if (current.is_active !== input.isActive) await client.query('DELETE FROM member_sessions WHERE user_id = $1', [id]);
+      return toUser(result.rows[0]);
+    });
+  }
+
   async updateUser(id: string, input: {
     username: string;
     displayName: string;
@@ -142,6 +196,7 @@ export class MemberRepository {
     try {
       await client.query('BEGIN');
       const current = await lockedUser(client, id);
+      if (current.auth_source === 'agt_iam') managedByIam();
       const securityChanged = current.role !== input.role || current.is_active !== input.isActive;
       const result = await client.query<LocalUserRow>(
         `UPDATE local_users
@@ -175,7 +230,7 @@ export class MemberRepository {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await lockedUser(client, id);
+      if ((await lockedUser(client, id)).auth_source === 'agt_iam') managedByIam();
       await client.query(
         `UPDATE local_users
          SET password_hash = $2, session_version = session_version + 1, updated_at = now()

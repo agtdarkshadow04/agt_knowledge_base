@@ -123,9 +123,10 @@ describe('MIGRATIONS (DATA-3)', () => {
     const sql = byName('settings_table').sql;
     assert.ok(sql.includes("('backup.maxZipBytes', to_jsonb(source.backup_max_bytes))"));
     const allowed = (migration: string) => byName(migration).sql.match(/CHECK \(key IN \(([^)]*)\)\)/)![1].match(/'[^']+'/g)!.map((key) => key.slice(1, -1));
-    assert.deepEqual(allowed('settings_table'), settingKeys.filter((key) => !key.startsWith('logs.')));
-    // 0019 adds the LOG-16 retention settings; the latest CHECK list is every EDITABLE_SETTINGS key.
-    assert.deepEqual(allowed('log_settings'), settingKeys);
+    assert.deepEqual(allowed('settings_table'), settingKeys.filter((key) => !key.startsWith('logs.') && key !== 'iam.enabled'));
+    // 0019 adds the LOG-16 retention settings, 0020 iam.enabled; the latest CHECK list is every EDITABLE_SETTINGS key.
+    assert.deepEqual(allowed('log_settings'), settingKeys.filter((key) => key !== 'iam.enabled'));
+    assert.deepEqual(allowed('agt_iam_members'), settingKeys);
     assert.ok(byName('drop_application_settings').sql.includes('DROP TABLE application_settings'));
   });
 
@@ -205,7 +206,7 @@ describe('runMigrations (DATA-4, DATA-11)', () => {
   });
 
   it('rolls back a failing migration, records nothing for it and releases the lock', async () => {
-    server = fakeServer({ controlApplied: [1], applied: MIGRATIONS.slice(0, -1).map((migration) => migration.version), failOn: byName('log_settings').sql });
+    server = fakeServer({ controlApplied: [1], applied: MIGRATIONS.slice(0, -1).map((migration) => migration.version), failOn: MIGRATIONS.at(-1)!.sql });
     await assert.rejects(runMigrations(server.db), /migration failed/);
     assert.ok(server.statements().includes('ROLLBACK'));
     assert.ok(!server.state.applied.includes(MIGRATIONS.length));
