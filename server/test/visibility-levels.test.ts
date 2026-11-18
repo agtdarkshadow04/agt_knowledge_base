@@ -3,7 +3,7 @@ import { after, describe, it } from 'node:test';
 import pg from 'pg';
 import { connectionParameters, MIGRATIONS } from '../db.js';
 import { securityLevels, visibilityLevel, type ArticleVisibility } from '../../src/lib/api.js';
-import { createTestDatabase, createTestServer, testDatabaseUrl, type TestServer } from './postgres.js';
+import { closeTestServers, createTestDatabase, createTestServer, testDatabaseUrl, type TestServer } from './postgres.js';
 
 /**
  * Member security levels on real PostgreSQL (#70): the SQL access rule agrees
@@ -18,7 +18,7 @@ const visibilities: ArticleVisibility[] = [0, 1, 2, 3, 4, 5, 'Public', 'Internal
 const servers: TestServer[] = [];
 
 after(async () => {
-  for (const server of servers) await server.close();
+  await closeTestServers(servers);
 });
 
 function cookieFrom(reply: { headers: Record<string, unknown> }, name: string) {

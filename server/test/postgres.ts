@@ -42,6 +42,41 @@ async function adminQuery(sql: string) {
 
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
 
+/**
+ * Drops a test database. `WITH (FORCE)` ends any session the test left open,
+ * but it may not end an autovacuum worker, which no non-superuser role may
+ * signal: PostgreSQL then refuses with 42501 "permission denied to terminate
+ * process". Autovacuum starts on its own after enough writes, so this happens
+ * now and then under load. A plain `DROP DATABASE` stops autovacuum workers
+ * itself, so that case retries without FORCE.
+ */
+async function dropDatabase(name: string) {
+  try {
+    await adminQuery(`DROP DATABASE IF EXISTS ${quote(name)} WITH (FORCE)`);
+  } catch (error) {
+    if ((error as { code?: string }).code !== '42501') throw error;
+    await adminQuery(`DROP DATABASE IF EXISTS ${quote(name)}`);
+  }
+}
+
+/**
+ * Closes every test server, in order, even when one of them fails to close,
+ * then throws the first failure. A server left open keeps polling its control
+ * connection, so the test process would never exit.
+ */
+export async function closeTestServers(servers: Iterable<{ close(): Promise<void> }>) {
+  const failures: unknown[] = [];
+  for (const server of servers) {
+    try {
+      await server.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, `${failures.length} test servers failed to close.`);
+}
+
 /** A new empty database and its preview database; `drop()` removes both. */
 export async function createTestDatabase() {
   const name = `agt_kb_test_${randomUUID().replaceAll('-', '').slice(0, 16)}`;
@@ -50,9 +85,7 @@ export async function createTestDatabase() {
   return {
     name,
     async drop() {
-      for (const database of [name, `${name}_preview`]) {
-        await adminQuery(`DROP DATABASE IF EXISTS ${quote(database)} WITH (FORCE)`);
-      }
+      for (const database of [name, `${name}_preview`]) await dropDatabase(database);
     },
   };
 }
@@ -146,11 +179,17 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
     async close() {
       if (closed) return;
       closed = true;
-      await app.close();
-      await operations.stop();
-      await db.close();
-      await created?.drop();
+      // Every step runs even if an earlier one fails, so nothing keeps polling or stays connected.
+      let failure: unknown;
+      for (const step of [() => app.close(), () => operations.stop(), () => db.close(), () => created?.drop()]) {
+        try {
+          await step();
+        } catch (error) {
+          failure ??= error;
+        }
+      }
       if (ownDataDir) rmSync(dataDir, { recursive: true, force: true });
+      if (failure !== undefined) throw failure;
     },
   };
 }

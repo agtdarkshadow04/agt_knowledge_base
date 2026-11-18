@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import pg from 'pg';
 import { connectionParameters } from '../db.js';
-import { createTestServer, testDatabaseUrl, type TestServer } from './postgres.js';
+import { closeTestServers, createTestServer, testDatabaseUrl, type TestServer } from './postgres.js';
 
 /**
  * AGT sign-in end to end (issue #30): the app on a real PostgreSQL database
@@ -67,9 +67,12 @@ before(async () => {
 });
 
 after(async () => {
-  for (const server of servers) await server.close();
-  iam.closeAllConnections();
-  await new Promise((resolve) => iam.close(resolve));
+  try {
+    await closeTestServers(servers);
+  } finally {
+    iam.closeAllConnections();
+    await new Promise((resolve) => iam.close(resolve));
+  }
 });
 
 beforeEach(() => {
