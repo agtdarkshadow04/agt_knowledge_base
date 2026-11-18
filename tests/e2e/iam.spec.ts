@@ -108,6 +108,13 @@ test('shows the AGT member to the Admin with only activation and deletion', asyn
   // AGT IAM sets the security level: it is shown, but there is no field for it (#70).
   await expect(card.locator('dd', { hasText: '1 – Private' })).toContainText('set by AGT IAM');
   await expect(card.getByLabel('Security level')).toHaveCount(0);
+  // The note and the details sit inside the card's padding, as the form below does.
+  const cardBox = (await card.boundingBox())!;
+  for (const part of [card.getByText(/signs in with their AGT account/), card.locator('dl')]) {
+    const box = (await part.boundingBox())!;
+    expect(box.x - cardBox.x, 'left padding').toBeGreaterThanOrEqual(12);
+    expect(cardBox.x + cardBox.width - (box.x + box.width), 'right padding').toBeGreaterThanOrEqual(12);
+  }
   await expect(card.getByRole('checkbox', { name: 'Active' })).toBeChecked();
   await expectAccessible(page, 'AGT member in the Users tab');
   await page.context().close();
