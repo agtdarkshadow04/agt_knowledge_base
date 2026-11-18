@@ -1,4 +1,4 @@
-import type { ArticleVisibility, Role } from '../lib/api';
+import type { ArticleVisibility, Role, SecurityLevel } from '../lib/api';
 
 export interface AdminSession {
   username: string;
@@ -19,6 +19,8 @@ export interface LocalUser {
   displayName: string;
   email?: string;
   role: Role;
+  /** Which articles the member reads and may assign (#70); an AGT member's comes from AGT IAM. */
+  securityLevel: SecurityLevel;
   isActive: boolean;
   /** How the member signs in: a local password or their AGT account (AGT IAM). */
   authSource: 'local' | 'agt_iam';

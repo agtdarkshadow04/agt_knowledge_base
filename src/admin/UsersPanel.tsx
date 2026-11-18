@@ -5,11 +5,30 @@ import { formatTranslation } from '../translations';
 import { useAdminI18n } from './context';
 import { LoadingState } from '../components/States';
 import { parseAdminPasswordWrite, parseAdminUserCreate, parseAdminUserUpdate, validate } from '../lib/validation';
-import type { Role } from '../lib/api';
+import type { Role, SecurityLevel } from '../lib/api';
+import { agtVisibilityOptions } from '../lib/visibility';
 import { createUser, deleteUser, listUsers, setUserPassword, updateUser } from './api';
 import type { LocalUser, LocalUserListResponse } from './types';
 
 const roleOptions: Role[] = ['Editor', 'Moderator'];
+
+/** The security level select (#70): the AGT levels, by number and name. */
+function SecurityLevelField({ defaultValue, error, help }: { defaultValue: SecurityLevel; error?: string; help?: string }) {
+  const { t, a, number } = useAdminI18n();
+  return (
+    <SelectField label={a.users.securityLevel} name="securityLevel" defaultValue={String(defaultValue)} error={error} help={help}>
+      {agtVisibilityOptions.map((option) => (
+        <option key={option.value} value={option.value}>{formatTranslation(a.users.securityLevelOption, { level: number(option.value), name: t.visibility[option.className] })}</option>
+      ))}
+    </SelectField>
+  );
+}
+
+/** A security level's number and name, as the select shows it. */
+function useSecurityLevelLabel() {
+  const { t, a, number } = useAdminI18n();
+  return (level: SecurityLevel) => formatTranslation(a.users.securityLevelOption, { level: number(level), name: t.visibility[agtVisibilityOptions[level].className] });
+}
 
 function UserEditor({ account, busy, onChanged, onDelete }: {
   account: LocalUser;
@@ -18,6 +37,7 @@ function UserEditor({ account, busy, onChanged, onDelete }: {
   onDelete(): void;
 }) {
   const { t, a } = useAdminI18n();
+  const levelLabel = useSecurityLevelLabel();
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState(noFormErrors);
   const [passwordErrors, setPasswordErrors] = useState(noFormErrors);
@@ -32,13 +52,14 @@ function UserEditor({ account, busy, onChanged, onDelete }: {
       displayName: String(data.get('displayName')),
       email: String(data.get('email') ?? ''),
       role: String(data.get('role')),
+      securityLevel: Number(data.get('securityLevel')),
       isActive: data.get('isActive') === 'on',
     };
     const checked = validate(parseAdminUserUpdate, input);
     setErrors(formErrors(checked, t));
     if (!checked.ok) return;
     try {
-      await updateUser(account.id, { ...input, role: input.role as Role, email: input.email.trim() || undefined });
+      await updateUser(account.id, { ...input, role: input.role as Role, securityLevel: input.securityLevel as SecurityLevel, email: input.email.trim() || undefined });
       setNotice(a.users.saved);
       await onChanged();
     } catch (cause) {
@@ -65,7 +86,7 @@ function UserEditor({ account, busy, onChanged, onDelete }: {
   return (
     <details className="admin-user-card">
       <summary>
-        <span><strong>{account.displayName}</strong><small>@{account.username} · {t.roles[account.role]}</small></span>
+        <span><strong>{account.displayName}</strong><small>@{account.username} · {t.roles[account.role]} · {levelLabel(account.securityLevel)}</small></span>
         <span className={`status-pill ${account.isActive ? 'active' : 'inactive'}`}>{account.isActive ? a.users.active : a.users.inactive}</span>
       </summary>
       <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
@@ -77,6 +98,7 @@ function UserEditor({ account, busy, onChanged, onDelete }: {
         <SelectField label={a.users.role} name="role" defaultValue={account.role} error={errors.fields.role}>
           {roleOptions.map((option) => <option key={option} value={option}>{t.roles[option]}</option>)}
         </SelectField>
+        <SecurityLevelField defaultValue={account.securityLevel} error={errors.fields.securityLevel} help={a.users.securityLevelHelp} />
         <label className="check-field"><input name="isActive" type="checkbox" defaultChecked={account.isActive} /> {a.users.active}</label>
         <div className="dialog-actions">
           <button className="button button-primary" disabled={busy} type="submit">{a.users.save}</button>
@@ -110,6 +132,7 @@ function AgtUserEditor({ account, busy, onChanged, onDelete }: {
   onDelete(): void;
 }) {
   const { t, a } = useAdminI18n();
+  const levelLabel = useSecurityLevelLabel();
   const [errors, setErrors] = useState(noFormErrors);
   const [notice, setNotice] = useState('');
 
@@ -131,7 +154,7 @@ function AgtUserEditor({ account, busy, onChanged, onDelete }: {
   return (
     <details className="admin-user-card">
       <summary>
-        <span><strong>{account.displayName}</strong><small>{a.users.agtBadge} · {t.roles[account.role]}</small></span>
+        <span><strong>{account.displayName}</strong><small>{a.users.agtBadge} · {t.roles[account.role]} · {levelLabel(account.securityLevel)}</small></span>
         <span className={`status-pill ${account.isActive ? 'active' : 'inactive'}`}>{account.isActive ? a.users.active : a.users.inactive}</span>
       </summary>
       <div role="status" aria-live="polite">{notice && <p className="success-note">{notice}</p>}</div>
@@ -140,6 +163,7 @@ function AgtUserEditor({ account, busy, onChanged, onDelete }: {
       <dl className="account-details">
         <div><dt>{a.users.travellerId}</dt><dd>{account.agtTravellerId ?? t.common.notAvailable}</dd></div>
         <div><dt>{a.users.iamPermission}</dt><dd>{account.iamPermission ?? t.common.notAvailable}</dd></div>
+        <div><dt>{a.users.securityLevel}</dt><dd>{levelLabel(account.securityLevel)} <small>{a.users.securityLevelFromIam}</small></dd></div>
       </dl>
       <form className="admin-form-grid" noValidate onSubmit={(event) => void save(event)}>
         <label className="check-field"><input name="isActive" type="checkbox" defaultChecked={account.isActive} /> {a.users.active}</label>
@@ -189,6 +213,7 @@ export function UsersPanel() {
       displayName: String(data.get('displayName')),
       email: String(data.get('email') ?? ''),
       role: String(data.get('role')),
+      securityLevel: Number(data.get('securityLevel')),
       password: String(data.get('password')),
     };
     const checked = validate(parseAdminUserCreate, input);
@@ -196,7 +221,7 @@ export function UsersPanel() {
     if (!checked.ok) return;
     setBusy(true);
     try {
-      await createUser({ ...input, role: input.role as Role, email: input.email.trim() || undefined });
+      await createUser({ ...input, role: input.role as Role, securityLevel: input.securityLevel as SecurityLevel, email: input.email.trim() || undefined });
       form.reset();
       setNotice(formatTranslation(a.users.created, { username: checked.value.username }));
       await load();
@@ -236,6 +261,7 @@ export function UsersPanel() {
             <SelectField label={a.users.role} name="role" defaultValue="Editor" error={createErrors.fields.role}>
               {roleOptions.map((option) => <option key={option} value={option}>{t.roles[option]}</option>)}
             </SelectField>
+            <SecurityLevelField defaultValue={0} error={createErrors.fields.securityLevel} help={a.users.securityLevelHelp} />
             <TextField label={a.users.initialPassword} name="password" type="password" autoComplete="new-password" required error={createErrors.fields.password} help={a.users.passwordHelp} />
             <button className="button button-primary" disabled={busy} type="submit">{a.users.create}</button>
           </form>

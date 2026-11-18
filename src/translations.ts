@@ -111,6 +111,7 @@ const en = {
     color: 'Color',
     version: 'Version',
     travellerName: 'Traveller Name',
+    securityLevel: 'Security level',
   },
   common: {
     loading: 'Loading…',
@@ -173,6 +174,8 @@ const en = {
     signInMethod: 'Signs in with',
     authLocal: 'Local account',
     authAgt: 'AGT account',
+    securityLevel: 'Security level',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: 'Loading the archive…',
@@ -542,6 +545,7 @@ const fr: Translations = {
     color: 'Couleur',
     version: 'Version',
     travellerName: 'Nom de voyageur',
+    securityLevel: 'Niveau de sécurité',
   },
   common: {
     loading: 'Chargement…',
@@ -604,6 +608,8 @@ const fr: Translations = {
     signInMethod: 'Connexion avec',
     authLocal: 'Compte local',
     authAgt: 'Compte AGT',
+    securityLevel: 'Niveau de sécurité',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: 'Chargement des archives…',
@@ -971,6 +977,7 @@ const de: Translations = {
     color: 'Farbe',
     version: 'Version',
     travellerName: 'Reisendenname',
+    securityLevel: 'Sicherheitsstufe',
   },
   common: {
     loading: 'Wird geladen…',
@@ -1033,6 +1040,8 @@ const de: Translations = {
     signInMethod: 'Anmeldung mit',
     authLocal: 'Lokales Konto',
     authAgt: 'AGT-Konto',
+    securityLevel: 'Sicherheitsstufe',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: 'Archiv wird geladen…',
@@ -1400,6 +1409,7 @@ const es: Translations = {
     color: 'Color',
     version: 'Versión',
     travellerName: 'Nombre de viajero',
+    securityLevel: 'Nivel de seguridad',
   },
   common: {
     loading: 'Cargando…',
@@ -1462,6 +1472,8 @@ const es: Translations = {
     signInMethod: 'Inicia sesión con',
     authLocal: 'Cuenta local',
     authAgt: 'Cuenta AGT',
+    securityLevel: 'Nivel de seguridad',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: 'Cargando el archivo…',
@@ -1829,6 +1841,7 @@ const pt: Translations = {
     color: 'Cor',
     version: 'Versão',
     travellerName: 'Nome de viajante',
+    securityLevel: 'Nível de segurança',
   },
   common: {
     loading: 'Carregando…',
@@ -1891,6 +1904,8 @@ const pt: Translations = {
     signInMethod: 'Entra com',
     authLocal: 'Conta local',
     authAgt: 'Conta AGT',
+    securityLevel: 'Nível de segurança',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: 'Carregando o arquivo…',
@@ -2258,6 +2273,7 @@ const it: Translations = {
     color: 'Colore',
     version: 'Versione',
     travellerName: 'Nome del viaggiatore',
+    securityLevel: 'Livello di sicurezza',
   },
   common: {
     loading: 'Caricamento…',
@@ -2320,6 +2336,8 @@ const it: Translations = {
     signInMethod: 'Accede con',
     authLocal: 'Account locale',
     authAgt: 'Account AGT',
+    securityLevel: 'Livello di sicurezza',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: 'Caricamento dell\'archivio…',
@@ -2687,6 +2705,7 @@ const th: Translations = {
     color: 'สี',
     version: 'เวอร์ชัน',
     travellerName: 'ชื่อนักเดินทาง',
+    securityLevel: 'ระดับความปลอดภัย',
   },
   common: {
     loading: 'กำลังโหลด…',
@@ -2749,6 +2768,8 @@ const th: Translations = {
     signInMethod: 'เข้าสู่ระบบด้วย',
     authLocal: 'บัญชีภายในระบบ',
     authAgt: 'บัญชี AGT',
+    securityLevel: 'ระดับความปลอดภัย',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: 'กำลังโหลดคลังบทความ…',
@@ -3116,6 +3137,7 @@ const zh: Translations = {
     color: '颜色',
     version: '版本',
     travellerName: '旅行者名称',
+    securityLevel: '安全级别',
   },
   common: {
     loading: '正在加载…',
@@ -3178,6 +3200,8 @@ const zh: Translations = {
     signInMethod: '登录方式',
     authLocal: '本地账户',
     authAgt: 'AGT 账户',
+    securityLevel: '安全级别',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: '正在加载档案…',
@@ -3545,6 +3569,7 @@ const hi: Translations = {
     color: 'रंग',
     version: 'संस्करण',
     travellerName: 'यात्री नाम',
+    securityLevel: 'सुरक्षा स्तर',
   },
   common: {
     loading: 'लोड हो रहा है…',
@@ -3607,6 +3632,8 @@ const hi: Translations = {
     signInMethod: 'साइन इन का तरीका',
     authLocal: 'स्थानीय खाता',
     authAgt: 'AGT खाता',
+    securityLevel: 'सुरक्षा स्तर',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: 'अभिलेखागार लोड हो रहा है…',
@@ -3974,6 +4001,7 @@ const ja: Translations = {
     color: '色',
     version: 'バージョン',
     travellerName: 'トラベラー名',
+    securityLevel: 'セキュリティレベル',
   },
   common: {
     loading: '読み込み中…',
@@ -4036,6 +4064,8 @@ const ja: Translations = {
     signInMethod: 'サインイン方法',
     authLocal: 'ローカルアカウント',
     authAgt: 'AGT アカウント',
+    securityLevel: 'セキュリティレベル',
+    securityLevelValue: '{{level}} – {{name}}',
   },
   states: {
     loading: 'アーカイブを読み込み中…',

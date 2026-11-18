@@ -7,7 +7,7 @@ import { dataWriteIt, fakeDatabase } from './helpers.js';
 type Query = (sql: string, params?: unknown[]) => Promise<unknown>;
 
 const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const moderator: Actor = { sub: 'moderator-sub', role: 'Moderator', displayName: 'Moderator' };
+const moderator: Actor = { sub: 'moderator-sub', role: 'Moderator', displayName: 'Moderator', securityLevel: 5 };
 const [a, b, c, orphan1, orphan2] = [
   '10000000-0000-4000-8000-00000000000a',
   '10000000-0000-4000-8000-00000000000b',

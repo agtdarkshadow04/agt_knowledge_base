@@ -16,12 +16,25 @@ import type {
 } from '../domain.js';
 import {
   articleVisibilityFromFilter,
+  viewerLevel,
   InvalidTagIdsError as InvalidTagIds,
   TagNameConflictError as TagNameConflict,
 } from '../domain.js';
 import type { Database } from '../db.js';
 import type { ArticleRepository, TagRepository } from '../repository.js';
 import { assertDataWrite } from '../dataWrite.js';
+
+/**
+ * The security level a stored visibility needs (#70), in SQL: AGT numbers as
+ * they are, legacy Public 0, Internal 1 and Admin 5. Mirrors `visibilityLevel()`
+ * in `src/lib/api.ts`; `server/test/visibility-levels.test.ts` checks that they agree.
+ */
+export function visibilityLevelSql(visibility: string) {
+  return `(CASE WHEN jsonb_typeof(${visibility}) = 'number' THEN (${visibility})::text::integer
+    WHEN ${visibility} = '"Public"'::jsonb THEN 0
+    WHEN ${visibility} = '"Internal"'::jsonb THEN 1
+    ELSE 5 END)`;
+}
 
 interface ArticleRow {
   id: string;
@@ -223,9 +236,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       `($4 = 'all' OR ($4 = 'protected' AND a.is_protected) OR ($4 = 'unprotected' AND NOT a.is_protected))`,
       `($5::jsonb IS NULL OR a.visibility = $5::jsonb)`,
       `($6 = 'all' OR ($6 = 'verified' AND a.is_verified) OR ($6 = 'unverified' AND NOT a.is_verified))`,
-      `($7::text IN ('Moderator', 'System')
-        OR a.visibility IN ('"Public"'::jsonb, '0'::jsonb)
-        OR ($7::text = 'Editor' AND a.visibility IN ('"Internal"'::jsonb, '1'::jsonb)))`,
+      `${visibilityLevelSql('a.visibility')} <= $7::integer`,
     ];
     const where = conditions.join(' AND ');
     // The sort column, and its value as exact text for the cursor (timestamps keep their microseconds).
@@ -244,7 +255,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       query.protection,
       visibilityFilter === null ? null : JSON.stringify(visibilityFilter),
       query.verification,
-      viewer,
+      viewerLevel(viewer),
     ];
 
     // Keyset paging: the order is pinned first, then the sort column, then the
@@ -314,10 +325,8 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
        JOIN app_users creator ON creator.user_id = a.created_by
        JOIN app_users editor ON editor.user_id = a.modified_by
        WHERE a.id = $1
-         AND ($2::text IN ('Moderator', 'System')
-           OR a.visibility IN ('"Public"'::jsonb, '0'::jsonb)
-           OR ($2::text = 'Editor' AND a.visibility IN ('"Internal"'::jsonb, '1'::jsonb)))`,
-      [id, viewer],
+         AND ${visibilityLevelSql('a.visibility')} <= $2::integer`,
+      [id, viewerLevel(viewer)],
     );
     return result.rows[0] ? toArticle(result.rows[0]) : null;
   }
@@ -364,7 +373,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       );
       await recordRevision(client, inserted.rows[0].id);
       await client.query('COMMIT');
-      return (await this.get(inserted.rows[0].id, actor.role))!;
+      return (await this.get(inserted.rows[0].id, actor.securityLevel))!;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -392,13 +401,14 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
          WHERE id = $6
            AND version = $7
            AND (NOT is_protected OR $8::boolean)
-           AND ($8::boolean OR $4::jsonb IN ('"Public"'::jsonb, '"Internal"'::jsonb, '0'::jsonb, '1'::jsonb))
+           AND ${visibilityLevelSql('$4::jsonb')} <= $9::integer
+           AND ${visibilityLevelSql('visibility')} <= $9::integer
          RETURNING id`,
-        [input.title, input.content, tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub, id, input.version, actor.role === 'Moderator'],
+        [input.title, input.content, tagIds, JSON.stringify(input.visibility ?? 'Internal'), actor.sub, id, input.version, actor.role === 'Moderator', actor.securityLevel],
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
-      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.securityLevel) : null;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -424,7 +434,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
-      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.securityLevel) : null;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -450,7 +460,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
-      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.securityLevel) : null;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -476,7 +486,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
-      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.securityLevel) : null;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -512,7 +522,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       );
       if (updated.rows[0]) await recordRevision(client, updated.rows[0].id);
       await client.query('COMMIT');
-      return updated.rows[0] ? this.get(updated.rows[0].id, actor.role) : null;
+      return updated.rows[0] ? this.get(updated.rows[0].id, actor.securityLevel) : null;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -564,7 +574,7 @@ export class PostgresArticleRepository implements ArticleRepository, TagReposito
       );
       await recordRevision(client, id);
       await client.query('COMMIT');
-      return { status: 'updated', article: (await this.get(id, actor.role))! };
+      return { status: 'updated', article: (await this.get(id, actor.securityLevel))! };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

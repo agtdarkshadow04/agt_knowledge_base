@@ -7,7 +7,7 @@ import { assertMatches, respond, testContext } from './helpers.js';
 // The test context's database fails the test if a route touches it.
 const handleRequest = (request: ApiRequest) => respond(createRequestHandler(testContext()), request);
 
-const editorActor: Actor = { sub: 'editor-sub', role: 'Editor', displayName: 'Editor Traveller' };
+const editorActor: Actor = { sub: 'editor-sub', role: 'Editor', displayName: 'Editor Traveller', securityLevel: 1 };
 
 function apiRequest(input: Partial<ApiRequest> & Pick<ApiRequest, 'routeKey'>): ApiRequest {
   return { pathParameters: {}, query: {}, actor: null, requestId: 'request-id', ...input };
@@ -138,7 +138,7 @@ describe('article request validation', () => {
   });
 
   it('does not dispatch admin routes, even for Moderators', async () => {
-    const moderator: Actor = { sub: 'moderator-sub', role: 'Moderator', displayName: 'Moderator Traveller' };
+    const moderator: Actor = { sub: 'moderator-sub', role: 'Moderator', displayName: 'Moderator Traveller', securityLevel: 5 };
     for (const routeKey of ['GET /api/admin/stats', 'GET /api/admin/users', 'GET /api/admin/backup', 'POST /api/admin/backup/restore']) {
       const response = await handleRequest(apiRequest({ routeKey, actor: moderator, body: {} }));
       assertMatches(response, { statusCode: 404 });

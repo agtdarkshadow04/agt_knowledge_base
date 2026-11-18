@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isUuidV4, roles, type ArticleWrite, type ListArticlesQuery, type TagWrite } from './api.js';
+import { isUuidV4, roles, type ArticleWrite, type ListArticlesQuery, type SecurityLevel, type TagWrite } from './api.js';
 import { fieldErrorsFromIssues, type FieldError } from './errors.js';
 
 // Zod's JIT probes `new Function` when it builds an object schema, which the
@@ -136,6 +136,7 @@ const adminIamUserUpdateSchema = z.object({
   displayName: z.string().max(120),
   email: z.string().max(254).optional(),
   role: z.string().max(20),
+  securityLevel: z.number().optional(),
   isActive: z.boolean(),
 }).strict();
 
@@ -148,11 +149,15 @@ const adminAccountPasswordSchema = z.object({
   path: ['passwordConfirmation'],
 });
 
+/** A member's security level (#70): an integer 0-5. */
+const securityLevelSchema = z.number().int().min(0).max(5).transform((level) => level as SecurityLevel);
+
 const adminUserCreateSchema = z.object({
   username: usernameSchema,
   displayName: displayNameSchema,
   email: emailSchema.optional(),
   role: z.enum(roles),
+  securityLevel: securityLevelSchema.optional(),
   password: passwordSchema,
 }).strict();
 
@@ -161,6 +166,7 @@ const adminUserUpdateSchema = z.object({
   displayName: displayNameSchema,
   email: emailSchema.optional(),
   role: z.enum(roles),
+  securityLevel: securityLevelSchema.optional(),
   isActive: z.boolean(),
 }).strict();
 

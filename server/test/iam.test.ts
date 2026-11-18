@@ -85,7 +85,7 @@ beforeEach(() => {
 describe('IamClient', () => {
   it('posts the credentials, the App ID and the API key to <baseUrl>/api/v1/auth/verify', async () => {
     const traveller = await client().verify('Atlas Walker', password);
-    assert.deepEqual(traveller, { travellerId: 'AGT-0042', travellerName: 'Atlas Walker', permission: 'Moderator', role: 'Moderator', expiresInSeconds: 86_400 });
+    assert.deepEqual(traveller, { travellerId: 'AGT-0042', travellerName: 'Atlas Walker', permission: 'Moderator', role: 'Moderator', securityLevel: 2, expiresInSeconds: 86_400 });
     assert.equal(received.length, 1);
     const [request] = received;
     assert.equal(request.method, 'POST');
@@ -182,6 +182,19 @@ describe('IamClient', () => {
     await rejectsMatching(client().verify('Atlas Walker', password), { statusCode: 504, error: 'iam_timeout' });
     assert.ok(Date.now() - started < 5000);
     fake.closeAllConnections();
+  });
+
+  it('takes the security level IAM sends, and refuses the sign-in without a valid one (#70)', async () => {
+    for (const [sent, level] of [['0', 0], ['5', 5], [3, 3]] as const) {
+      respond = reply(200, verified({ traveller: { securityLevel: sent } }));
+      assert.equal((await client().verify('Atlas Walker', password)).securityLevel, level);
+    }
+    for (const sent of [undefined, '', '6', '-1', '1.5', 'Restricted', ' 2', null, 7]) {
+      respond = reply(200, verified({ traveller: { securityLevel: sent } }));
+      await rejectsMatching(client().verify('Atlas Walker', password), { statusCode: 502, error: 'iam_bad_gateway' });
+    }
+    assert.match(logged(), /securityLevel/);
+    assert.ok(!logged().includes('Atlas Walker'));
   });
 
   it('keeps at most 42 characters of the Traveller Name IAM returns', async () => {

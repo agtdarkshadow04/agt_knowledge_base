@@ -10,6 +10,7 @@ export function toActor(user: AuthenticatedUser): Actor {
   return {
     sub: user.sub,
     role: user.role,
+    securityLevel: user.securityLevel,
     displayName: user.displayName.slice(0, 120),
     email: user.email?.slice(0, 254),
   };

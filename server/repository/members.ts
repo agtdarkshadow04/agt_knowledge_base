@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { AppContext } from '../context.js';
 import { HttpError } from '../http.js';
-import { type AdminStats, type LocalUserRecord, type Role } from '../domain.js';
+import { type AdminStats, type LocalUserRecord, type Role, type SecurityLevel } from '../domain.js';
 import { hashPassword } from '../passwords.js';
 import { assertDataWrite } from '../dataWrite.js';
 import { withTransaction } from '../db.js';
@@ -17,6 +17,7 @@ interface LocalUserRow {
   display_name: string;
   email: string | null;
   role: Role;
+  security_level: SecurityLevel;
   is_active: boolean;
   session_version: number;
   created_at: Date | string;
@@ -24,7 +25,7 @@ interface LocalUserRow {
 }
 
 const userColumns = `
-  id, username, display_name, email, role, is_active,
+  id, username, display_name, email, role, security_level, is_active,
   session_version, created_at, updated_at,
   auth_source, iam_traveller_id, iam_traveller_name, iam_permission
 `;
@@ -40,6 +41,7 @@ function toUser(row: LocalUserRow): LocalUserRecord {
     displayName: row.display_name,
     email: row.email ?? undefined,
     role: row.role,
+    securityLevel: row.security_level,
     isActive: row.is_active,
     authSource: row.auth_source,
     ...(row.iam_traveller_id === null ? {} : { agtTravellerId: row.iam_traveller_id }),
@@ -119,6 +121,8 @@ export class MemberRepository {
     displayName: string;
     email?: string;
     role: Role;
+    /** Public (0) unless the Admin chooses another (#70). */
+    securityLevel?: SecurityLevel;
     password: string;
   }) {
     assertDataWrite();
@@ -128,10 +132,10 @@ export class MemberRepository {
     try {
       await client.query('BEGIN');
       const result = await client.query<LocalUserRow>(
-        `INSERT INTO local_users (id, username, password_hash, display_name, email, role)
-         VALUES ($6, $1, $2, $3, $4, $5)
+        `INSERT INTO local_users (id, username, password_hash, display_name, email, role, security_level)
+         VALUES ($6, $1, $2, $3, $4, $5, $7)
          RETURNING ${userColumns}`,
-        [input.username, passwordHash, input.displayName, input.email ?? null, input.role, randomUUID()],
+        [input.username, passwordHash, input.displayName, input.email ?? null, input.role, randomUUID(), input.securityLevel ?? 0],
       );
       await client.query('COMMIT');
       return toUser(result.rows[0]);
@@ -153,14 +157,17 @@ export class MemberRepository {
 
   /**
    * Replaces an AGT IAM member: only `isActive` can change. The other fields
-   * must repeat the current values, or the request is refused with
-   * `409 managed_by_iam`. Deactivation ends the member's sessions (AUTH-4).
+   * must repeat the current values (a left-out `securityLevel` counts as
+   * unchanged), or the request is refused with `409 managed_by_iam`: AGT IAM
+   * owns the name, role and security level (#70). Deactivation ends the
+   * member's sessions (AUTH-4).
    */
   async updateIamUser(id: string, input: {
     username: string;
     displayName: string;
     email?: string;
     role: string;
+    securityLevel?: number;
     isActive: boolean;
   }) {
     assertDataWrite();
@@ -168,7 +175,8 @@ export class MemberRepository {
       const current = await lockedUser(client, id);
       if (current.auth_source !== 'agt_iam') throw new HttpError(409, 'conflict', 'The member changed. Reload and try again.');
       if (input.username !== current.iam_traveller_name || input.displayName !== current.display_name
-        || input.role !== current.role || (input.email ?? null) !== current.email) managedByIam();
+        || input.role !== current.role || (input.email ?? null) !== current.email
+        || (input.securityLevel !== undefined && input.securityLevel !== current.security_level)) managedByIam();
       const result = await client.query<LocalUserRow>(
         `UPDATE local_users
          SET is_active = $2,
@@ -188,6 +196,8 @@ export class MemberRepository {
     displayName: string;
     email?: string;
     role: Role;
+    /** Left out: the current level stays (#70). */
+    securityLevel?: SecurityLevel;
     isActive: boolean;
   }) {
     assertDataWrite();
@@ -197,7 +207,8 @@ export class MemberRepository {
       await client.query('BEGIN');
       const current = await lockedUser(client, id);
       if (current.auth_source === 'agt_iam') managedByIam();
-      const securityChanged = current.role !== input.role || current.is_active !== input.isActive;
+      const securityLevel = input.securityLevel ?? current.security_level;
+      const securityChanged = current.role !== input.role || current.is_active !== input.isActive || current.security_level !== securityLevel;
       const result = await client.query<LocalUserRow>(
         `UPDATE local_users
          SET username = $2,
@@ -205,13 +216,14 @@ export class MemberRepository {
              email = $4,
              role = $5,
              is_active = $6,
+             security_level = $8,
              session_version = session_version + CASE WHEN $7 THEN 1 ELSE 0 END,
              updated_at = now()
          WHERE id = $1
          RETURNING ${userColumns}`,
-        [id, input.username, input.displayName, input.email ?? null, input.role, input.isActive, securityChanged],
+        [id, input.username, input.displayName, input.email ?? null, input.role, input.isActive, securityChanged, securityLevel],
       );
-      // A role change or deactivation ends every session of that member (AUTH-4, AUTH-1 deviation).
+      // A role or security level change, or a deactivation, ends every session of that member (AUTH-4, #70).
       if (securityChanged) await client.query('DELETE FROM member_sessions WHERE user_id = $1', [id]);
       await client.query('COMMIT');
       return toUser(result.rows[0]);

@@ -121,7 +121,7 @@ const memberCookie = { cookie: 'agt_knowledge_base_member_session=member-token' 
 const moderatorToken = { ...memberCookie, ...csrf };
 const article = { title: 'Portal Guide', content: 'Enough Markdown content for the article.', tagIds: [] };
 const adminCookie = { cookie: 'agt_knowledge_base_session=admin-token' };
-const moderator: MemberUser = { sub: 'moderator-sub', username: 'mod', displayName: 'Moderator', role: 'Moderator', authSource: 'local' };
+const moderator: MemberUser = { sub: 'moderator-sub', username: 'mod', displayName: 'Moderator', role: 'Moderator', authSource: 'local', securityLevel: 5 };
 
 beforeEach(async () => {
   now += 24 * 60 * 60 * 1000;
@@ -183,7 +183,7 @@ describe('session separation', () => {
     assertCalledWith(mocks.memberSession, 'member-token');
     assertMatches(callArgs(mocks.handleRequest)[0], {
       routeKey: 'POST /api/articles',
-      actor: { sub: 'moderator-sub', role: 'Moderator', displayName: 'Moderator' },
+      actor: { sub: 'moderator-sub', role: 'Moderator', displayName: 'Moderator', securityLevel: 5 },
       body: article,
     });
   });

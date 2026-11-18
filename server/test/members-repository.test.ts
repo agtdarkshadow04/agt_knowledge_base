@@ -17,6 +17,7 @@ const editorRow = {
   display_name: 'Apollo',
   email: 'apollo@example.com',
   role: 'Editor' as const,
+  security_level: 1 as const,
   is_active: true,
   session_version: 1,
   created_at: '2026-10-10T00:00:00.000Z',
@@ -58,11 +59,34 @@ describe('MemberRepository', () => {
     }), { role: 'Moderator' });
 
     const update = query.mock.calls.find(({ arguments: [sql] }) => sql.includes('UPDATE local_users'))!;
-    assert.deepEqual(update.arguments[1], [editorRow.id, 'apollo', 'Apollo', null, 'Moderator', true, true]);
+    // A left-out security level keeps the current one (#70).
+    assert.deepEqual(update.arguments[1], [editorRow.id, 'apollo', 'Apollo', null, 'Moderator', true, true, 1]);
     // AUTH-4: a role change ends all of that member's sessions, in the same transaction.
     assertCalledWith(query, 'DELETE FROM member_sessions WHERE user_id = $1', [editorRow.id]);
     const sql = query.mock.calls.map(({ arguments: [statement] }) => statement);
     assert.ok(sql.indexOf('DELETE FROM member_sessions WHERE user_id = $1') < sql.indexOf('COMMIT'));
+  });
+
+  dataWriteIt('sets a local member\'s security level and signs them out when it changes (#70)', async () => {
+    const query = fakeClient();
+    await service().updateUser(editorRow.id, { username: 'apollo', displayName: 'Apollo', role: 'Editor', securityLevel: 3, isActive: true });
+    const update = query.mock.calls.find(({ arguments: [sql] }) => sql.includes('UPDATE local_users'))!;
+    assert.deepEqual(update.arguments[1], [editorRow.id, 'apollo', 'Apollo', null, 'Editor', true, true, 3]);
+    assertCalledWith(query, 'DELETE FROM member_sessions WHERE user_id = $1', [editorRow.id]);
+
+    const same = fakeClient();
+    await service().updateUser(editorRow.id, { username: 'apollo', displayName: 'Apollo', role: 'Editor', securityLevel: 1, isActive: true });
+    assert.equal(same.mock.calls.some(({ arguments: [sql] }) => sql.startsWith('DELETE FROM member_sessions')), false);
+  });
+
+  dataWriteIt('creates members at Public (0) unless the Admin picks a security level (#70)', async () => {
+    const query = fakeClient();
+    await service().createUser({ username: 'hermes', displayName: 'Hermes', role: 'Editor', password: 'Permanent123!' });
+    const insert = query.mock.calls.find(({ arguments: [sql] }) => sql.includes('INSERT INTO local_users'))!;
+    assert.equal((insert.arguments[1] as unknown[]).at(-1), 0);
+    const chosen = fakeClient();
+    await service().createUser({ username: 'hermes', displayName: 'Hermes', role: 'Editor', securityLevel: 2, password: 'Permanent123!' });
+    assert.equal((chosen.mock.calls.find(({ arguments: [sql] }) => sql.includes('INSERT INTO local_users'))!.arguments[1] as unknown[]).at(-1), 2);
   });
 
   dataWriteIt('keeps sessions when nothing security-relevant changes', async () => {

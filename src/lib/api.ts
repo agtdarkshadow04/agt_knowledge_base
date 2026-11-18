@@ -12,6 +12,34 @@ export type AgtArticleVisibility = 0 | 1 | 2 | 3 | 4 | 5;
 export type ArticleVisibility = LegacyArticleVisibility | AgtArticleVisibility;
 export type ArticleVisibilityFilter = 'all' | 'public' | 'internal' | 'admin' | `${AgtArticleVisibility}`;
 
+/**
+ * A member's security level on the AGT scale (#70): a member at level N reads
+ * every article whose visibility level is N or lower. Visitors who are not
+ * signed in have level 0.
+ */
+export const securityLevels = [0, 1, 2, 3, 4, 5] as const;
+export type SecurityLevel = typeof securityLevels[number];
+
+/** Whether a value is a security level (an integer 0-5). */
+export function isSecurityLevel(value: unknown): value is SecurityLevel {
+  return typeof value === 'number' && (securityLevels as readonly number[]).includes(value);
+}
+
+/**
+ * The security level an article's visibility needs: the AGT number itself, and
+ * for the legacy text levels Public 0, Internal 1 and Admin 5. The SQL in
+ * `server/repository/articles.ts` (`visibilityLevelSql`) mirrors this mapping.
+ */
+export function visibilityLevel(visibility: ArticleVisibility): SecurityLevel {
+  if (typeof visibility === 'number') return visibility;
+  return visibility === 'Public' ? 0 : visibility === 'Internal' ? 1 : 5;
+}
+
+/** Whether a member at `level` may read, or assign, an article visibility. */
+export function securityLevelAllows(level: SecurityLevel, visibility: ArticleVisibility) {
+  return visibilityLevel(visibility) <= level;
+}
+
 export interface TagWrite {
   name: string;
   color: string;
@@ -56,6 +84,8 @@ export interface SessionUser {
   displayName: string;
   email?: string;
   role: Role;
+  /** The articles the member may read and assign: visibility levels up to this one (#70). */
+  securityLevel: SecurityLevel;
   /** How the member signs in: a local password or their AGT account (AGT IAM). */
   authSource: 'local' | 'agt_iam';
 }

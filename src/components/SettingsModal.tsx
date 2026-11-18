@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { SessionUser } from '../lib/api';
 import { offsetLabel, TIME_ZONE_OFFSETS, type TimeZoneSetting } from '../lib/format';
+import { agtVisibilityOptions } from '../lib/visibility';
 import {
   fontScales,
   preferencesChangedEvent,
@@ -57,7 +58,7 @@ export function DisplaySettings({ preferences, onChange }: {
 
 /** The user settings (UI-7, I18N-4): account details and the preferences stored in this browser (FE-3). */
 export function SettingsModal({ user, onClose }: { user: SessionUser | null; onClose(): void }) {
-  const { t } = useI18n();
+  const { t, number } = useI18n();
   const id = useId();
   const [preferences, setPreferences] = useState(readPreferences);
 
@@ -101,6 +102,7 @@ export function SettingsModal({ user, onClose }: { user: SessionUser | null; onC
           <div><dt>{t.settings.username}</dt><dd>{user?.username ?? t.settings.notSignedIn}</dd></div>
           <div><dt>{t.settings.email}</dt><dd>{user?.email ?? t.common.notAvailable}</dd></div>
           <div><dt>{t.settings.accountType}</dt><dd>{user ? t.roles[user.role] : t.common.notAvailable}</dd></div>
+          {user && <div><dt>{t.settings.securityLevel}</dt><dd>{formatTranslation(t.settings.securityLevelValue, { level: number(user.securityLevel), name: t.visibility[agtVisibilityOptions[user.securityLevel].className] })}</dd></div>}
           {user && <div><dt>{t.settings.signInMethod}</dt><dd>{user.authSource === 'agt_iam' ? t.settings.authAgt : t.settings.authLocal}</dd></div>}
         </dl>
       </section>

@@ -9,7 +9,8 @@ import { useAppSettings } from './AppSettingsContext';
 import type { ArticleVisibility, CanonicalTag } from '../lib/api';
 import {
   agtVisibilityOptions,
-  isModeratorOnlyVisibility,
+  assignableOptions,
+  initialVisibility,
   legacyVisibilityOptions,
   parseArticleVisibility,
   visibilityClassName,
@@ -109,13 +110,11 @@ export function EditorPage({ id }: { id?: string }) {
     if (!isNew || draft.title || draft.content || draft.tagIds.length || baseline !== serializeDraft(emptyDraft)) return;
     const next = {
       ...emptyDraft,
-      visibility: isModeratorOnlyVisibility(settings.articles.defaultVisibility) && user?.role !== 'Moderator'
-        ? 'Internal'
-        : settings.articles.defaultVisibility,
+      visibility: initialVisibility(settings.articles.defaultVisibility, user?.securityLevel ?? 0),
     };
     setDraft(next);
     setBaseline(serializeDraft(next));
-  }, [baseline, draft.content, draft.tagIds.length, draft.title, isNew, settings.articles.defaultVisibility, user?.role]);
+  }, [baseline, draft.content, draft.tagIds.length, draft.title, isNew, settings.articles.defaultVisibility, user?.securityLevel]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -270,12 +269,12 @@ export function EditorPage({ id }: { id?: string }) {
           <label className="field"><span>{t.editor.visibility}</span>
             <select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: parseArticleVisibility(event.target.value) })}>
               <optgroup label={t.visibility.agtGroup}>
-                {agtVisibilityOptions.filter((option) => user?.role === 'Moderator' || !option.moderatorOnly).map((option) => (
+                {assignableOptions(agtVisibilityOptions, user?.securityLevel ?? 0).map((option) => (
                   <option key={option.value} value={option.value}>{t.visibility[option.className]}</option>
                 ))}
               </optgroup>
               <optgroup label={t.visibility.legacyGroup}>
-                {legacyVisibilityOptions.filter((option) => user?.role === 'Moderator' || !option.moderatorOnly).map((option) => (
+                {assignableOptions(legacyVisibilityOptions, user?.securityLevel ?? 0).map((option) => (
                   <option key={option.value} value={option.value}>{t.visibility[option.className]}</option>
                 ))}
               </optgroup>

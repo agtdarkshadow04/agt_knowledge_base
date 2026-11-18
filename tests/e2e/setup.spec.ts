@@ -4,7 +4,8 @@ import { admin, auth, createArticle, createTag, csrf, editor, moderator } from '
 
 /**
  * First run through the UI (AUTH-5, TEST-6): the setup project creates the
- * Admin with the setup password, creates two members in the Users tab, signs
+ * Admin with the setup password, creates two members (with their security
+ * levels, #70) in the Users tab, signs
  * each of them in at /?view=login, and saves the signed-in states the other
  * projects use.
  */
@@ -21,10 +22,13 @@ test('first-run setup creates the Admin, and the Admin creates the members', asy
   // AUTH-6: the setup password is still set, so the dashboard reminds the Admin.
   await expect(page.getByText(/AGT_KNOWLEDGE_BASE_SETUP_PASSWORD is still set/)).toBeVisible();
 
-  for (const [member, role] of [[moderator, 'Moderator'], [editor, 'Editor']] as const) {
+  // The security level decides what each member reads (#70): the Moderator everything, the Editor up to Private.
+  for (const [member, role, level] of [[moderator, 'Moderator', '5'], [editor, 'Editor', '1']] as const) {
     await page.getByLabel('Username', { exact: true }).first().fill(member.username);
     await page.getByLabel('Display name').first().fill(member.displayName);
     await page.getByLabel('Role').first().selectOption(role);
+    await expect(page.getByLabel('Security level').first()).toHaveValue('0');
+    await page.getByLabel('Security level').first().selectOption(level);
     await page.getByLabel('Initial password').fill(member.password);
     await page.getByRole('button', { name: 'Create user' }).click();
     await expect(page.getByRole('status').filter({ hasText: `“${member.username}”` })).toBeVisible();

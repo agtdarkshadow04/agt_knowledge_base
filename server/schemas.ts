@@ -138,6 +138,12 @@ export const LegacyPublicSettings = object({
   version: Type.Integer(),
 });
 
+const SecurityLevel = Type.Integer({
+  minimum: 0,
+  maximum: 5,
+  description: 'Security level on the AGT scale (#70): the member reads and may assign article visibility levels up to this one (legacy Public 0, Internal 1, Admin 5).',
+});
+
 const AuthSource = Type.Union([Type.Literal('local'), Type.Literal('agt_iam')], {
   description: '`local`: a username or email and a password; `agt_iam`: the member\'s AGT account.',
 });
@@ -148,6 +154,7 @@ export const MemberUser = object({
   displayName: Type.String(),
   email: Type.Optional(Type.String()),
   role: Role,
+  securityLevel: SecurityLevel,
   authSource: AuthSource,
 });
 
@@ -170,6 +177,7 @@ export const LocalUser = object({
   displayName: Type.String(),
   email: Type.Optional(Type.String()),
   role: Role,
+  securityLevel: SecurityLevel,
   isActive: Type.Boolean(),
   authSource: AuthSource,
   agtTravellerId: Type.Optional(Type.String({ description: 'The AGT traveller ID of an AGT member.' })),
@@ -453,6 +461,7 @@ export const UserCreateBody = object({
   displayName: text(),
   email: Type.Optional(text()),
   role: text('`Editor` or `Moderator`.'),
+  securityLevel: Type.Optional(Type.Integer({ description: '0-5, default 0 (Public).' })),
   password: text(),
 });
 export const UserUpdateBody = object({
@@ -460,8 +469,9 @@ export const UserUpdateBody = object({
   displayName: text(),
   email: Type.Optional(text()),
   role: text('`Editor` or `Moderator`.'),
+  securityLevel: Type.Optional(Type.Integer({ description: '0-5; left out, the current level stays. A change ends the member\'s sessions.' })),
   isActive: Type.Boolean(),
-}, 'For an AGT member only `isActive` can change: send the other fields as they are, or the request is refused with `409 managed_by_iam`.');
+}, 'For an AGT member only `isActive` can change: send the other fields as they are (or leave out `securityLevel`), or the request is refused with `409 managed_by_iam`.');
 export const UserPasswordBody = object({ password: text() });
 
 const legacyInput = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()], { deprecated: true, description: 'Deprecated 1.x field; use `values`. Removed in 3.0.0.' }));

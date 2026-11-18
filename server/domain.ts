@@ -1,9 +1,13 @@
-import type { AgtArticleVisibility, ArticleVisibility, ArticleVisibilityFilter, ListArticlesQuery, Role } from '../src/lib/api.js';
+import { securityLevelAllows, type AgtArticleVisibility, type ArticleVisibility, type ArticleVisibilityFilter, type ListArticlesQuery, type Role, type SecurityLevel } from '../src/lib/api.js';
 import { fieldError } from '../src/lib/errors.js';
 import { HttpError } from './http.js';
 
 export {
   roles,
+  securityLevels,
+  isSecurityLevel,
+  visibilityLevel,
+  type SecurityLevel,
   type AgtArticleVisibility,
   type ArticleVisibility,
   type ArticleVisibilityFilter,
@@ -14,25 +18,30 @@ export {
   type TagWrite,
 } from '../src/lib/api.js';
 /**
- * Who is reading articles: a member role, an anonymous visitor (null), or the
- * internal system viewer the admin panel uses for inventory and statistics.
+ * Who is reading articles: a member's security level (#70), an anonymous
+ * visitor (null, level 0), or the internal system viewer the admin panel uses
+ * for inventory and statistics, which sees every level.
  */
-export type Viewer = Role | 'System' | null;
+export type Viewer = SecurityLevel | 'System' | null;
 
-/**
- * Moderators (and the system viewer) see every level, including legacy
- * `Admin`, which now means Moderator-only. Editors also see Internal and 1.
- */
-export function canViewArticleVisibility(viewer: Viewer, visibility: ArticleVisibility) {
-  return viewer === 'Moderator'
-    || viewer === 'System'
-    || visibility === 'Public'
-    || visibility === 0
-    || (viewer === 'Editor' && (visibility === 'Internal' || visibility === 1));
+/** The security level a viewer reads up to. */
+export function viewerLevel(viewer: Viewer): SecurityLevel {
+  if (viewer === 'System') return 5;
+  return viewer ?? 0;
 }
 
-export function canAssignArticleVisibility(role: Role, visibility: ArticleVisibility) {
-  return canViewArticleVisibility(role, visibility);
+/**
+ * Hierarchical access (#70): a viewer reads every article whose visibility
+ * level (`visibilityLevel()`: AGT numbers as they are, legacy Public 0,
+ * Internal 1, Admin 5) is at most their security level. The role plays no part.
+ */
+export function canViewArticleVisibility(viewer: Viewer, visibility: ArticleVisibility) {
+  return securityLevelAllows(viewerLevel(viewer), visibility);
+}
+
+/** A member may assign only a visibility they can read themselves. */
+export function canAssignArticleVisibility(level: SecurityLevel, visibility: ArticleVisibility) {
+  return securityLevelAllows(level, visibility);
 }
 
 export function articleVisibilityFromFilter(filter: ArticleVisibilityFilter): ArticleVisibility | null {
@@ -50,6 +59,8 @@ export interface LocalUserRecord {
   displayName: string;
   email?: string;
   role: Role;
+  /** The member's security level (#70); for an AGT member, the one AGT IAM sent at the last sign-in. */
+  securityLevel: SecurityLevel;
   isActive: boolean;
   /** How the member signs in: a local password or their AGT account. */
   authSource: 'local' | 'agt_iam';
@@ -93,7 +104,10 @@ export interface Actor {
   sub: string;
   displayName: string;
   email?: string;
+  /** Moderation powers only: protect, pin, verify, restore, delete and tags. */
   role: Role;
+  /** Which articles the member reads and may assign (#70). */
+  securityLevel: SecurityLevel;
 }
 
 export interface CanonicalTag {

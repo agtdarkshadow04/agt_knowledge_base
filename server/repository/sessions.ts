@@ -1,4 +1,4 @@
-import type { Role } from '../domain.js';
+import type { Role, SecurityLevel } from '../domain.js';
 import { assertDataWrite } from '../dataWrite.js';
 
 /**
@@ -26,6 +26,7 @@ export interface MemberRow {
   display_name: string;
   email: string | null;
   role: Role;
+  security_level: SecurityLevel;
   auth_source: 'local' | 'agt_iam';
   iam_traveller_name: string | null;
 }
@@ -33,7 +34,7 @@ export interface MemberRow {
 /** A local member, who signs in with a username or email and a password. */
 export type LocalMemberRow = MemberRow & { username: string; password_hash: string; auth_source: 'local' };
 
-const memberColumns = 'member.id, member.username, member.display_name, member.email, member.role, member.auth_source, member.iam_traveller_name';
+const memberColumns = 'member.id, member.username, member.display_name, member.email, member.role, member.security_level, member.auth_source, member.iam_traveller_name';
 
 /** Adds a session row; expired rows of the table are purged first (AUTH-8). */
 export async function insertSession(sql: Sql, tokenHash: string, expiresAt: Date, memberId?: string) {
@@ -118,17 +119,19 @@ export interface IamMemberWrite {
   travellerName: string;
   permission: string;
   role: Role;
+  /** IAM's `securityLevel`, which always replaces the stored one (#70). */
+  securityLevel: SecurityLevel;
 }
 
 /** Creates the member for a traveller's first AGT sign-in, without a username or password. */
 export async function insertIamMember(sql: Sql, id: string, input: IamMemberWrite) {
   assertDataWrite();
   return (await sql.query<Omit<MemberRow, 'password_hash'>>(
-    `INSERT INTO local_users AS member (id, username, password_hash, display_name, email, role, auth_source,
+    `INSERT INTO local_users AS member (id, username, password_hash, display_name, email, role, security_level, auth_source,
        iam_traveller_id, iam_traveller_name, iam_permission, iam_synced_at)
-     VALUES ($1, NULL, NULL, $2, NULL, $3, 'agt_iam', $4, $2, $5, now())
+     VALUES ($1, NULL, NULL, $2, NULL, $3, $6, 'agt_iam', $4, $2, $5, now())
      RETURNING ${memberColumns}`,
-    [id, input.travellerName, input.role, input.travellerId, input.permission],
+    [id, input.travellerName, input.role, input.travellerId, input.permission, input.securityLevel],
   )).rows[0];
 }
 
@@ -137,10 +140,11 @@ export async function updateIamMember(sql: Sql, id: string, input: IamMemberWrit
   assertDataWrite();
   return (await sql.query<Omit<MemberRow, 'password_hash'>>(
     `UPDATE local_users AS member
-     SET display_name = $2, iam_traveller_name = $2, role = $3, iam_permission = $4, iam_synced_at = now(), updated_at = now()
+     SET display_name = $2, iam_traveller_name = $2, role = $3, iam_permission = $4, security_level = $5,
+       iam_synced_at = now(), updated_at = now()
      WHERE member.id = $1
      RETURNING ${memberColumns}`,
-    [id, input.travellerName, input.role, input.permission],
+    [id, input.travellerName, input.role, input.permission, input.securityLevel],
   )).rows[0];
 }
 
