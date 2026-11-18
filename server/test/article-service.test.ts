@@ -4,7 +4,9 @@ import { assertMatches, assertEquals, match, rejectsMatching } from './helpers.j
 import { ArticleService } from '../article-service.js';
 import {
   articleVisibilityFromFilter,
+  canAssignArticleVisibility,
   canViewArticleVisibility,
+  securityLevels,
   ConflictError,
   ForbiddenError,
   type Actor,
@@ -20,8 +22,8 @@ import {
 } from '../domain.js';
 import type { ArticleRepository } from '../repository.js';
 
-const moderator: Actor = { sub: 'moderator-sub', displayName: 'Atlas', role: 'Moderator' };
-const editor: Actor = { sub: 'editor-sub', displayName: 'Apollo', role: 'Editor' };
+const moderator: Actor = { sub: 'moderator-sub', displayName: 'Atlas', role: 'Moderator', securityLevel: 5 };
+const editor: Actor = { sub: 'editor-sub', displayName: 'Apollo', role: 'Editor', securityLevel: 1 };
 const tagCatalog: Record<string, CanonicalTag> = {
   ships: { id: '10000000-0000-4000-8000-000000000001', name: 'ships', color: '#AABBCC' },
   portals: { id: '10000000-0000-4000-8000-000000000002', name: 'portals', color: '#B5C3B7' },
@@ -414,14 +416,34 @@ describe('ArticleService authorization and persistence', () => {
     assertMatches(await service.list(query, editor), { total: 1 });
   });
 
-  it('lets Moderators see legacy Admin and AGT 2-5 articles and Editors only Public, Internal, 0 and 1', () => {
-    for (const visibility of ['Admin', 2, 3, 4, 5] as const) {
-      assert.equal(canViewArticleVisibility('Moderator', visibility), true);
-      assert.equal(canViewArticleVisibility('Editor', visibility), false);
-      assert.equal(canViewArticleVisibility(null, visibility), false);
+  it('lets each security level read the visibility levels up to it, whatever the role (#70)', () => {
+    // [visibility, the lowest level that reads it]: AGT numbers as they are, legacy Public 0, Internal 1, Admin 5.
+    const needs = [[0, 0], [1, 1], [2, 2], [3, 3], [4, 4], [5, 5], ['Public', 0], ['Internal', 1], ['Admin', 5]] as const;
+    for (const [visibility, needed] of needs) {
+      for (const level of securityLevels) {
+        assert.equal(canViewArticleVisibility(level, visibility), level >= needed, `level ${level} reading ${visibility}`);
+        assert.equal(canAssignArticleVisibility(level, visibility), level >= needed, `level ${level} assigning ${visibility}`);
+      }
+      // Visitors read at level 0; the admin inventory reads everything.
+      assert.equal(canViewArticleVisibility(null, visibility), needed === 0);
+      assert.equal(canViewArticleVisibility('System', visibility), true);
     }
-    for (const visibility of ['Public', 'Internal', 0, 1] as const) assert.equal(canViewArticleVisibility('Editor', visibility), true);
-    assert.equal(canViewArticleVisibility(null, 'Internal'), false);
+  });
+
+  it('limits a Moderator to their security level, and lets an Editor read up to theirs (#70)', async () => {
+    const repository = new MemoryRepository();
+    const service = new ArticleService(repository);
+    const lowModerator: Actor = { ...moderator, securityLevel: 0 };
+    const highEditor: Actor = { ...editor, securityLevel: 3 };
+    const secret = await service.create(articleInput('Top Secret Guide', [], 3), highEditor);
+    await rejectsMatching(service.get(secret.id, lowModerator), { statusCode: 404 });
+    await rejectsMatching(service.setPinned(secret.id, true, secret.version, lowModerator), { statusCode: 404 });
+    assert.throws(() => service.create(articleInput('Restricted Guide', [], 2), lowModerator), { statusCode: 403 });
+    assert.throws(() => service.create(articleInput('SLT Guide', [], 4), highEditor), { statusCode: 403 });
+    // A Moderator cannot restore a revision whose visibility is above their level.
+    const lowered = await service.update(secret.id, { ...articleInput('Top Secret Guide', [], 0), version: secret.version }, highEditor);
+    await rejectsMatching(service.restore(secret.id, 1, lowered.version, { ...moderator, securityLevel: 2 }), { statusCode: 403 });
+    assertMatches(await service.get(secret.id, highEditor), { title: 'Top Secret Guide' });
   });
 
   it('retains five dated revisions for Editors and restricts restoration to Moderators', async () => {

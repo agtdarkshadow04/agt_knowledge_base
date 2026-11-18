@@ -2,7 +2,7 @@ import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import type { SettingValues } from './config.js';
 import type { AppContext } from './context.js';
-import type { Role } from './domain.js';
+import { isSecurityLevel, type Role, type SecurityLevel } from './domain.js';
 import { HttpError, RateLimitedError } from './http.js';
 
 /**
@@ -48,6 +48,8 @@ export interface IamTraveller {
   permission: string;
   /** The role `iam.roleMap` (or `iam.defaultRole`) gives the permission. */
   role: Role;
+  /** IAM's `traveller.securityLevel` (#70). */
+  securityLevel: SecurityLevel;
   /** IAM's `metadata.expiresIn`, in seconds, when it gave a readable one. */
   expiresInSeconds?: number;
 }
@@ -67,6 +69,8 @@ const VerifyResponse = Type.Object({
   traveller: Type.Optional(Type.Object({
     travellerName: Type.Optional(Type.String()),
     agtTravellerId: Type.String({ minLength: 1, maxLength: 200 }),
+    /** "0"-"5" (#70); checked in `traveller()`, so a bad value has its own log line. */
+    securityLevel: Type.Optional(Type.Unknown()),
   })),
   applicationAuthorization: Type.Optional(Type.Object({
     requestedAppId: Type.Optional(Type.String()),
@@ -106,6 +110,12 @@ export function parseExpiresIn(value: unknown): number | undefined {
   if (!match) return undefined;
   const seconds = Number(match[1]) * ({ '': 1, s: 1, m: 60, h: 3600, d: 86_400 } as Record<string, number>)[match[2].toLowerCase()];
   return seconds > 0 ? seconds : undefined;
+}
+
+/** IAM's security level: the string "0"-"5" (an integer 0-5 is accepted too), else undefined. */
+export function parseSecurityLevel(value: unknown): SecurityLevel | undefined {
+  const level = typeof value === 'string' && /^[0-5]$/.test(value) ? Number(value) : value;
+  return isSecurityLevel(level) ? level : undefined;
 }
 
 /** The upstream error code, if it looks like one; only this ever reaches the log. */
@@ -239,12 +249,19 @@ export class IamClient implements IamVerifier {
     }
     const permission = (authorization.permissionAssigned ?? '').trim();
     if (!authorization.isAuthorized || !permission || noAccessTiers.has(permission.toUpperCase())) throw accessDenied();
+    const securityLevel = parseSecurityLevel(body.traveller.securityLevel);
+    if (securityLevel === undefined) {
+      // Never guess a level: a missing or unknown one could grant too much (#70).
+      this.log.error('AGT IAM sent no valid traveller.securityLevel (expected "0" to "5"); the sign-in was refused.');
+      throw badGateway();
+    }
     const name = [...(body.traveller.travellerName ?? '').trim()].slice(0, 42).join('');
     return {
       travellerId: body.traveller.agtTravellerId,
       travellerName: name,
       permission,
       role: iam.roleMap[permission] ?? iam.defaultRole,
+      securityLevel,
       expiresInSeconds: parseExpiresIn(body.metadata?.expiresIn),
     };
   }

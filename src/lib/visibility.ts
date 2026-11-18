@@ -1,4 +1,4 @@
-import type { AgtArticleVisibility, ArticleVisibility, ArticleVisibilityFilter } from './api.js';
+import { securityLevelAllows, type AgtArticleVisibility, type ArticleVisibility, type ArticleVisibilityFilter, type SecurityLevel } from './api.js';
 
 /** The key of a level's CSS class and of its translated name (`t.visibility[key]`). */
 export type VisibilityKey = 'agt-public' | 'private' | 'restricted' | 'top-secret' | 'slt-restricted' | 'scc-restricted' | 'public' | 'internal' | 'admin';
@@ -6,22 +6,23 @@ export type VisibilityKey = 'agt-public' | 'private' | 'restricted' | 'top-secre
 interface VisibilityOption {
   value: ArticleVisibility;
   className: VisibilityKey;
-  moderatorOnly: boolean;
 }
 
+/** The AGT levels; each one's number is also the security level that reads it (#70). */
 export const agtVisibilityOptions = [
-  { value: 0, className: 'agt-public', moderatorOnly: false },
-  { value: 1, className: 'private', moderatorOnly: false },
-  { value: 2, className: 'restricted', moderatorOnly: true },
-  { value: 3, className: 'top-secret', moderatorOnly: true },
-  { value: 4, className: 'slt-restricted', moderatorOnly: true },
-  { value: 5, className: 'scc-restricted', moderatorOnly: true },
+  { value: 0, className: 'agt-public' },
+  { value: 1, className: 'private' },
+  { value: 2, className: 'restricted' },
+  { value: 3, className: 'top-secret' },
+  { value: 4, className: 'slt-restricted' },
+  { value: 5, className: 'scc-restricted' },
 ] as const satisfies readonly VisibilityOption[];
 
+/** The legacy text levels, read at security levels 0 (Public), 1 (Internal) and 5 (Admin). */
 export const legacyVisibilityOptions = [
-  { value: 'Public', className: 'public', moderatorOnly: false },
-  { value: 'Internal', className: 'internal', moderatorOnly: false },
-  { value: 'Admin', className: 'admin', moderatorOnly: true },
+  { value: 'Public', className: 'public' },
+  { value: 'Internal', className: 'internal' },
+  { value: 'Admin', className: 'admin' },
 ] as const satisfies readonly VisibilityOption[];
 
 const visibilityOptions: readonly VisibilityOption[] = [...agtVisibilityOptions, ...legacyVisibilityOptions];
@@ -42,6 +43,15 @@ export function visibilityFilterValue(visibility: ArticleVisibility): Exclude<Ar
     : visibility.toLowerCase() as 'public' | 'internal' | 'admin';
 }
 
-export function isModeratorOnlyVisibility(visibility: ArticleVisibility) {
-  return visibilityOptions.find((option) => option.value === visibility)!.moderatorOnly;
+/** The options a member at `level` may assign: the levels they can read (#70). */
+export function assignableOptions<Option extends VisibilityOption>(options: readonly Option[], level: SecurityLevel): Option[] {
+  return options.filter((option) => securityLevelAllows(level, option.value));
+}
+
+/**
+ * The visibility a new article starts with: the site's default if the member
+ * may assign it, else the highest AGT level they may (their own level).
+ */
+export function initialVisibility(defaultVisibility: ArticleVisibility, level: SecurityLevel): ArticleVisibility {
+  return securityLevelAllows(level, defaultVisibility) ? defaultVisibility : level;
 }

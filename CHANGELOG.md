@@ -16,6 +16,13 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
   (README, *AGT sign-in*) ([#30](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/30)).
 - Migration `0020` runs at startup: it adds the `iam.enabled` setting and the AGT columns to `local_users`. Backups
   from 2.0.0 restore and are migrated as before.
+- **Reading articles now depends on each member's security level, not their role**
+  ([#70](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/70)).
+  - Migration `0021` gives existing Editors level 1 and existing Moderators level 5, so nobody's access changes on
+    upgrade.
+  - New local members start at Public (0): set a higher level in **Users** when you create them.
+  - A Moderator whose level you lower keeps their moderation powers, but only for the articles that level lets them
+    read.
 
 ### Added
 
@@ -36,6 +43,17 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 - The sign-in page offers **Local account** and **AGT account** while AGT sign-in is available; the Settings dialog
   shows how a member signs in. In the admin panel, the Settings tab has an **AGT sign-in** section that says what the
   server still needs, and the Users tab marks AGT members, with their traveller ID and permission tier.
+- **Member security levels** ([#70](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/70)):
+  - Every member has a security level on the AGT scale, 0–5. A member at level N reads, and may assign, every
+    article visibility up to N (legacy Public 0, Internal 1, Admin 5); visitors read at level 0.
+  - The Admin sets a local member's level in the Users tab (Public by default).
+  - An AGT member's level is the `securityLevel` AGT IAM sends at every sign-in, which replaces the stored value and
+    which the Admin cannot change (`409 managed_by_iam`). A missing or invalid value refuses the AGT sign-in with
+    `502 iam_bad_gateway`.
+  - A changed level ends the member's other sessions (AUTH-4).
+  - The member Settings dialog shows the level, and the editor offers only the levels the member may assign.
+  - API: `securityLevel` on the member session, the sign-in responses and member accounts, and an optional
+    `securityLevel` in `POST`/`PUT /api/admin/users`.
 - API fields: `authSource` (`local` or `agt_iam`) on the member session and on member accounts, `agtTravellerId` and
   `iamPermission` on AGT member accounts, `iam.signIn` in `GET /api/settings/public`, and `iam` (`enabled`,
   `available`, `missing`) in `/api/admin/settings`.
@@ -44,6 +62,9 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 - The server makes outbound requests to AGT IAM, and only there, while AGT sign-in is on: a permanent deviation from
   the spec's SEC-14, recorded in `AGENTS.md`.
+- Article access no longer follows the role: Moderators read only up to their security level, and Editors can be
+  given levels above Private. Restoring a revision whose visibility is above the Moderator's level answers
+  `403 forbidden` ([#70](https://github.com/agtdarkshadow04/agt_knowledge_base/issues/70)).
 - AGT IAM owns an AGT member's name, role and password: the Admin can only deactivate or delete them, and other
   changes answer `409 managed_by_iam`. Switching `iam.enabled` off ends every AGT member's sessions; local members
   are not affected.

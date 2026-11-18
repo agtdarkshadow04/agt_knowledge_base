@@ -1,4 +1,4 @@
-import type { ArticleListParams, ArticleListResponse, Role } from '../lib/api';
+import type { ArticleListParams, ArticleListResponse, Role, SecurityLevel } from '../lib/api';
 import { ApiError, apiFetch, apiRequest, attachmentName, type RequestOptions } from '../lib/client';
 import { queryString } from '../lib/memberApi';
 import type {
@@ -98,11 +98,11 @@ export function listUsers(params: {
   return adminRequest<LocalUserListResponse>(`/users?${query(params)}`, { signal });
 }
 
-export function createUser(input: { username: string; displayName: string; email?: string; role: Role; password: string }) {
+export function createUser(input: { username: string; displayName: string; email?: string; role: Role; securityLevel?: SecurityLevel; password: string }) {
   return adminRequest<LocalUser>('/users', { method: 'POST', body: input });
 }
 
-export function updateUser(id: string, input: { username: string; displayName: string; email?: string; role: Role; isActive: boolean }) {
+export function updateUser(id: string, input: { username: string; displayName: string; email?: string; role: Role; securityLevel?: SecurityLevel; isActive: boolean }) {
   return adminRequest<LocalUser>(`/users/${encodeURIComponent(id)}`, { method: 'PUT', body: input });
 }
 

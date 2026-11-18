@@ -53,7 +53,7 @@ curl -sS -b member.cookies "$SITE/api/member/articles?search=portal"
 curl -sS -b member.cookies -X POST "$SITE/api/articles" -H 'x-agt-request: 1' -H 'content-type: application/json' -d @article.json
 ```
 
-- `POST /api/member/login` answers `{ sub, username, displayName, email, role, authSource }` and sets the member cookie. Wrong credentials and inactive accounts both answer `401 invalid_credentials`. It is rate-limited per client address (`rateLimits.login`, see [Limits and caching](#limits-and-caching)).
+- `POST /api/member/login` answers `{ sub, username, displayName, email, role, securityLevel, authSource }` and sets the member cookie. Wrong credentials and inactive accounts both answer `401 invalid_credentials`. It is rate-limited per client address (`rateLimits.login`, see [Limits and caching](#limits-and-caching)).
 - `GET /api/member/session` returns the signed-in member.
 - `POST /api/member/logout` ends the session on the server and clears the cookie.
 
@@ -74,10 +74,10 @@ curl -sS -c member.cookies -X POST "$SITE/api/member/iam/login" \
 ```
 
 - `POST /api/member/iam/login` takes `{ travellerName, password }`, each 1–42 characters; any character but control characters (such as line breaks) is accepted, quotes, commas, `+` and `\` included. The server sends them to AGT IAM (`POST <iam.baseUrl>/api/v1/auth/verify`) and never stores the password. It answers like `POST /api/member/login`, with `authSource: "agt_iam"` and the Traveller Name as `username`, and sets the same member cookie.
-- The first sign-in creates the member; later sign-ins find it by its AGT traveller ID. Every sign-in sets the role from the AGT IAM permission tier (`iam.roleMap`, otherwise `iam.defaultRole`); a changed role ends the member's other sessions. The session ends after `session.ttlHours` or when AGT IAM's token expires, whichever is first.
+- The first sign-in creates the member; later sign-ins find it by its AGT traveller ID. Every sign-in sets the role from the AGT IAM permission tier (`iam.roleMap`, otherwise `iam.defaultRole`) and the `securityLevel` from the traveller's `securityLevel` (the string `"0"` to `"5"`), replacing the stored values; a changed role or level ends the member's other sessions. A missing or invalid `securityLevel` refuses the sign-in with `502 iam_bad_gateway`. The session ends after `session.ttlHours` or when AGT IAM's token expires, whichever is first.
 - Errors: wrong credentials, and a member the Admin deactivated, answer `401 invalid_credentials`; an AGT account without access to this app (tier `NOACCESS` or `NONE`) `403 app_access_denied`; `403 iam_disabled` while `iam.enabled` is off; `503 iam_unavailable` while it is on but not configured, or when AGT IAM refuses the app itself; `429 rate_limited` when AGT IAM rate-limits (with its `Retry-After`) or the route's own limit is reached; `502 iam_bad_gateway` and `504 iam_timeout` when AGT IAM fails or does not answer within `iam.timeoutSeconds`.
 - Switching `iam.enabled` off ends every AGT member's session at once; their accounts and articles stay. While AGT sign-in is unavailable, their session cookies are not accepted.
-- In the admin API, an AGT member's `username` is their Traveller Name, and `agtTravellerId` and `iamPermission` are set. AGT IAM owns their name, role and password: `PUT /api/admin/users/{userId}` accepts only a change of `isActive` (send the other fields unchanged), and changing anything else, or setting a password, answers `409 managed_by_iam`. Deactivating or deleting an AGT member works as for any member.
+- In the admin API, an AGT member's `username` is their Traveller Name, and `agtTravellerId` and `iamPermission` are set. AGT IAM owns their name, role, security level and password: `PUT /api/admin/users/{userId}` accepts only a change of `isActive` (send the other fields unchanged, or leave out `securityLevel`), and changing anything else, or setting a password, answers `409 managed_by_iam`. Deactivating or deleting an AGT member works as for any member.
 
 ## Admin authentication
 
@@ -115,12 +115,34 @@ The `page` and `pageSize` list parameters and the `page`, `pageSize` and `totalP
 
 ## Roles and visibility
 
-Members have one of two roles (`server/domain.ts`):
+Reading depends on the member's **security level**, and moderation on their **role** (`server/domain.ts`, #70).
 
-- **Editor**: reads Public, Internal, and AGT levels 0–1; creates articles; edits unprotected articles; assigns Public, Internal, or AGT levels 0–1.
-- **Moderator**: reads everything; edits protected articles; assigns any level; pins, protects, verifies, restores revisions, deletes articles, and manages tags.
+**Visibility.** An article's visibility is either a legacy text level (`Public`, `Internal`, `Admin`) or an AGT
+numeric level: `0` Public, `1` Private, `2` Restricted, `3` Top Secret, `4` SLT Restricted, `5` SCC Restricted.
 
-Visibility is either a legacy text level (`Public`, `Internal`, `Admin`) or an AGT numeric level (`0` Public, `1` Private, `2` Restricted, `3` Top Secret, `4` SLT Restricted, `5` SCC Restricted). Anonymous visitors read only `Public` and `0`, and only while `access.allowPublicBrowsing` is on (`403 public_browsing_closed` otherwise). An article the caller may not read answers `404 not_found`, exactly like one that does not exist.
+**Security levels.**
+- Every member has a `securityLevel` from 0 to 5. It is part of the member session (`GET /api/member/session`, the
+  sign-in responses) and of the admin user objects.
+- A member reads, and may assign, every visibility whose level is at most their own. AGT levels count as their number;
+  legacy `Public` counts as 0, `Internal` as 1, and `Admin` as 5.
+- Writing an article with a visibility above the caller's level, or restoring a revision with one, answers
+  `403 forbidden`.
+- Anonymous visitors read at level 0 (`Public` and `0`), and only while `access.allowPublicBrowsing` is on
+  (`403 public_browsing_closed` otherwise).
+- An article the caller may not read answers `404 not_found`, exactly like one that does not exist.
+
+**Roles.**
+- **Editor:** creates articles and edits unprotected ones.
+- **Moderator:** also edits protected articles; pins, protects and verifies them; restores revisions; deletes articles;
+  and manages tags.
+
+A role never widens what a member can read: a Moderator at level 0 moderates only Public articles.
+
+**Setting levels.**
+- A local member starts at 0. In `POST /api/admin/users` and `PUT /api/admin/users/{userId}`, `securityLevel` is an
+  optional integer from 0 to 5; left out of an update, the level stays. A changed level ends the member's sessions.
+- An AGT member's level is the one AGT IAM sends at every sign-in. The Admin cannot change it: a different value
+  answers `409 managed_by_iam`.
 
 ## Optimistic concurrency
 
@@ -219,7 +241,7 @@ Field codes: `required`, `too_long` (`params.max`), `too_short` (`params.min`), 
 | 403 | `app_access_denied` | `APP_ACCESS_DENIED` | AGT IAM signed the traveller in, but their AGT account is not authorized for this app. |
 | 404 | `not_found` | `NOT_FOUND`, `INVALID_ID`, `INVALID_TAG_ID`, `INVALID_USER_ID`, `TAG_NOT_FOUND`, `USER_NOT_FOUND` | The route, article, revision, tag or member account does not exist, the ID is malformed, or the caller may not see the article. |
 | 409 | `conflict` | `VERSION_CONFLICT`, `TAG_NAME_CONFLICT`, `USER_CONFLICT`, `CONFLICT` | The article changed since it was read, a name, username or email is taken, or a backup or restore is already running or could not start ("The server is busy. Try again."). |
-| 409 | `managed_by_iam` | `MANAGED_BY_IAM` | The member signs in with their AGT account: only AGT IAM changes their name, role or password. |
+| 409 | `managed_by_iam` | `MANAGED_BY_IAM` | The member signs in with their AGT account: only AGT IAM changes their name, role, security level or password. |
 | 409 | `defined_in_config` | `SETTING_DEFINED_IN_FILE` | The setting (`params.key`) is defined in `config.yaml` and cannot be changed through the API. |
 | 410 | `setup_complete` | `SETUP_ALREADY_COMPLETED` | An Admin already exists, so setup is closed (even while the setup password is still set). |
 | 413 | `file_too_large` | `BODY_TOO_LARGE` | A backup upload exceeds `backup.maxZipBytes` (`params.maxBytes`). |

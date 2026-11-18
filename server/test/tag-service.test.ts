@@ -5,8 +5,8 @@ import { ForbiddenError, TagNotFoundError, type Actor, type CanonicalTag, type T
 import type { TagRepository } from '../repository.js';
 import { TagService } from '../tag-service.js';
 
-const moderator: Actor = { sub: 'moderator-sub', displayName: 'Atlas', role: 'Moderator' };
-const editor: Actor = { sub: 'editor-sub', displayName: 'Apollo', role: 'Editor' };
+const moderator: Actor = { sub: 'moderator-sub', displayName: 'Atlas', role: 'Moderator', securityLevel: 5 };
+const editor: Actor = { sub: 'editor-sub', displayName: 'Apollo', role: 'Editor', securityLevel: 1 };
 
 class MemoryTagRepository implements TagRepository {
   tags: CanonicalTag[] = [

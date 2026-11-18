@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { AppContext } from './context.js';
 import { withTransaction } from './db.js';
 import * as repo from './repository/sessions.js';
-import { roles, type Role } from './domain.js';
+import { isSecurityLevel, roles, type Role, type SecurityLevel } from './domain.js';
 import { fieldError } from '../src/lib/errors.js';
 import { HttpError } from './http.js';
 import { dummyPasswordHash, hashPassword, secretsEqual, verifyPassword } from './passwords.js';
@@ -48,6 +48,8 @@ export interface MemberUser {
   displayName: string;
   email?: string;
   role: Role;
+  /** The articles the member reads and may assign (#70). */
+  securityLevel: SecurityLevel;
   /** How the member signs in: a local password or their AGT account. */
   authSource: 'local' | 'agt_iam';
 }
@@ -210,6 +212,8 @@ function toMember(row: Omit<repo.MemberRow, 'password_hash'>): MemberUser {
     displayName: row.display_name,
     email: row.email ?? undefined,
     role: roles.includes(row.role) ? row.role : 'Editor',
+    // A stored level outside 0-5 cannot exist (CHECK); 0 is the safe reading anyway.
+    securityLevel: isSecurityLevel(row.security_level) ? row.security_level : 0,
     authSource: row.auth_source,
   };
 }
@@ -275,13 +279,20 @@ export class MemberAuthService {
   async completeIamLogin(traveller: IamTraveller): Promise<SessionResult<MemberUser>> {
     if (!(await this.iamAvailability()).available) throw new HttpError(403, 'iam_disabled', 'AGT sign-in is turned off.');
     return withTransaction(await this.context.db.pool(), async (client) => {
-      const input = { travellerId: traveller.travellerId, travellerName: traveller.travellerName, permission: traveller.permission, role: traveller.role };
+      const input = {
+        travellerId: traveller.travellerId,
+        travellerName: traveller.travellerName,
+        permission: traveller.permission,
+        role: traveller.role,
+        securityLevel: traveller.securityLevel,
+      };
       const existing = await repo.iamMemberForUpdate(client, traveller.travellerId);
       if (existing && !existing.is_active) invalidIamCredentials();
       let member: Omit<repo.MemberRow, 'password_hash'>;
       if (existing) {
         member = await repo.updateIamMember(client, existing.id, input);
-        if (existing.role !== member.role) await repo.deleteMemberSessions(client, existing.id);
+        // IAM's role and security level win; a change of either ends the member's other sessions (AUTH-4, #70).
+        if (existing.role !== member.role || existing.security_level !== member.security_level) await repo.deleteMemberSessions(client, existing.id);
       } else {
         member = await repo.insertIamMember(client, randomUUID(), input);
       }

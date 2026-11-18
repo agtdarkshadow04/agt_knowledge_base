@@ -25,6 +25,8 @@ interface Traveller {
   permission: string;
   isAuthorized?: boolean;
   expiresIn?: string;
+  /** IAM's traveller.securityLevel; '2' unless a test sets it, `undefined` sends none. */
+  securityLevel?: unknown;
 }
 
 let travellers: Traveller[] = [];
@@ -49,7 +51,7 @@ const iam = http.createServer((request, response) => {
       authenticated: true,
       verified: true,
       token: 'iam-token',
-      traveller: { travellerName: traveller.name, agtTravellerId: traveller.id, agtStatus: 'Active', securityLevel: '1' },
+      traveller: { travellerName: traveller.name, agtTravellerId: traveller.id, agtStatus: 'Active', securityLevel: 'securityLevel' in traveller ? traveller.securityLevel : '2' },
       applicationAuthorization: { requestedAppId: body.appId, permissionAssigned: traveller.permission, isAuthorized: traveller.isAuthorized ?? true, accessNotes: '' },
       metadata: { issuer: 'AGT-IAM', expiresIn: traveller.expiresIn ?? '24h', timestamp: new Date().toISOString() },
     }));
@@ -156,7 +158,7 @@ describe('AGT sign-in (issue #30)', () => {
     const first = await agtSignIn(target, 'Atlas Walker', agtPassword);
     assert.equal(first.statusCode, 200, first.body);
     const member = JSON.parse(first.body);
-    assert.deepEqual({ ...member, sub: undefined }, { sub: undefined, username: 'Atlas Walker', displayName: 'Atlas Walker', role: 'Moderator', authSource: 'agt_iam' });
+    assert.deepEqual({ ...member, sub: undefined }, { sub: undefined, username: 'Atlas Walker', displayName: 'Atlas Walker', role: 'Moderator', securityLevel: 2, authSource: 'agt_iam' });
     assert.deepEqual(calls, [{ identifier: 'Atlas Walker', password: agtPassword, appId: 'kb-app', key: apiKey }]);
     // The session ends no later than session.ttlHours (12 h here) and IAM's own token.
     assert.match(cookieFrom(first, 'agt_knowledge_base_member_session'), /Max-Age=43[12]\d\d; HttpOnly; SameSite=Strict/);
@@ -169,6 +171,7 @@ describe('AGT sign-in (issue #30)', () => {
     assert.equal(row.password_hash, null);
     assert.equal(row.iam_traveller_id, 'AGT-1001');
     assert.equal(row.iam_permission, 'Moderator');
+    assert.equal(row.security_level, 2);
     assert.ok(!JSON.stringify(await query(target, 'SELECT * FROM local_users')).includes(agtPassword));
 
     // An AGT member writes like any member, and the audit log names them without the password.
@@ -195,6 +198,36 @@ describe('AGT sign-in (issue #30)', () => {
     assert.match(cookieFrom(second, 'agt_knowledge_base_member_session'), /Max-Age=(3[0-5]\d\d|3600);/);
     assert.equal((await session(target, cookie)).statusCode, 401);
     assert.equal((await query(target, "SELECT count(*)::int AS count FROM local_users WHERE auth_source = 'agt_iam'"))[0].count, 1);
+  });
+
+  it('honours the security level IAM sends at every sign-in, and a change ends the other sessions (#70)', async () => {
+    const target = await server('  enabled: true\n');
+    travellers[0].securityLevel = '3';
+    const cookie = await signedIn(target);
+    assert.equal(JSON.parse((await session(target, cookie)).body).securityLevel, 3);
+    // The stored value never wins over IAM's: even one changed in the database is replaced.
+    await query(target, "UPDATE local_users SET security_level = 5 WHERE auth_source = 'agt_iam'");
+    travellers[0].securityLevel = '1';
+    const second = await agtSignIn(target, 'Atlas Walker', agtPassword);
+    assert.equal(JSON.parse(second.body).securityLevel, 1);
+    assert.deepEqual(await query(target, "SELECT security_level FROM local_users WHERE auth_source = 'agt_iam'"), [{ security_level: 1 }]);
+    assert.equal((await session(target, cookie)).statusCode, 401);
+
+    // The same level keeps the other sessions.
+    const third = cookieFrom(second, 'agt_knowledge_base_member_session').split(';')[0];
+    await signedIn(target);
+    assert.equal((await session(target, third)).statusCode, 200);
+  });
+
+  it('refuses the sign-in, and creates nobody, when IAM sends no valid security level (#70)', async () => {
+    const target = await server('  enabled: true\n');
+    for (const securityLevel of [undefined, '', '9', 'Top Secret']) {
+      travellers[0].securityLevel = securityLevel;
+      const reply = await agtSignIn(target, 'Atlas Walker', agtPassword);
+      assert.equal(reply.statusCode, 502, String(securityLevel));
+      assert.equal(JSON.parse(reply.body).error, 'iam_bad_gateway');
+    }
+    assert.equal((await query(target, 'SELECT count(*)::int AS count FROM local_users'))[0].count, 0);
   });
 
   it('refuses wrong credentials and travellers IAM does not authorize for this app, and creates nobody', async () => {
@@ -244,14 +277,14 @@ describe('AGT sign-in (issue #30)', () => {
     const [user] = JSON.parse(list.body).items;
     assert.deepEqual({ ...user, id: undefined, createdAt: undefined, updatedAt: undefined }, {
       id: undefined, createdAt: undefined, updatedAt: undefined,
-      username: 'Atlas Walker', displayName: 'Atlas Walker', role: 'Moderator', isActive: true,
+      username: 'Atlas Walker', displayName: 'Atlas Walker', role: 'Moderator', securityLevel: 2, isActive: true,
       authSource: 'agt_iam', agtTravellerId: 'AGT-1001', iamPermission: 'Moderator',
     });
     const update = (changes: Record<string, unknown>) => target.app.inject({
       method: 'PUT', url: `/api/admin/users/${user.id}`, headers: { ...csrf, cookie: admin },
       payload: { username: user.username, displayName: user.displayName, role: user.role, isActive: true, ...changes },
     });
-    for (const changes of [{ role: 'Editor' }, { displayName: 'Renamed' }, { username: 'atlas' }, { email: 'atlas@example.com' }]) {
+    for (const changes of [{ role: 'Editor' }, { displayName: 'Renamed' }, { username: 'atlas' }, { email: 'atlas@example.com' }, { securityLevel: 5 }, { securityLevel: 0 }]) {
       const reply = await update(changes);
       assert.equal(reply.statusCode, 409, JSON.stringify(changes));
       assert.equal(JSON.parse(reply.body).error, 'managed_by_iam');

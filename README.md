@@ -328,7 +328,7 @@ With Docker Compose, `.env.db` holds `POSTGRES_PASSWORD`, the database superuser
 
 The admin panel is a separate page reachable only by visiting `/admin` directly; nothing in the knowledge base links to it, and its code is not part of the member app. It has its own sign-in and session, independent of member sign-in: signing in or out of one never affects the other. Its gear button sets the language, time zone and text size, as in the knowledge base. Its tabs:
 
-- **Users** creates, updates, deactivates, resets passwords for, and deletes member accounts (Editor or Moderator). Members who sign in with their AGT account are marked **AGT account**, with their AGT traveller ID and permission tier; AGT IAM sets their name and role, so they can only be deactivated or deleted here.
+- **Users** creates, updates, deactivates, resets passwords for, and deletes member accounts (Editor or Moderator), and sets each local member's [security level](#roles-and-editing-rules) (Public by default). Members who sign in with their AGT account are marked **AGT account**, with their AGT traveller ID and permission tier; AGT IAM sets their name, role and security level, so they can only be deactivated or deleted here.
 - **Data** shows archive statistics and the inventory of every article at every visibility level.
 - **Settings** edits the [dashboard-editable keys](#dashboard-editable-keys). Settings defined in `config.yaml` are shown read-only, marked "Set in the configuration file". The **AGT sign-in** section switches [AGT sign-in](#agt-sign-in) on or off and says what the server still needs for it.
 - **Backup & restore** downloads and restores backups (see [Backup & restore](#backup--restore)).
@@ -356,15 +356,50 @@ Schema changes are numbered SQL files, `server/migrations/NNNN_<name>.sql` (DATA
 
 ## Roles and editing rules
 
-| User | Visible articles | View/compare history | Create | Set visibility | Edit unprotected | Edit protected | Pin, protect, verify | Restore | Delete | Manage tags |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Public | Public (legacy or AGT level 0) | No | No | No | No | No | No | No | No | No |
-| Editor | Public, Internal, Private | Yes | Yes | Public, Internal, or AGT levels 0–1 on unprotected articles | Yes | No | No | No | No | No |
-| Moderator | All | Yes | Yes | Any level | Yes | Yes | Yes | Yes | Yes | Yes (**Tags** page) |
+What a member may **read** depends on their **security level**; what they may **do** depends on their **role**.
 
-Editors and Moderators are member accounts that sign in from the sign-in button in the header (`/?view=login`). The **Admin** is not a member role: it is the single installation account, which signs in only at `/admin` and manages member accounts, settings, statistics, and backups. It cannot sign in to the knowledge base or write articles; use a separate member account for that. No API call or page can give a member account administrator privileges.
+**Security levels.** Every member has a security level on the AGT scale, from 0 to 5. A member reads every article
+whose visibility level is at most their own, and may give articles only those levels. Visitors who are not signed
+in read at level 0.
 
-AGT-standard visibility is stored as numeric levels: `0` Public (`#2aff00`), `1` Private (`#00f4ff`), `2` Restricted (`#f198e2`), `3` Top Secret (`#fd0303`), `4` SLT Restricted (`#ff9300`), and `5` SCC Restricted (`#3287f0`). Public visitors and Editors can read level 0, Editors can also read level 1, and levels 2–5 are Moderator-only. The legacy text values Public, Internal, and Admin remain supported with their existing access rules and colors; legacy `Admin` articles are shown as "Admin (legacy)" and are visible to Moderators.
+| Article visibility | Colour | Read from security level |
+| --- | --- | --- |
+| `0` Public | `#2aff00` | 0 (everyone, also visitors) |
+| `1` Private | `#00f4ff` | 1 |
+| `2` Restricted | `#f198e2` | 2 |
+| `3` Top Secret | `#fd0303` | 3 |
+| `4` SLT Restricted | `#ff9300` | 4 |
+| `5` SCC Restricted | `#3287f0` | 5 |
+| Legacy Public | | 0 |
+| Legacy Internal | | 1 |
+| Legacy Admin, shown as "Admin (legacy)" | | 5 |
+
+The legacy text values keep their own colours and are stored as text, as before.
+
+Who sets a member's level:
+
+- **Local members:** a new account starts at Public (0). The Admin sets the level in the **Users** tab when creating
+  or editing the account.
+- **AGT members:** the level is the one AGT IAM sends at every sign-in. It replaces the stored value whenever the two
+  differ, and the Admin cannot change it.
+
+Any change of level signs the member out of their other sessions. Upgrading to 2.1.0 gives existing Editors level 1
+and existing Moderators level 5, so nobody's access changes until the Admin changes a level.
+
+**Roles.** The role decides only what a member can do with the articles they can read:
+
+| Role | Create, edit unprotected | Edit protected | Pin, protect, verify | Restore | Delete | Manage tags | View/compare history |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Editor | Yes | No | No | No | No | No | Yes |
+| Moderator | Yes | Yes | Yes | Yes, if they can read the revision's visibility | Yes | Yes (**Tags** page) | Yes |
+
+A Moderator at a low security level moderates only the articles that level lets them read.
+
+Editors and Moderators are member accounts that sign in from the sign-in button in the header (`/?view=login`). The
+**Admin** is not a member role: it is the single installation account, which signs in only at `/admin` and manages
+member accounts, settings, statistics, and backups. It cannot sign in to the knowledge base or write articles; use a
+separate member account for that. Its inventory in the **Data** tab shows every article at every level. No API call
+or page can give a member account administrator privileges.
 
 Updates, restores, and deletes carry the article version. PostgreSQL applies the mutation only when that version still matches, returning HTTP `409` instead of silently overwriting a concurrent edit. Restoration creates a new latest revision rather than rewriting history.
 
@@ -383,9 +418,9 @@ The sign-in page then offers **Local account** and **AGT account**. What happens
 
 - The server sends the Traveller Name, the password and the App ID to `POST <iam.baseUrl>/api/v1/auth/verify` with the API key, and nowhere else. It never stores, caches or logs the password, and never retries. This is the only outbound request the server makes (a deviation from the AGT spec's SEC-14, recorded in `AGENTS.md`).
 - A traveller AGT IAM does not authorize for this app (tier `NOACCESS` or `NONE`) is refused with a message saying so; nothing is created.
-- The first sign-in creates a member account linked to the AGT traveller ID, without a local password; the Traveller Name becomes its name. Every sign-in sets its role from the permission tier again; a changed role signs its other sessions out.
+- The first sign-in creates a member account linked to the AGT traveller ID, without a local password; the Traveller Name becomes its name. Every sign-in sets its role from the permission tier and its [security level](#roles-and-editing-rules) from the traveller's `securityLevel` (`"0"` to `"5"`) again, replacing what is stored; a changed role or level signs its other sessions out. A sign-in whose `securityLevel` is missing or invalid is refused ("The AGT sign-in service answered unexpectedly") and the server log says why.
 - The session lasts `session.ttlHours`, or until AGT IAM's own token expires if that is sooner. Then the member signs in again.
-- The Admin can deactivate or delete an AGT member like any member, but not rename it, change its role or set a password: AGT IAM owns those.
+- The Admin can deactivate or delete an AGT member like any member, but not rename it, change its role or security level, or set a password: AGT IAM owns those.
 - Switching `iam.enabled` off signs every AGT member out at once. Their accounts and articles stay, and they can sign in again once it is back on. Local accounts are never affected.
 
 Traveller Names and passwords may be up to 42 characters and may contain any character except control characters such as line breaks; quotes, commas, `+` and `\` are sent exactly as typed. If AGT IAM refuses the app itself (wrong API key or App ID, an inactive app, a missing capability), members see "AGT sign-in is unavailable" and the server log says why, without the key.

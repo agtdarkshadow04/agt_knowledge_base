@@ -83,6 +83,8 @@ test('signs a traveller in with their AGT account once the Admin switches it on'
   await expect(dialog.getByText(traveller.name, { exact: true })).toBeVisible();
   await expect(dialog.getByText('AGT account', { exact: true })).toBeVisible();
   await expect(dialog.getByText('Moderator', { exact: true })).toBeVisible();
+  // The security level comes from AGT IAM (#70).
+  await expect(dialog.getByText('1 – Private', { exact: true })).toBeVisible();
 });
 
 test('tells a traveller whose AGT account has no access to the Knowledge Base', async ({ page }) => {
@@ -103,6 +105,9 @@ test('shows the AGT member to the Admin with only activation and deletion', asyn
   await expect(card.getByText('AGT-E2E-1')).toBeVisible();
   await expect(card.getByLabel('Username')).toHaveCount(0);
   await expect(card.getByLabel('New password')).toHaveCount(0);
+  // AGT IAM sets the security level: it is shown, but there is no field for it (#70).
+  await expect(card.locator('dd', { hasText: '1 – Private' })).toContainText('set by AGT IAM');
+  await expect(card.getByLabel('Security level')).toHaveCount(0);
   await expect(card.getByRole('checkbox', { name: 'Active' })).toBeChecked();
   await expectAccessible(page, 'AGT member in the Users tab');
   await page.context().close();

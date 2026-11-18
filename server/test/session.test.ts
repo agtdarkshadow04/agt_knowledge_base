@@ -208,6 +208,7 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
     display_name: 'Traveller',
     email: 'traveller@example.com',
     role: 'Editor',
+    security_level: 0,
     auth_source: 'local',
     iam_traveller_name: null,
   });
@@ -224,6 +225,7 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
       displayName: 'Traveller',
       email: 'traveller@example.com',
       role: 'Editor',
+      securityLevel: 0,
       authSource: 'local',
     });
     assertCalledWith(database.query, match.stringContaining('is_active = true'), ['traveller']);
@@ -261,8 +263,8 @@ describe('member sign-in and sessions (AUTH-1 deviation)', () => {
   });
 
   dataWriteIt('accepts only an unexpired session of an active member, and revokes it on sign-out', async () => {
-    database.query.mock.mockImplementationOnce(async () => ({ rows: [{ id: 'u1', username: 'traveller', display_name: 'Traveller', email: null, role: 'Moderator', auth_source: 'local', iam_traveller_name: null }] }));
-    assert.deepEqual(await members().session('token'), { sub: 'u1', username: 'traveller', displayName: 'Traveller', email: undefined, role: 'Moderator', authSource: 'local' });
+    database.query.mock.mockImplementationOnce(async () => ({ rows: [{ id: 'u1', username: 'traveller', display_name: 'Traveller', email: null, role: 'Moderator', security_level: 4, auth_source: 'local', iam_traveller_name: null }] }));
+    assert.deepEqual(await members().session('token'), { sub: 'u1', username: 'traveller', displayName: 'Traveller', email: undefined, role: 'Moderator', securityLevel: 4, authSource: 'local' });
     const [sql, params] = database.query.mock.calls[0].arguments;
     assert.ok(sql.includes('FROM member_sessions session'));
     assert.ok(sql.includes('session.expires_at > now()'));

@@ -31,7 +31,7 @@ describe('admin request dispatch', () => {
   });
 
   it('refuses every admin route without an Admin session, even with a Moderator actor', async () => {
-    const moderator: Actor = { sub: 'moderator-sub', role: 'Moderator', displayName: 'Moderator' };
+    const moderator: Actor = { sub: 'moderator-sub', role: 'Moderator', displayName: 'Moderator', securityLevel: 5 };
     for (const routeKey of ['GET /api/admin/users', 'GET /api/admin/stats', 'PUT /api/admin/settings', 'GET /api/admin/backup', 'POST /api/admin/backup/restore']) {
       const response = await handleAdminRequest(adminRequest({ routeKey, admin: null, actor: moderator, body: {} }));
       assert.equal(response.statusCode, 401, routeKey);

@@ -11,17 +11,19 @@ describe('authentication', () => {
       username: 'traveller',
       displayName: 'Traveller',
       role: 'Moderator',
+      securityLevel: 3,
       authSource: 'local',
     }), {
       sub: '00000000-0000-4000-8000-000000000001',
       role: 'Moderator',
+      securityLevel: 3,
       displayName: 'Traveller',
       email: undefined,
     });
   });
 
   it('requires a signed-in actor, and an Admin session on admin routes', () => {
-    const editor: Actor = { sub: 'editor-sub', role: 'Editor', displayName: 'Editor' };
+    const editor: Actor = { sub: 'editor-sub', role: 'Editor', displayName: 'Editor', securityLevel: 1 };
     throwsMatching(() => requireActor({ actor: null }), { statusCode: 401 });
     assert.equal(requireActor({ actor: editor }), editor);
     throwsMatching(() => requireAdminSession({ admin: null }), { statusCode: 401 });
