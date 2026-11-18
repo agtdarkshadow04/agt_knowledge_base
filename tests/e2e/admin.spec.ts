@@ -85,7 +85,9 @@ test.describe('the dashboard', () => {
   test.beforeEach(async ({ page }) => signIn(page));
 
   test('shows the version and renders the generated API document in the API tab (API-14)', async ({ page }) => {
-    await expect(page.getByText('Version 2.0.0')).toBeVisible();
+    // The version the dashboard shows is package.json's (VER-2).
+    const { version } = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
+    await expect(page.getByText(`Version ${version}`)).toBeVisible();
     const documentRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/openapi.json');
     await openTab(page, 'API');
     await documentRequest;
